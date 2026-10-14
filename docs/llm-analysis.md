@@ -57,7 +57,7 @@ and would therefore be classified as *Safe* by the reputation analyzers alone.
    The LLM escalates to *Malicious* on its own only when `malicious_escalation` is set
    (default `off`), the sender is not authenticated and, in `review` and `debate`, the
    reviewer answered without withholding trust and the agents agreed. The LLM can never
-   downgrade a verdict (`THEPHISH_ARCHITECTURE.md` §1.2).
+   downgrade a verdict (`BLUEPHISH_ARCHITECTURE.md` §1.2).
 
 ## Multiple agents (optional)
 
@@ -84,7 +84,7 @@ Two things worth knowing before turning `debate` on:
   the case to a person and blocks autonomous escalation to Malicious. A reviewer that
   is unreachable counts as "did not look", never as "approved".
 
-Full rationale in [`THEPHISH_ARCHITECTURE.md` §8.6](../THEPHISH_ARCHITECTURE.md).
+Full rationale in [`BLUEPHISH_ARCHITECTURE.md` §8.6](../BLUEPHISH_ARCHITECTURE.md).
 
 ## Fail-open behavior
 
@@ -102,7 +102,7 @@ canary, a warning is logged and the link/attachment analysis continues normally.
   system prompt. A leaked canary means the injection worked, so the assessment is discarded
   and the analysis continues on the analyzers alone. The response is schema-validated
   (`risk_level` whitelist, justification truncated to 500 chars, closed tactics vocabulary).
-  Full rationale in [`THEPHISH_ARCHITECTURE.md` §8.3](../THEPHISH_ARCHITECTURE.md).
+  Full rationale in [`BLUEPHISH_ARCHITECTURE.md` §8.3](../BLUEPHISH_ARCHITECTURE.md).
 - An email that carries injection markers cannot be closed as *Safe*: the verdict floor
   raises it to **Suspicious** so a human reads it. It stops there — never *Malicious* — and
   it applies even when the LLM is disabled, because the payload is a fact about the email

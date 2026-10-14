@@ -3,7 +3,7 @@
 Três classes de erro que não produzem exceção, log nem teste vermelho — e por
 isso precisam de um teste de texto sobre os arquivos.
 
-**A CSP proíbe JavaScript embutido** (`THEPHISH_ARCHITECTURE.md` §7.4). Um
+**A CSP proíbe JavaScript embutido** (`BLUEPHISH_ARCHITECTURE.md` §7.4). Um
 `onclick=` no template é bloqueado pelo navegador sem aviso: o botão
 simplesmente não faz nada. Já aconteceu duas vezes aqui — uma delas mandou as
 credenciais do login pela URL.

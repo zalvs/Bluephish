@@ -41,4 +41,4 @@ Malicious, a notification to whoever reported it, and a whitelist. Both are rele
 the AGPL-3.0.
 
 For the detailed design of Bluephish, see
-[`THEPHISH_ARCHITECTURE.md`](../THEPHISH_ARCHITECTURE.md).
+[`BLUEPHISH_ARCHITECTURE.md`](../BLUEPHISH_ARCHITECTURE.md).

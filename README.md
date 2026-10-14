@@ -27,7 +27,7 @@ an independent project. If you know the original and want to see how the two dif
 | [Troubleshooting](docs/troubleshooting.md) | Common problems and how to fix them |
 | [Optional integrations](docs/integrations.md) | TheHive, MISP and the AI companion agent |
 | [Security notes](docs/security.md) | Network exposure, authentication and what leaves the machine |
-| [Architecture](THEPHISH_ARCHITECTURE.md) | Data model, roles, routes and known constraints |
+| [Architecture](BLUEPHISH_ARCHITECTURE.md) | Data model, roles, routes and known constraints |
 | [Diagrams](diagrams.md) | The pipeline, the verdict chain and the stack, drawn from the code |
 
 > **Changing the code with an AI agent?** Read [`CLAUDE.md`](CLAUDE.md) first: consulting

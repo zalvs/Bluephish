@@ -46,4 +46,4 @@
   ever seen, password login refuses them outright, and *Reset password* is not offered for
   them: revocation belongs to the identity provider.
 - Before opening this to a wider network, read the *Known constraints and traps* section of
-  [`THEPHISH_ARCHITECTURE.md`](../THEPHISH_ARCHITECTURE.md).
+  [`BLUEPHISH_ARCHITECTURE.md`](../BLUEPHISH_ARCHITECTURE.md).

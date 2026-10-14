@@ -38,7 +38,7 @@ text.
 
 | Symptom | Cause and fix |
 |---|---|
-| No emails listed | The queue lists every unread email whatever the analysis mode, so an empty queue means the mailbox could not be read or holds nothing unread. The queue's status line and `docker logs thephish` name the provider error (for Gmail's daily download cap, see §7.7.1 of [`THEPHISH_ARCHITECTURE.md`](../THEPHISH_ARCHITECTURE.md)). The analysis mode only changes what the automatic scheduler picks up. |
+| No emails listed | The queue lists every unread email whatever the analysis mode, so an empty queue means the mailbox could not be read or holds nothing unread. The queue's status line and `docker logs thephish` name the provider error (for Gmail's daily download cap, see §7.7.1 of [`BLUEPHISH_ARCHITECTURE.md`](../BLUEPHISH_ARCHITECTURE.md)). The analysis mode only changes what the automatic scheduler picks up. |
 | No analyzer ran on an analysis | None is enabled, or none supports the observable types found. Check *Integrações → Analisadores*; the header there states how many are on. |
 | One analyzer reports nothing while the others work | Its own error travels with the report: `findings[].error` in the `report.json` the disk destination writes, and the analysis log (the live panel, or `docker logs thephish`). A refused key, an expired quota and a 429 all say so verbatim. |
 | The LLM contributes nothing to verdicts | Check `docker logs thephish` for a warning from `llm_analysis`. Analysis is fail-open: an unreachable model never blocks the pipeline. Remember that on Linux `host.docker.internal` needs an `extra_hosts` entry (see [configuration](configuration.md#2-ai-and-automatic-analysis)). |

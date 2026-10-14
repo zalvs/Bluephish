@@ -14,7 +14,7 @@ Describe the goal first, then where you got stuck.
 **What you already tried**
 
 The documentation you read (`README.md`, `docker/README.md`,
-`THEPHISH_ARCHITECTURE.md`) and what it did not answer.
+`BLUEPHISH_ARCHITECTURE.md`) and what it did not answer.
 
 **Your setup, if it matters**
 

@@ -107,7 +107,7 @@ Cada item abaixo diz onde está a casca, o que falta e por onde começar.
   e o painel tático de Phishing confirmado.
 - **O que é:** `score = 100 × Σ(peso × fator)`, fatores em [0,1], pesos
   ajustáveis por fator, faixas phishing ≥ 50 · suspeito/spam ≥ 40 · legítimo ≥ 20.
-  A razão de cada decisão está em `THEPHISH_ARCHITECTURE.md` §1.2.1 e §1.2.2.
+  A razão de cada decisão está em `BLUEPHISH_ARCHITECTURE.md` §1.2.1 e §1.2.2.
 - **O que ele resolve deste roadmap:** a nota composta que o item 6 pedia passa a
   existir, e ela é gravada como tag do caso — que é o que os itens 4, 5 e o
   ranking de remetentes por risco agregado consomem.
@@ -326,7 +326,7 @@ o porquê do veredito, quantas pessoas denunciaram a mesma mensagem, os indicado
 assistente de IA ao lado, já com o contexto do caso. Decisões: marcar como legítimo, confirmar
 malicioso, reanalisar. Errata ao denunciante configurável em Notificações. Memória de vereditos:
 a mensagem idêntica a um falso positivo corrigido passa a ser liberada, e o remetente vira
-proposta de whitelist. Ver `THEPHISH_ARCHITECTURE.md` §7.15–7.17.
+proposta de whitelist. Ver `BLUEPHISH_ARCHITECTURE.md` §7.15–7.17.
 
 **O que continua fora:**
 
@@ -340,7 +340,7 @@ proposta de whitelist. Ver `THEPHISH_ARCHITECTURE.md` §7.15–7.17.
 
 - **Interruptor de "buscar imagem remota" em Configurações.** A visualização
   *Como entregue* busca as imagens do e-mail denunciado a partir do servidor
-  (§7.11 de `THEPHISH_ARCHITECTURE.md`), e isso é decisão de política de SOC:
+  (§7.11 de `BLUEPHISH_ARCHITECTURE.md`), e isso é decisão de política de SOC:
   há operações para as quais qualquer requisição de saída para a infraestrutura
   do phisher é inaceitável. O parâmetro existe (`fetch_remote`, em
   `email_render.render()`) e já tem teste, mas não foi ligado a uma tela — quem

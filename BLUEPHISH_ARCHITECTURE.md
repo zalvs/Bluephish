@@ -401,7 +401,7 @@ Bluephish/
 ├── docs/                            # llm-analysis, hive-ai-agent, m365-oauth-setup, sso-entra-setup,
 │                                    # conectores-genericos, conectores-manual
 ├── README.md · ROADMAP.md · diagrams.md · CLAUDE.md · AGENTS.md
-└── THEPHISH_ARCHITECTURE.md         # This document
+└── BLUEPHISH_ARCHITECTURE.md         # This document
 ```
 
 ---

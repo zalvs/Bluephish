@@ -22,7 +22,7 @@ Duas regras que falham em silêncio se forem quebradas:
    receba a chave como bearer token.
 
 Este módulo não usa `logging`: um logger novo teria de entrar em
-`logging_conf.json` (THEPHISH_ARCHITECTURE.md, armadilhas silenciosas).
+`logging_conf.json` (BLUEPHISH_ARCHITECTURE.md, armadilhas silenciosas).
 """
 
 import hashlib

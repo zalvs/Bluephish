@@ -14,7 +14,7 @@ Três decisões que valem explicar
    o assunto nem o remetente do e-mail *denunciado*: no modo de denúncia por
    anexo, o `from` do envelope é o colega que encaminhou, não o atacante. Baixar
    corpo por ciclo para contar mais cedo gastaria o orçamento diário de download
-   do provedor (THEPHISH_ARCHITECTURE.md §7.7.1), que falha fingindo ser rede.
+   do provedor (BLUEPHISH_ARCHITECTURE.md §7.7.1), que falha fingindo ser rede.
 
 2. **Cooldown por padrão, persistido.** Sem ele, uma campanha que continua na
    fila dispararia o mesmo alerta a cada ciclo de leitura. Fica em

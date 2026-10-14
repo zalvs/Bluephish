@@ -816,7 +816,7 @@ def evaluate_volume_alerts():
 	"""Look at the queue for a repeated pattern and warn the security team.
 
 	Detection and the cooldown mark happen here, over what the poll already holds
-	in memory - nothing is downloaded for it (THEPHISH_ARCHITECTURE.md §7.14).
+	in memory - nothing is downloaded for it (BLUEPHISH_ARCHITECTURE.md §7.14).
 	Sending runs in a background task, outside the mailbox semaphore: a slow
 	webhook must never hold the next read of the mailbox.
 	"""

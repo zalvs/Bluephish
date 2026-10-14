@@ -407,7 +407,7 @@ def load_one(mail_uid):
 #
 # Deliberately not part of the listing. The polling cycle already lost a race
 # with IMAP_TIMEOUT once by doing expensive work over every message it touched
-# (see THEPHISH_ARCHITECTURE.md 7.10), and hashing attachments plus base64-ing
+# (see BLUEPHISH_ARCHITECTURE.md 7.10), and hashing attachments plus base64-ing
 # logos for a hundred emails a minute is exactly that cost again - paid for
 # emails nobody has opened. It costs one peek, on the click that asks for it.
 #

@@ -41,4 +41,4 @@ extração dos observáveis de cada um, a análise deles, um veredito Safe, Susp
 Malicious, um aviso a quem denunciou e uma whitelist. Os dois são publicados sob a AGPL-3.0.
 
 Para o desenho detalhado do Bluephish, veja o
-[`THEPHISH_ARCHITECTURE.md`](../THEPHISH_ARCHITECTURE.md).
+[`BLUEPHISH_ARCHITECTURE.md`](../BLUEPHISH_ARCHITECTURE.md).

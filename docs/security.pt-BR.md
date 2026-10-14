@@ -48,4 +48,4 @@
   jamais viu, o login por senha as recusa de saída e o *Reset password* não é oferecido para
   elas: a revogação cabe ao provedor de identidade.
 - Antes de abrir isto para uma rede mais ampla, leia a seção *Known constraints and traps* do
-  [`THEPHISH_ARCHITECTURE.md`](../THEPHISH_ARCHITECTURE.md).
+  [`BLUEPHISH_ARCHITECTURE.md`](../BLUEPHISH_ARCHITECTURE.md).

@@ -62,7 +62,7 @@ import unicodedata
 
 
 # The analysis runs on greenlets, not threads (see trap 7.1 in
-# THEPHISH_ARCHITECTURE.md): a regex chewing through a multi-megabyte body does
+# BLUEPHISH_ARCHITECTURE.md): a regex chewing through a multi-megabyte body does
 # not yield, so it stalls every other analysis in the process, not just its own.
 # Scanning is bounded to the first slice of text, which is also where an
 # injection has to live to be read by a model whose context is capped anyway

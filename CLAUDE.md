@@ -47,7 +47,7 @@ estrutural e **perde** os nós de doutrina descritos abaixo.
    causaram incidente neste deploy e falham *em silêncio*: CSP sem inline JS (§7.4),
    `eventlet.monkey_patch()` antes de qualquer import (§7.5) e todo módulo listado em
    `logging_conf.json` (§7.3). Se sua mudança toca qualquer uma dessas
-   superfícies, leia a seção correspondente de `THEPHISH_ARCHITECTURE.md` antes de editar.
+   superfícies, leia a seção correspondente de `BLUEPHISH_ARCHITECTURE.md` antes de editar.
 
    Duas outras falham pior, porque falham *mentindo*:
 
@@ -99,7 +99,7 @@ estrutural e **perde** os nós de doutrina descritos abaixo.
    servidor, em toda rota: esconder um botão nunca é o controle.
 
 4. **God nodes** — os nós mais conectados. Mexer neles propaga longe. Hoje o campeão é o
-   próprio `THEPHISH_ARCHITECTURE.md`: ele é a fonte de verdade sobre por quê
+   próprio `BLUEPHISH_ARCHITECTURE.md`: ele é a fonte de verdade sobre por quê
    as decisões são o que são, e o grafo liga cada decisão ao código que a implementa.
 
 5. **Nós de racional (`file_type: rationale`).** Antes de "simplificar" algo, procure se
@@ -132,7 +132,7 @@ monitorada, extrai observáveis, passa pelos analisadores de reputação, pede u
 de engenharia social a um LLM e grava o veredito nos destinos habilitados — TheHive, Jira, disco e conectores genéricos, em qualquer combinação.
 
 Referência de arquitetura, RBAC, rotas e armadilhas conhecidas:
-[`THEPHISH_ARCHITECTURE.md`](THEPHISH_ARCHITECTURE.md). Instalação e operação:
+[`BLUEPHISH_ARCHITECTURE.md`](BLUEPHISH_ARCHITECTURE.md). Instalação e operação:
 [`README.md`](README.md). O que o handoff pede e ainda não existe: [`ROADMAP.md`](ROADMAP.md).
 
 **Não invente dado na interface.** Painel sem dado real recebe estado vazio explícito,

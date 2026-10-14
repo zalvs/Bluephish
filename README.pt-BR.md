@@ -27,7 +27,7 @@ leia [Bluephish e ThePhish](docs/bluephish-vs-thephish.pt-BR.md).
 | [Solução de problemas](docs/troubleshooting.pt-BR.md) | Problemas comuns e como resolvê-los |
 | [Integrações opcionais](docs/integrations.pt-BR.md) | TheHive, MISP e o agente de IA |
 | [Notas de segurança](docs/security.pt-BR.md) | Exposição de rede, autenticação e o que sai da máquina |
-| [Arquitetura](THEPHISH_ARCHITECTURE.md) | Modelo de dados, papéis, rotas e restrições conhecidas (em inglês) |
+| [Arquitetura](BLUEPHISH_ARCHITECTURE.md) | Modelo de dados, papéis, rotas e restrições conhecidas (em inglês) |
 | [Diagramas](diagrams.md) | O pipeline, a cadeia do veredito e a stack, desenhados a partir do código |
 
 > **Vai mudar o código com um agente de IA?** Leia o [`CLAUDE.md`](CLAUDE.md) antes:

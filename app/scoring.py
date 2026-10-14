@@ -3,7 +3,7 @@
 Por que existe
 --------------
 O veredito que o pipeline produz é categórico — Malicious, Suspicious, Safe — e
-foi assim desde o Cortex (`THEPHISH_ARCHITECTURE.md` §1.2). Categoria responde
+foi assim desde o Cortex (`BLUEPHISH_ARCHITECTURE.md` §1.2). Categoria responde
 "o que é" e não responde "o que eu abro primeiro": quarenta casos suspeitos numa
 segunda-feira são quarenta linhas indistinguíveis. O score ordena essa fila.
 
