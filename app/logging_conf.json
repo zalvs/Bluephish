@@ -1,0 +1,123 @@
+{
+	"version": 1,
+	"disable_existing_loggers": false,
+	"formatters": {
+		"formatter_console": {
+			"format": "[%(levelname)s]_[%(name)s]: %(message)s"
+		}
+	},
+	"handlers": {
+		"handler_console": {
+			"level": "INFO",
+			"formatter": "formatter_console",
+			"class": "logging.StreamHandler",
+			"stream": "ext://sys.stdout"
+		}
+	},
+	"loggers": {
+		"": {
+			"handlers": ["handler_console"],
+			"level": "INFO"
+		},
+		"audit_store": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"audit_trail": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"case_evidence": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"case_from_email": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"case_scope": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"email_render": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"eml_store": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"errata": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"history": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"list_emails": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"llm_analysis": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"llm_council": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"prompt_guard": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"reclassification": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"run_analysis": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"scoring": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"socket_guard": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"spam_headers": {
+			"handlers": ["handler_console"],
+			"level": "DEBUG",
+			"propagate": false
+		},
+		"verdict_memory": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		},
+		"volume_alerts": {
+			"handlers": ["handler_console"],
+			"level": "INFO",
+			"propagate": false
+		}
+	}
+}

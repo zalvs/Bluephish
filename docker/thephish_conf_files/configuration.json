@@ -1,0 +1,88 @@
+{
+	"imap": {
+		"host": "outlook.office365.com",
+		"port": "993",
+		"user": "",
+		"password": "",
+		"authType": "oauth2",
+		"folder": "inbox"
+	},
+	"oauth2": {
+		"tenantId": "",
+		"clientId": "",
+		"clientSecret": ""
+	},
+	"email_sync": {
+		"provider": "m365",
+		"m365": {
+			"tenantId": "",
+			"clientId": "",
+			"clientSecret": "",
+			"mailbox": "",
+			"folder": "inbox"
+		},
+		"gmail": {
+			"user": "",
+			"appPassword": "",
+			"folder": "inbox"
+		}
+	},
+	"autoAnalysis": {
+		"enabled": false,
+		"intervalMinutes": 10
+	},
+	"llm_analysis": {
+		"enabled": false,
+		"api_endpoint": "http://host.docker.internal:11434/api/chat",
+		"model_name": "llama3"
+	},
+	"thehive": {
+		"url": "http://thehive:9000",
+		"apikey": ""
+	},
+	"misp": {
+		"id": "MISP THP"
+	},
+	"case": {
+		"tlp": "2",
+		"pap": "2",
+		"tags": [
+			"email",
+			"ThePhish"
+		]
+	},
+	"notification": {
+		"enabled": false,
+		"startMessage": "Thanks for the submission. Your e-mail with subject [{subject}] is being analyzed.",
+		"safeMessage": "Thanks for your submission. The e-mail with subject [{subject}] you submitted has been classified as Safe.",
+		"maliciousMessage": "Thanks for your submission. The e-mail with subject [{subject}] you submitted has been classified as Malicious.",
+		"smtp": {
+			"enabled": false,
+			"host": "",
+			"port": 587,
+			"security": "starttls",
+			"user": "",
+			"password": "",
+			"sender": "",
+			"senderName": "BluePhish",
+			"subjectPrefix": "[BluePhish]"
+		}
+	},
+	"whitelist": {
+		"malicious_limit": 3,
+		"total_limit": 5,
+		"window_days": 30,
+		"history_retention_days": 90
+	},
+	"scoring": {
+		"mode": "escalate",
+		"weights": {},
+		"tiers": {
+			"phishing": 50,
+			"suspicious": 40,
+			"legitimate": 20
+		},
+		"spamTriage": true,
+		"spamSkipAnalysis": false
+	}
+}

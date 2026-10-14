@@ -1,0 +1,132 @@
+version: "3.8"
+
+# Tudo aqui sobe com `docker compose up -d`. O produto é o `thephish`; o resto são
+# integrações que ele usa quando configuradas (TheHive, MISP) e o agente de IA que
+# comenta casos do TheHive. Cada grupo tem os seus armazenamentos ao lado.
+
+# Todo serviço volta sozinho depois de uma queda ou de um reinício da máquina
+x-restarts: &restarts
+  restart: unless-stopped
+
+services:
+
+  # --- o produto -----------------------------------------------------------
+
+  thephish:
+    <<: *restarts
+    build:
+      context: ../app
+    image: thephish-custom:latest
+    container_name: thephish
+    depends_on:
+      - thehive
+      - misp
+    ports:
+      - '127.0.0.1:8080:8080'
+    environment:
+      # Signing key for the session cookie. Set it in docker/.env (which is
+      # gitignored) so that sessions survive a restart; when it is empty the
+      # application falls back to a random per-process key and everybody is
+      # signed out on restart.
+      - THEPHISH_SECRET_KEY=${THEPHISH_SECRET_KEY:-}
+      # Public origin, needed only behind a TLS-terminating proxy: the SSO
+      # redirect URI has to match what is registered in Entra ID, and the
+      # process only sees the internal address
+      - BLUEPHISH_BASE_URL=${BLUEPHISH_BASE_URL:-}
+      # Seconds a session survives with no sign of life from its browser tab
+      - BLUEPHISH_TAB_GRACE_SECONDS=${BLUEPHISH_TAB_GRACE_SECONDS:-}
+      # Name the authenticator app shows next to the second-factor code; only
+      # worth setting when one phone is paired with more than one installation
+      - BLUEPHISH_MFA_ISSUER=${BLUEPHISH_MFA_ISSUER:-}
+    volumes:
+      - ./thephish_conf_files/configuration.json:/root/thephish/configuration.json
+      - ./thephish_conf_files/whitelist.json:/root/thephish/whitelist.json
+      # SQLite database (users, whitelist state, analysis history, reclassifications,
+      # verdict memory), audit trail, TLS key pair, volume alerts and the kept
+      # originals and layouts: kept outside the image so they survive a rebuild
+      - ./vol/thephish_data:/root/thephish/data
+
+  # --- TheHive (onde o veredito pode ser registrado) -------------------------
+
+  thehive:
+    <<: *restarts
+    image: thehiveproject/thehive4:4.1.9-1
+    container_name: thehive
+    depends_on:
+      - cassandra
+    ports:
+      - '127.0.0.1:9000:9000'
+    command: '--no-config --no-config-secret'
+    volumes:
+      - ./thehive/application.conf:/etc/thehive/application.conf
+      - ./vol/data:/opt/data
+      - ./vol/index:/opt/index
+
+  cassandra:
+    <<: *restarts
+    image: cassandra:3.11
+    container_name: cassandra
+    hostname: cassandra
+    environment:
+      - MAX_HEAP_SIZE=1G
+      - HEAP_NEWSIZE=1G
+      - CASSANDRA_CLUSTER_NAME=thp
+    volumes:
+      - ./vol/cassandra-data:/var/lib/cassandra/data
+
+  hive-ai-agent:
+    <<: *restarts
+    build: ../hive_ai_agent
+    container_name: hive-ai-agent
+    depends_on:
+      - thehive
+    ports:
+      - '127.0.0.1:8008:8008'
+    environment:
+      - THEHIVE_URL=http://thehive:9000
+      - THEHIVE_APIKEY=${THEHIVE_APIKEY:-}
+      - LLM_API_ENDPOINT=${LLM_API_ENDPOINT:-http://host.docker.internal:11434/api/chat}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-llama3}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./hive_ai_agent_conf/configuration.json:/opt/hive_ai_agent/configuration.json
+
+  # --- MISP (fonte de inteligência de ameaças) --------------------------------
+
+  misp:
+    <<: *restarts
+    image: coolacid/misp-docker:core-v2.4.148a
+    container_name: misp
+    depends_on:
+      - redis
+      - mysql
+    ports:
+      - '127.0.0.1:80:80'
+      - '127.0.0.1:443:443'
+    environment:
+      - "MYSQL_HOST=mysql"
+      - "HOSTNAME=https://localhost"
+      - "REDIS_FQDN=redis"
+      - "INIT=true"
+      - "CRON_USER_ID=1"
+      - "DISIPV6=true"
+
+  mysql:
+    <<: *restarts
+    image: mysql:8.0.26
+    container_name: mysql
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      - "MYSQL_USER=misp"
+      - "MYSQL_PASSWORD=example"
+      - "MYSQL_ROOT_PASSWORD=password"
+      - "MYSQL_DATABASE=misp"
+    volumes:
+      - ./vol/mysql:/var/lib/mysql
+
+  redis:
+    <<: *restarts
+    image: redis:6.2.5
+    container_name: redis

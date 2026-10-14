@@ -1,0 +1,29 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-08-10T16:23:19.233Z",
+        "reason": "Geist veio do handoff de design da marca (b49d087)"
+      },
+      {
+        "rule": "overused-font",
+        "value": "geist mono",
+        "createdAt": "2026-08-10T16:23:26.839Z",
+        "reason": "Geist Mono veio do handoff de design da marca (b49d087)"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "app/templates/login.html"
+        ],
+        "createdAt": "2026-09-15T00:16:44.449Z",
+        "reason": "Claude: #mfaQr recebe o src por JS como data: SVG do QR do MFA (comentário nas linhas 147-149); a tag já existia no HEAD, não é imagem quebrada"
+      }
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+# Keep the Python dependencies and the GitHub Actions up to date
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # Bluephish web application (/app) — deliberately NOT managed here.
+  #
+  # app/requirements.txt is the lock that app/Dockerfile installs: whatever it pins
+  # is what runs. The image sits on Ubuntu 20.04 with Python 3.8, and roughly four
+  # in five of the versions Dependabot proposes declare Requires-Python >= 3.9 or
+  # >= 3.10, so pip cannot even find the distribution and the job dies at the
+  # install step. The remainder were mergeable but moved one piece of a set whose
+  # core (Flask 2.0.1, Werkzeug 2.0.1, eventlet 0.31.1) has to move together.
+  #
+  # Upgrades are deliberate: pick the Python, re-pin, rebuild the image and run the
+  # suite inside it. The upgrades Python 3.8 already allows are listed at the top
+  # of app/requirements.txt so nothing is silently lost.
+  #
+  # To manage it again, delete this comment and restore a `pip` entry for /app.
+
+  # hive_ai_agent middleware — runs on Python 3.11, so it has no such ceiling
+  # and its updates are expected to merge normally
+  - package-ecosystem: "pip"
+    directory: "/hive_ai_agent"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  # The GitHub Actions used by the CI workflow
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"

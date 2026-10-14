@@ -1,0 +1,100 @@
+# The exact package set of the running image — a lock, not a wish list.
+#
+# app/Dockerfile installs this file (`pip3 install -r requirements.txt`) on the
+# Python 3.8 that ships with Ubuntu 20.04, so what is pinned here is what runs in
+# production. CI installs the same file on Python 3.8 and proves the set resolves.
+#
+# When a pin changes, rebuild the image and run the suite inside it, and keep the
+# list sorted. To compare the lock with what an image really carries:
+#
+#     docker run --rm --entrypoint python3 <image> -m pip freeze
+#
+# Dependabot is switched off for this directory (see .github/dependabot.yml): most
+# of what it proposes requires Python >= 3.9. It stays on for hive_ai_agent, whose
+# requirements are real.
+#
+# Upgrades that Python 3.8 does allow but the image does not yet carry — adopt
+# them by changing the pin below and rebuilding the image:
+#
+#     certifi   2021.5.30 -> 2026.7.22   (five years of CA bundle updates)
+#     requests  2.26.0    -> 2.32.4
+#     urllib3   1.26.6    -> 2.2.3
+#     msal      1.24.1    -> 1.36.0
+#     python-socketio 5.4.0 -> 5.16.3
+#     dnspython 1.16.0    -> 2.6.1
+#
+# Flask was once held below 3 because the code used flask.escape (removed in
+# Flask 3). It no longer does — test_analysis_input keeps it that way — so the
+# pin below is only what the image carries.
+
+attrs==21.2.0
+bcrypt==4.0.1
+beautifulsoup4==4.9.3
+bidict==0.21.2
+bs4==0.0.1
+certifi==2021.5.30
+cffi==1.17.1
+charset-normalizer==2.0.4
+click==8.0.1
+commonmark==0.9.2
+cortex4py==2.1.0
+cryptography==43.0.3
+d8s-dicts==0.6.0
+d8s-hypothesis==0.6.0
+d8s-lists==0.8.0
+d8s-math==0.7.0
+d8s-strings==0.5.0
+d8s-uuids==0.6.0
+deprecated==1.3.1
+dictdiffer==0.9.0
+dnspython==1.16.0
+emoji==1.4.2
+eventlet==0.31.1
+Flask-Limiter==2.6.3
+Flask-Login==0.6.2
+Flask-SocketIO==5.1.1
+Flask-WTF==1.0.1
+Flask==2.0.1
+future==0.18.2
+greenlet==1.1.1
+hypothesis==6.15.0
+idna==3.2
+importlib-resources==6.4.5
+inflect==5.3.0
+ioc-fanger==3.3.0
+ioc-finder==6.0.1
+itsdangerous==2.0.1
+Jinja2==3.0.1
+limits==3.13.0
+MarkupSafe==2.0.1
+more-itertools==8.8.0
+mpmath==1.2.1
+msal==1.24.1
+number-tools==0.1.0
+packaging==24.2
+pycparser==2.23
+pygments==2.19.2
+PyJWT==2.9.0
+pyotp==2.9.0
+pyparsing==2.4.7
+pypng==0.20220715.0
+python-engineio==4.2.1
+python-magic==0.4.24
+python-socketio==5.4.0
+qrcode==7.4.2
+requests==2.26.0
+rich==12.6.0
+six==1.16.0
+sortedcontainers==2.4.0
+soupsieve==2.2.1
+SQLAlchemy==1.4.46
+sympy==1.8
+thehive4py==1.8.1
+typing-extensions==4.13.2
+typing==3.7.4.3
+urllib3==1.26.6
+Werkzeug==2.0.1
+wrapt==2.0.1
+wtforms==3.1.2
+yara-python==4.3.1
+zipp==3.20.2

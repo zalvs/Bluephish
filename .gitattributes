@@ -1,0 +1,41 @@
+# Normalize line endings so a clone on Windows (where core.autocrlf=true is the
+# default from Git for Windows) cannot break files that must keep LF.
+#
+# Without this, setup.sh was checked out with CRLF and bash refused to run it:
+#   set: pipefail\r: invalid option name
+# The shebang itself became "#!/usr/bin/env bash\r", so the interpreter was not
+# even found.
+
+# Let Git decide what is text, but never rewrite the endings of the files below.
+* text=auto
+
+# Shell scripts are executed by bash/sh, which treat a trailing \r as part of
+# the token: they must always be LF, on every platform.
+*.sh text eol=lf
+
+# Files read inside the Linux containers, or by tools that dislike CRLF.
+Dockerfile   text eol=lf
+*.Dockerfile text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.json       text eol=lf
+*.conf       text eol=lf
+*.py         text eol=lf
+.env.example text eol=lf
+.dockerignore text eol=lf
+.gitignore   text eol=lf
+.gitattributes text eol=lf
+
+# Binary assets: never touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.eot binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.eml binary

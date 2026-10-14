@@ -1,0 +1,13 @@
+From: Novidades <news@marca-real.com>
+To: analista@empresa.com
+Subject: Suas novidades de setembro
+Date: Wed, 10 Sep 2026 09:00:00 -0300
+Authentication-Results: mx.empresa.com; spf=pass smtp.mailfrom=marca-real.com; dkim=pass header.i=@marca-real.com; dmarc=pass
+List-Unsubscribe: <https://marca-real.com/u/abc>, <mailto:u@marca-real.com>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+List-Id: novidades <news.marca-real.com>
+Precedence: bulk
+Feedback-ID: 1:2:3:esp
+Content-Type: text/plain
+
+Confira as novidades do mes.

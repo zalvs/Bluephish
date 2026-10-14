@@ -1,0 +1,2913 @@
+/* bluephish — design system
+ *
+ * Tokens and components transcribed from the Claude Design handoff
+ * ("bluephish Dashboard.dc.html"). The prototype carried every rule as an
+ * inline style attribute; here the same values live in classes so the markup
+ * stays readable and the JS only ever toggles class names.
+ *
+ * The palette is defined twice: the :root/[data-theme="dark"] block is the
+ * default, [data-theme="light"] overrides it. Nothing outside this file should
+ * hardcode a colour — always go through a var().
+ *
+ * Two families of red-adjacent tokens exist and they are NOT interchangeable:
+ *
+ *   --accent-*  the brand blue. Selection, active nav, primary actions, the
+ *               "threat" series of a chart — anything that means "this is the
+ *               product speaking".
+ *   --danger-*  the verdict red. Malicious findings, destructive buttons,
+ *               failed authentication. It survived the rebrand on purpose:
+ *               a malicious verdict must never be painted in brand colour,
+ *               or the one thing an analyst scans for stops standing out.
+ *
+ * Before the rebrand the product accent WAS red, so a single --accent-soft
+ * served both jobs. Splitting them is what keeps the blue from swallowing the
+ * severity signal.
+ */
+
+:root,
+[data-theme="dark"] {
+	--s0: #09090b; --s1: #0c0c0e; --s2: #0a0a0c; --s3: #0d0d10;
+	--s4: #101013; --s5: #141417; --s6: #18181c; --s7: #1a1a1e;
+	--track: #1c1c20;
+	--b1: #1c1c1f; --b2: #26262b; --b3: #2a2a2f; --b4: #3a3a40;
+	--t0: #fafafa; --t1: #e4e4ec; --t2: #c4c4cc; --t3: #8f8f98;
+	--t4: #8a8a93; --t5: #82828b;
+	--danger: #ff5c62; --danger2: #ff8a8f; --warn: #e5a54a; --ok: #3fb950;
+	--accent: #2563eb; --accent-hi: #3b82f6;
+	--accent-soft: rgba(37, 99, 235, 0.08);
+	--accent-soft2: rgba(37, 99, 235, 0.16);
+	--accent-line: rgba(37, 99, 235, 0.32);
+	--accent-tint: rgba(37, 99, 235, 0.13);
+	--danger-soft: rgba(224, 26, 36, 0.08);
+	--danger-soft2: rgba(224, 26, 36, 0.16);
+	--danger-line: rgba(224, 26, 36, 0.3);
+	--danger-tint: rgba(224, 26, 36, 0.13);
+	--shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
+	--shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.5);
+	--scrim: rgba(0, 0, 0, 0.62);
+}
+
+[data-theme="light"] {
+	--s0: #f4f4f6; --s1: #ffffff; --s2: #ffffff; --s3: #ffffff;
+	--s4: #ffffff; --s5: #f2f2f4; --s6: #ebebee; --s7: #e6e6ea;
+	--track: #e2e2e7;
+	--b1: #e7e7eb; --b2: #dcdce2; --b3: #cfcfd7; --b4: #b4b4be;
+	--t0: #0d0d10; --t1: #26262b; --t2: #3f3f47; --t3: #5f5f68;
+	--t4: #62626b; --t5: #67676f;
+	--danger: #c1121f; --danger2: #a50f1a; --warn: #8a5a00; --ok: #1a7f37;
+	--accent: #1d4ed8; --accent-hi: #2563eb;
+	--accent-soft: rgba(29, 78, 216, 0.07);
+	--accent-soft2: rgba(29, 78, 216, 0.14);
+	--accent-line: rgba(29, 78, 216, 0.3);
+	--accent-tint: rgba(29, 78, 216, 0.11);
+	--danger-soft: rgba(193, 18, 31, 0.07);
+	--danger-soft2: rgba(193, 18, 31, 0.14);
+	--danger-line: rgba(193, 18, 31, 0.3);
+	--danger-tint: rgba(193, 18, 31, 0.11);
+	--shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.18);
+	--shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.14);
+	--scrim: rgba(0, 0, 0, 0.38);
+}
+
+/* --- Layout scale ----------------------------------------------------------
+ *
+ * The measurements a screen is built out of, in one place, because the screens
+ * had drifted apart: the list column was 320px on the inbox, 320 on the analyzed
+ * emails, 300 on phishing and 330 on the chat, each with its own head padding,
+ * and the content column was 1118px wide on one screen and 760 on another. None
+ * of it was a decision — every screen had been measured on its own — and the
+ * result was an interface where nothing stayed put when you changed tabs.
+ *
+ * In rem, so they follow the text-size control in the dock. That control
+ * multiplies the root font size; a column pinned in px would keep its width
+ * while the text inside it grew, which is where the overflow the analyst reports
+ * as "quebrado" comes from.
+ */
+:root {
+	/* The list column: every screen that has one uses this width */
+	--pane-list: 21rem;
+	--pane-list-min: 17rem;
+	/* The narrowest a reading/working column may get before the shell scrolls */
+	--pane-min: 26rem;
+	/* Horizontal gutter, by pane role. A list is denser than a detail pane, so
+	 * the two differ — but only these two values exist */
+	--gutter-list: 0.875rem;
+	--gutter-pane: 1.375rem;
+	/* Rows sit inside the list gutter; the difference is the row's own padding,
+	 * so row text and pane title start on the same vertical line */
+	--row-inset: 0.375rem;
+	/* Reading measure. Long-form text stops here rather than running the full
+	 * width of a 1400px pane, which is roughly 95 characters a line */
+	--measure: 68ch;
+	/* One working column width for forms and settings, so a tab that has three
+	 * fields and a tab that has thirty start at the same place */
+	--column: 52rem;
+
+	/* --- Type scale ---------------------------------------------------------
+	 *
+	 * Five steps, each at least 1.25× the one below it. There were fourteen
+	 * sizes before, nine of them packed between 9.5px and 15px — steps of four
+	 * or five percent, which no eye resolves. Fourteen sizes expressing three
+	 * levels is not a hierarchy; it is the absence of one, spread thin enough to
+	 * look deliberate.
+	 *
+	 * The scale carries **structural level** and nothing else. Emphasis inside a
+	 * level is the tone ladder's job (--t0 … --t5), weight's, and the
+	 * sans/mono split's — three axes that compose, instead of one axis asked to
+	 * do four jobs at once. That is why a note and the body text it sits under
+	 * are now the same size and different colours: they are the same level of
+	 * structure, and one of them matters less.
+	 *
+	 * Console density is preserved on purpose: micro stays where the old sheet's
+	 * most-used label size was, and body grows by half a pixel. What actually
+	 * moves is the top — a card title used to be exactly as big as the paragraph
+	 * under it. */
+	--fs-micro: 0.65625rem;   /* 10.5px — mono labels, keys, badges, meta, code */
+	--fs-body: 0.84375rem;    /* 13.5px — everything read as prose, every control */
+	--fs-title: 1.0625rem;    /* 17px   — card, pane and modal titles */
+	--fs-display: 1.375rem;   /* 22px   — KPI figures, section headings */
+	--fs-hero: 2.375rem;      /* 38px   — the sign-in pitch, alone at the top */
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	background: var(--s0);
+}
+
+body {
+	font-family: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	font-size: var(--fs-body);
+	color: var(--t0);
+	-webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent-hi); text-decoration: none; }
+a:hover { color: #60a5fa; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--b3); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--b4); }
+
+.mono { font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hidden { display: none !important; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grow { flex: 1; min-width: 0; }
+.push { margin-left: auto; }
+
+/* --- shell ---------------------------------------------------------------- */
+
+.app {
+	display: flex;
+	height: 100vh;
+	width: 100%;
+	padding-right: 46px;
+	background: var(--s0);
+	color: var(--t0);
+	overflow-x: auto;
+	overflow-y: hidden;
+}
+
+.theme-dock {
+	position: fixed;
+	top: 12px;
+	right: 9px;
+	z-index: 40;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: center;
+}
+
+.icon-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+	border: 1px solid var(--b2);
+	background: var(--s5);
+	color: var(--t3);
+	cursor: pointer;
+	padding: 0;
+}
+.icon-btn:hover { color: var(--t0); border-color: var(--b4); }
+.icon-btn.ghost { background: transparent; border-radius: 6px; }
+.icon-btn.ghost:hover { background: var(--s7); color: var(--t0); }
+
+/* --- foco visível ---------------------------------------------------------
+   Antes, `outline: none` em .input, .search input e .composer-box input, e
+   nenhuma regra de foco em botão, aba ou alternância. Quem navega por teclado
+   perdia o cursor dentro da tela. O anel usa a cor de acento com um degrau de
+   afastamento, para se ler tanto sobre a superfície escura quanto sobre a
+   clara, e `:focus-visible` deixa o navegador decidir quando ele aparece. */
+
+:root { --anel: 0 0 0 2px var(--s1), 0 0 0 4px var(--accent); }
+
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.tab:focus-visible,
+.nav-item:focus-visible,
+.chip:focus-visible,
+.toggle:focus-visible,
+.check:focus-visible,
+.profile:focus-visible,
+.modal-close:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+	outline: none;
+	box-shadow: var(--anel);
+	border-radius: 6px;
+}
+
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible,
+.search:focus-within,
+.composer-box:focus-within {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* O campo dentro de .search e .composer-box não desenha o próprio anel: quem
+   desenha é o contêiner, com :focus-within, senão o anel apareceria por dentro
+   da borda arredondada e ficaria cortado. */
+.search input:focus-visible,
+.composer-box input:focus-visible { outline: none; box-shadow: none; }
+
+/* Pular para o conteúdo: primeiro alvo do Tab, invisível até receber foco.
+   Sem isto, chegar à lista de e-mails custa passar por toda a navegação. */
+.skip-link {
+	position: fixed;
+	top: 8px;
+	left: 8px;
+	z-index: 100;
+	padding: 9px 14px;
+	border-radius: 8px;
+	background: var(--accent);
+	color: #fff;
+	font-size: var(--fs-body);
+	font-weight: 500;
+	text-decoration: none;
+	transform: translateY(-200%);
+}
+.skip-link:focus { transform: translateY(0); }
+
+/* --- controle de tamanho da interface ------------------------------------
+   O dock do tema ganha um segundo grupo. O valor mora em `font-size` no <html>,
+   então ele multiplica todo rem da folha — inclusive o que o navegador já
+   aplicaria por conta da preferência do usuário. */
+
+/* Tamanho do texto: um botão que avança a cada clique.
+
+   O par `aA` é a marca reconhecida de "tamanho de texto" — quem já viu num
+   leitor ou num jornal sabe o que ela faz antes de clicar. Qual dos três
+   tamanhos está valendo não precisa de indicador: o clique muda a tela inteira
+   na hora, e essa é a confirmação mais direta que existe. O que o botão informa,
+   pelo título e pelo nome acessível, é para onde o próximo clique vai.
+
+   As letras medem em px, e não em rem, de propósito: se crescessem junto com a
+   escolha, o botão mudaria de tamanho debaixo do cursor a cada clique e o alvo
+   fugiria de quem acabou de mirar nele. O controle é a régua, e régua não muda
+   de tamanho com o que ela mede. */
+
+.dock-size {
+	gap: 1px;
+	font-family: inherit;
+	font-weight: 500;
+	line-height: 1;
+	letter-spacing: -0.01em;
+}
+/* Os dois únicos tamanhos em px da folha, e de propósito: estes dois glifos são
+   a própria régua do controle de tamanho de texto. Em rem eles cresceriam junto
+   com o que estão medindo, e o botão passaria a mostrar sempre a mesma coisa. */
+.dock-size .dock-size-a { font-size: 10px; }
+.dock-size .dock-size-A { font-size: 15px; }
+/* Fora do tamanho normal, o botão fica preenchido: é o único lugar da tela onde
+   uma preferência ativa não se lê sozinha, já que a régua não muda de tamanho. */
+.dock-size[data-size="small"] .dock-size-a,
+.dock-size[data-size="large"] .dock-size-A { color: var(--accent); }
+
+/* --- movimento reduzido ---------------------------------------------------
+   A regra antiga cobria só a dica do gráfico. As demais transições continuavam
+   valendo para quem pede menos movimento. Aqui elas encurtam quase a zero, mas
+   não vão a zero: a mudança de estado precisa continuar perceptível — o que
+   incomoda é o deslocamento, não o fato de algo ter mudado. */
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.08s !important;
+		scroll-behavior: auto !important;
+	}
+	.skip-link { transition: none; }
+}
+
+/* Conteúdo só para leitor de tela. Não usa display:none nem visibility:hidden —
+   os dois tiram o elemento da árvore de acessibilidade, que é justamente para
+   quem ele existe. */
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* .pane-title mantém o tamanho independente da tag: a hierarquia de cabeçalho é
+   para a leitura assistiva, e não deve mexer no desenho. */
+h1.pane-title, h2.pane-title { font-size: var(--fs-title); font-weight: 600; margin: 0; }
+
+/* --- rail / sidebar ------------------------------------------------------- */
+
+.rail {
+	width: 44px;
+	flex: 0 0 44px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 12px;
+	padding: 14px 0;
+	background: var(--s1);
+	border-right: 1px solid var(--b1);
+	height: 100%;
+}
+
+.sidebar {
+	width: 236px;
+	flex: 0 0 236px;
+	display: flex;
+	flex-direction: column;
+	background: var(--s1);
+	border-right: 1px solid var(--b1);
+	height: 100%;
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 16px 16px 14px 16px;
+}
+.brand img { width: 30px; height: 30px; border-radius: 7px; object-fit: cover; flex: 0 0 30px; }
+.brand-name { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; }
+.brand-sub { font-size: var(--fs-micro); color: var(--t4); letter-spacing: 0.02em; }
+
+.nav {
+	flex: 1;
+	overflow-y: auto;
+	padding: 6px 12px 12px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-title {
+	margin: 0 0 6px 8px;
+	font-size: var(--fs-micro);
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	color: var(--t4);
+}
+.nav-item {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-height: 1.9375rem;
+	padding: 0 9px;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--t3);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	text-align: left;
+	cursor: pointer;
+	transition: background 120ms ease;
+}
+.nav-item:hover { background: var(--s5); color: var(--t1); }
+.nav-item.active {
+	background: var(--accent);
+	color: #fff;
+	font-weight: 500;
+	box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset;
+}
+.nav-item svg { width: 15px; height: 15px; flex: 0 0 15px; }
+.nav-badge { font-size: var(--fs-micro); flex: 0 0 auto; color: var(--t4); }
+.nav-item.active .nav-badge { color: rgba(255, 255, 255, 0.85); }
+.nav-badge:empty { display: none; }
+
+.profile {
+	position: relative;
+	border-top: 1px solid var(--b1);
+	padding: 10px 12px;
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	cursor: pointer;
+}
+.profile:hover { background: var(--s5); }
+.avatar {
+	width: 26px;
+	height: 26px;
+	flex: 0 0 26px;
+	border-radius: 6px;
+	background: var(--track);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: var(--fs-micro);
+	font-weight: 600;
+	color: var(--t2);
+}
+.profile-name { font-size: var(--fs-body); font-weight: 500; }
+.profile-role { font-size: var(--fs-micro); color: var(--t4); }
+.profile-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+
+.profile-menu {
+	position: absolute;
+	bottom: calc(100% + 6px);
+	left: 10px;
+	right: 10px;
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	padding: 5px;
+	border-radius: 9px;
+	border: 1px solid var(--b2);
+	background: var(--s4);
+	box-shadow: var(--shadow-menu);
+}
+.profile-menu button {
+	text-align: left;
+	min-height: 1.875rem;
+	padding: 0 9px;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--t1);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	cursor: pointer;
+}
+.profile-menu button:hover { background: var(--s7); }
+.profile-menu button.danger { color: var(--danger2); }
+.profile-menu button.danger:hover { background: var(--danger-soft); }
+.profile-menu .sep { height: 1px; margin: 4px 0; background: var(--b1); }
+
+/* --- panes ---------------------------------------------------------------- */
+
+.pane {
+	flex: 1;
+	min-width: var(--pane-min);
+	display: flex;
+	flex-direction: column;
+	background: var(--s2);
+	height: 100%;
+	min-height: 0;
+	position: relative;
+}
+
+/* Every list column in the application, at one width. The inline overrides that
+ * used to make this 300 on one screen and 330 on another are gone; a column that
+ * moves when you switch tabs is read as the interface being unfinished, and it
+ * was the first thing anybody said about it */
+.pane.list {
+	width: var(--pane-list);
+	flex: 0 1 var(--pane-list);
+	min-width: var(--pane-list-min);
+	border-right: 1px solid var(--b1);
+}
+.pane.detail { min-width: var(--pane-min); }
+.pane.empty {
+	flex: 0 1 var(--pane-list);
+	min-width: var(--pane-list-min);
+	align-items: center;
+	justify-content: center;
+	gap: 9px;
+}
+
+/* One head, two gutters — a detail pane's and a list pane's — and the body of
+ * each pane uses the same one as its head, so a title and the content under it
+ * start on the same line. They did not: heads ran 12/22, 14/14/10 and 14/14/12
+ * across four screens */
+.pane-head {
+	padding: 12px var(--gutter-pane);
+	border-bottom: 1px solid var(--b1);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 3.5rem;
+}
+.pane-head.stacked {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 11px;
+	padding: 12px var(--gutter-pane) 0 var(--gutter-pane);
+}
+.pane.list > .pane-head,
+.pane.list > .pane-head.stacked { padding-left: var(--gutter-list); padding-right: var(--gutter-list); }
+.pane.list > .pane-head.stacked { padding-bottom: 10px; }
+
+.pane-title { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
+.pane-sub { font-size: var(--fs-micro); color: var(--t4); }
+.pane-body { flex: 1; min-height: 0; overflow-y: auto; }
+.pane-body.pad { padding: 18px var(--gutter-pane) 30px var(--gutter-pane); display: flex; flex-direction: column; gap: 14px; }
+.pane-body.stack { padding: var(--gutter-list); display: flex; flex-direction: column; gap: 16px; }
+
+/* A working column, not a full-bleed one. Centred rather than pinned left: a
+ * 760px form pushed against the left edge of a 1400px pane leaves a third of the
+ * screen empty next to it and reads as a layout that failed to load */
+.pane-body.narrow { max-width: var(--column); margin-inline: auto; width: 100%; }
+
+/* A scrolling flex column must never shrink its children — overflowing is
+ * exactly what the scrollbar is for.
+ *
+ * Without this, a card whose content is taller than the pane gets compressed
+ * instead of scrolled. It bites hardest on `.card.flush`: `overflow: hidden`
+ * removes the automatic minimum size of a flex item, so that card absorbs all
+ * the shrinkage and collapses to a couple of pixels while its rows stay in the
+ * DOM at full height, invisible. That is what made a case with 55 observables
+ * render as an empty sliver between the assessment and the body. */
+.pane-body.pad > *,
+.pane-body.stack > * { flex-shrink: 0; }
+
+/* --- buttons -------------------------------------------------------------- */
+
+/* Uma escala de altura só, e a variante muda cor — nunca tamanho.
+ *
+ * Antes cada variante trazia a própria altura (1.875rem o primário, 1.75 o sm,
+ * 1.625 o quiet e o danger) e o primário não tinha borda enquanto o secondary
+ * tinha 1px. Numa linha que misturava dois deles os rótulos ficavam em alturas
+ * diferentes e os botões pareciam tortos. A borda transparente no primário e o
+ * `line-height: 1` põem o texto no mesmo pixel em todas as variantes. */
+/* A altura de um controle é uma escala só para botão, campo e seletor:
+ * --control-h (2.125rem) e --control-h-sm (1.75rem). O botão tinha 2rem e o
+ * campo 2.125rem, e toda linha que juntava os dois — Simular/Incluir ao lado dos
+ * campos da whitelist, Carregar ao lado do caso no chat — ficava 2px fora. */
+:root { --control-h: 2.125rem; --control-h-sm: 1.75rem; }
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-height: var(--control-h);
+	padding: 0 14px;
+	border: 1px solid transparent;
+	border-radius: 7px;
+	background: var(--accent);
+	color: #fff;
+	font-family: inherit;
+	font-size: var(--fs-body);
+	font-weight: 500;
+	line-height: 1;
+	text-align: center;
+	vertical-align: middle;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.btn > svg { flex: 0 0 auto; }
+.btn:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: 0.5; cursor: default; filter: none; }
+
+.btn.secondary {
+	border: 1px solid var(--b3);
+	background: var(--s5);
+	color: var(--t1);
+}
+.btn.secondary:hover { filter: none; background: var(--s7); border-color: var(--b4); }
+
+.btn.quiet {
+	border-color: var(--b2);
+	background: transparent;
+	color: var(--t3);
+	font-weight: 400;
+}
+.btn.quiet:hover { filter: none; background: var(--s7); color: var(--t1); border-color: var(--b4); }
+
+.btn.danger {
+	border-color: var(--danger-line);
+	background: var(--danger-soft);
+	color: var(--danger2);
+	font-weight: 400;
+}
+.btn.danger:hover { filter: none; background: var(--danger-soft2); }
+
+.btn.sm { min-height: var(--control-h-sm); padding: 0 12px; border-radius: 6px; }
+
+/* Uma faixa de ações: tudo nela centrado no mesmo eixo, sem depender do pai */
+.toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Formulário em grade: duas colunas quando cabem, uma quando não */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 12px 14px; align-items: end; }
+.form-grid.three { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+
+/* O que é raro ajustar, recolhido. `details` é nativo: abre com teclado e leitor
+ * de tela sem uma linha de JavaScript */
+.disclosure { border-top: 1px solid var(--b1); padding-top: 12px; }
+.disclosure > summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: var(--control-h-sm);
+	cursor: pointer;
+	list-style: none;
+	font-size: var(--fs-body);
+	color: var(--t3);
+}
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-right: 1.5px solid currentColor;
+	border-bottom: 1.5px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 140ms ease;
+}
+.disclosure[open] > summary::before { transform: rotate(45deg); }
+.disclosure > summary:hover { color: var(--t1); }
+.disclosure > summary:focus-visible { outline: none; box-shadow: var(--anel); border-radius: 6px; }
+.disclosure > .form-grid { margin-top: 12px; }
+
+/* Um evento com o próprio interruptor e a própria mensagem */
+.event-row { display: flex; flex-direction: column; gap: 8px; }
+.event-row + .event-row { padding-top: 16px; border-top: 1px solid var(--b1); }
+.event-row-head, .option-row { display: flex; align-items: center; gap: 12px; }
+.event-row.off .event-message { opacity: 0.55; }
+.event-message {
+	min-height: 4.5rem;
+	padding: 9px 11px;
+	line-height: 1.5;
+	resize: vertical;
+	font-family: inherit;
+}
+
+/* Número e unidade como um controle só */
+.unit-input { display: flex; align-items: center; gap: 6px; }
+.unit-input > .input { flex: 1 1 auto; min-width: 0; }
+.unit-input > .select-wrap { flex: 0 0 6.5rem; }
+
+.inline-note { margin: 0; padding: 9px 12px; border-radius: 8px; font-size: var(--fs-body); line-height: 1.5; color: var(--t2); background: rgba(229, 165, 74, 0.08); border: 1px solid rgba(229, 165, 74, 0.3); }
+
+/* Um disparo do alerta de volume: o padrão, a contagem e cada canal */
+.alert-entry { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-top: 1px solid var(--b1); }
+.alert-entry:first-child { border-top: none; padding-top: 0; }
+.alert-entry-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.alert-entry-pattern { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--t1); }
+.alert-entry-channels { display: flex; flex-wrap: wrap; gap: 5px; }
+.btn.xs { min-height: 1.5rem; padding: 0 9px; border-radius: 5px; }
+.btn.block { width: 100%; }
+
+/* Tabs: switch what a region shows. (Chips, below, filter what a list holds —
+ * the two are different questions and stay different controls.)
+ *
+ * The strip is one continuous rail with the labels sitting on it, rather than
+ * eight free-floating buttons. Configurações runs from "IA" to "Análise
+ * automática", 34px to 134px, and without the rail there was nothing holding
+ * them together: the row read as debris. A minimum width pulls the short labels
+ * up so the rhythm is legible without stretching the long ones into a grid,
+ * which would have made "IA" a 134px button.
+ *
+ * It scrolls sideways instead of wrapping. A wrapped strip changes the height of
+ * the header, which moves everything under it — and it did, on exactly the
+ * widths where the settings screen is most cramped. */
+.tabs {
+	display: flex;
+	gap: 2px;
+	flex-wrap: nowrap;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+	box-shadow: inset 0 -1px 0 var(--b1);
+}
+.tabs::-webkit-scrollbar { height: 0; }
+/* In a pane head the rail is already there — it is the head's own bottom border,
+ * and it runs the full width instead of stopping where the labels do. Keeping
+ * both would stack two hairlines on the same pixel row */
+.pane-head .tabs { box-shadow: none; }
+
+/* Sem degradê na borda direita.
+ *
+ * Havia um `::after` sticky com margem negativa de 2rem para sugerir que a faixa
+ * continuava. A margem negativa punha o degradê em cima dos últimos 2rem da
+ * última aba mesmo sem nada para rolar — "Whitelist" aparecia borrada no fim, e
+ * o mesmo acontecia em toda faixa de abas do app. Um rótulo legível vale mais do
+ * que a dica de rolagem; a faixa continua rolando de lado. */
+.tab {
+	flex: 0 0 auto;
+	min-height: 2rem;
+	/* Recuo e largura mínima encolheram junto com a subida do rótulo de 12.5px
+	 * para o corpo da escala: a faixa das oito abas de Configurações fica com
+	 * praticamente a mesma largura total de antes, e o que cresceu foi a letra */
+	min-width: 4rem;
+	padding: 0 10px;
+	border: none;
+	border-bottom: 2px solid transparent;
+	border-radius: 0;
+	background: transparent;
+	color: var(--t4);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	white-space: nowrap;
+	cursor: pointer;
+	transition: color 120ms ease, border-color 120ms ease;
+}
+.tab:hover { color: var(--t1); }
+.tab.active { color: var(--t0); border-bottom-color: var(--accent); font-weight: 500; }
+
+/* O tamanho da fila, ao lado do nome dela. Numa tabular-nums para o número não
+ * fazer o rótulo pular a cada atualização, e vazio — não zero — enquanto a
+ * contagem não chegou: um "0" antes da resposta diz que a fila está limpa */
+.tab-count {
+	margin-left: 5px;
+	font-size: var(--fs-micro);
+	font-variant-numeric: tabular-nums;
+	color: var(--t4);
+}
+.tab.active .tab-count { color: var(--t2); }
+.tab-count:empty { display: none; }
+
+/* The same control inside a card, where there is no header rail to sit on and
+ * the labels are a pair rather than a row of eight */
+.tabs.inline {
+	box-shadow: none;
+	gap: 4px;
+	padding: 2px;
+	border-radius: 7px;
+	background: var(--s5);
+	border: 1px solid var(--b2);
+}
+.tabs.inline .tab {
+	min-height: 1.5rem;
+	min-width: 0;
+	padding: 0 10px;
+	border-bottom: none;
+	border-radius: 5px;
+	font-size: var(--fs-body);
+}
+.tabs.inline .tab.active { background: var(--s7); color: var(--t0); }
+
+/* Filter chips above a list */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+	min-height: 1.5rem;
+	padding: 0 10px;
+	border: 1px solid var(--b2);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--t3);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	cursor: pointer;
+}
+.chip:hover { background: var(--s7); color: var(--t1); }
+.chip.active {
+	border-color: var(--accent);
+	background: var(--accent-tint);
+	color: var(--accent-hi);
+}
+.chip.active:hover { background: var(--accent-tint); color: var(--accent-hi); }
+
+/* --- form controls -------------------------------------------------------- */
+
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field-label {
+	font-size: var(--fs-micro);
+	color: var(--t3);
+	letter-spacing: 0.06em;
+	font-family: "Geist Mono", ui-monospace, monospace;
+}
+.field-hint { font-size: var(--fs-micro); color: var(--t5); font-family: "Geist Mono", ui-monospace, monospace; }
+
+.input,
+.select,
+.textarea {
+	width: 100%;
+	min-height: var(--control-h);
+	padding: 0 11px;
+	border: 1px solid var(--b2);
+	border-radius: 7px;
+	background: var(--s3);
+	color: var(--t0);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	outline: none;
+}
+.input:focus,
+.select:focus,
+.textarea:focus { border-color: var(--accent); }
+.input::placeholder, .textarea::placeholder { color: var(--t5); }
+.input.mono, .textarea.mono { font-family: "Geist Mono", ui-monospace, monospace; }
+/* A altura pequena, para campo e seletor que dividem faixa com botões .sm */
+.input.sm, .select.sm { min-height: var(--control-h-sm); }
+.select.sm { padding-right: 26px; }
+
+.textarea {
+	height: auto;
+	min-height: 7.5rem;
+	padding: 11px;
+	line-height: 1.6;
+	resize: vertical;
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-body);
+	color: var(--t1);
+}
+
+.select { appearance: none; padding-right: 28px; cursor: pointer; }
+.select-wrap { position: relative; display: flex; min-width: 0; }
+.select-wrap::after {
+	content: "";
+	position: absolute;
+	right: 11px;
+	top: 50%;
+	width: 6px;
+	height: 6px;
+	margin-top: -4px;
+	border-right: 1.4px solid var(--t4);
+	border-bottom: 1.4px solid var(--t4);
+	transform: rotate(45deg);
+	pointer-events: none;
+}
+
+input[type="range"] { accent-color: var(--accent); background: transparent; }
+input[type="checkbox"] { accent-color: var(--accent); }
+
+/* Toggle switch */
+.toggle {
+	flex: 0 0 auto;
+	width: 38px;
+	height: 21px;
+	border-radius: 9999px;
+	background: var(--track);
+	border: 1px solid var(--b3);
+	padding: 2px;
+	cursor: pointer;
+	transition: background 140ms ease, border-color 140ms ease;
+}
+.toggle .knob {
+	display: block;
+	width: 15px;
+	height: 15px;
+	border-radius: 50%;
+	background: var(--t3);
+	transition: transform 140ms ease, background 140ms ease;
+}
+.toggle.on { background: var(--accent); border-color: var(--accent); }
+.toggle.on .knob { transform: translateX(17px); background: #fff; }
+
+/* Square checkbox used by the email queue rows */
+.check {
+	flex: 0 0 15px;
+	width: 15px;
+	height: 15px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	background: var(--s5);
+	border: 1px solid var(--b3);
+	color: transparent;
+}
+.check.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* --- cards ---------------------------------------------------------------- */
+
+.card {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 16px;
+	border-radius: 10px;
+	border: 1px solid var(--b1);
+	background: var(--s4);
+}
+.card-title { font-size: var(--fs-title); font-weight: 600; }
+.card-note { margin: 0; font-size: var(--fs-body); line-height: 1.55; color: var(--t3); text-wrap: pretty; }
+
+/* Três padrões que estavam escritos à mão no template, dezesseis vezes, com dois
+ * tamanhos diferentes para o mesmo papel. Uma escala não sobrevive a tamanhos
+ * fixados na marcação: o próximo a editar copia o vizinho, e o vizinho está
+ * errado. */
+
+/* O título de um aviso, dentro de um callout ou de uma faixa */
+.callout-title { font-size: var(--fs-body); font-weight: 600; color: var(--t0); }
+
+/* O texto ao lado de uma caixa de seleção, clicável junto com ela */
+.check-label { font-size: var(--fs-body); color: var(--t3); cursor: pointer; }
+
+/* O nome de um ajuste, acima do controle que o altera */
+.setting-name { font-size: var(--fs-body); color: var(--t1); }
+
+/* Uma entrada da legenda de um gráfico */
+.legend-item { font-size: var(--fs-micro); color: var(--t3); }
+.card-code { font-size: var(--fs-micro); color: var(--t4); font-family: "Geist Mono", ui-monospace, monospace; }
+.card .sep { height: 1px; background: var(--b1); }
+.card.flush { padding: 0; gap: 0; overflow: hidden; }
+.card-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 11px 14px;
+	border-bottom: 1px solid var(--b1);
+}
+/* `margin-top: auto` assenta o rodapé no fundo do card. Numa grade os cards de
+ * uma linha esticam até o mais alto, e sem isto cada botão "Configurar" ficava
+ * na altura em que a descrição do seu card acabava — a fileira em escada. */
+.card-foot {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: auto;
+	padding-top: 12px;
+	border-top: 1px solid var(--b1);
+}
+
+.grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.grid-auto.narrow { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-content: start; }
+.row { display: flex; align-items: center; gap: 12px; }
+.row.top { align-items: flex-start; }
+.row.baseline { align-items: baseline; }
+.col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+/* Callout used for the "malicious verdict" style banner */
+.callout {
+	display: flex;
+	gap: 12px;
+	padding: 14px;
+	border-radius: 10px;
+	border: 1px solid var(--danger-line);
+	background: linear-gradient(180deg, rgba(224, 26, 36, 0.1), rgba(224, 26, 36, 0.03));
+}
+.callout .glyph {
+	flex: 0 0 auto;
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	background: var(--danger-soft2);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--danger);
+}
+.callout.neutral { border-color: var(--b1); background: var(--s4); }
+.callout.neutral .glyph { background: var(--s6); color: var(--t3); }
+
+/* The middle tone: something the analyst has to know about, that is not a
+ * failure. The queue hitting its ceiling is the case this exists for — red
+ * would read as "the mailbox broke", and neutral would let it pass unread. */
+.callout.warn { border-color: rgba(229, 165, 74, 0.35); background: rgba(229, 165, 74, 0.07); }
+.callout.warn .glyph { background: rgba(229, 165, 74, 0.14); color: var(--warn); }
+
+/* --- info tip: o texto explicativo atrás do "i" ----------------------------
+ * A tela mostra o essencial — nome, estado, número — e o porquê fica a um
+ * hover, foco ou toque de distância. O balão é uma camada fixa no <body>
+ * (bluephish.js, show_info_tip) para não ser cortado por painéis que rolam. */
+
+.title-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.title-line > :first-child { min-width: 0; }
+.info { display: inline-flex; flex: 0 0 auto; }
+.info-tip-text { display: none; }
+.info-tip {
+	display: inline-grid;
+	place-items: center;
+	width: 1.25rem;
+	height: 1.25rem;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--t4);
+	cursor: help;
+	transition: color 120ms ease, background-color 120ms ease;
+}
+.info-tip:hover,
+.info-tip[aria-expanded="true"] { color: var(--t0); background: var(--s7); }
+.info-tip:focus-visible { outline: none; box-shadow: var(--anel); border-radius: 50%; }
+.info-tip svg { display: block; }
+
+.info-tip-layer {
+	position: fixed;
+	z-index: 300;
+	max-width: min(22rem, calc(100vw - 16px));
+	padding: 10px 12px;
+	border: 1px solid var(--b3);
+	border-radius: 8px;
+	background: var(--s6);
+	box-shadow: var(--shadow-menu);
+	color: var(--t1);
+	font-size: var(--fs-body);
+	font-weight: 400;
+	line-height: 1.55;
+	text-wrap: pretty;
+	white-space: normal;
+}
+.info-tip-layer strong { color: var(--t0); font-weight: 600; }
+.info-tip-layer code,
+.info-tip-layer .mono { font-family: "Geist Mono", ui-monospace, monospace; font-size: var(--fs-micro); color: var(--t0); }
+
+/* --- bloco de ajuste: uma função, um bloco ---------------------------------
+ * Análise automática tinha três cards soltos e um parágrafo em cada. O bloco
+ * junta o que liga a função (cabeçalho: nome, resumo de uma linha, toggle) e
+ * o que a regula (corpo), e fecha com o próprio Salvar — o que está dentro da
+ * borda é salvo junto, o que está fora não é. */
+
+.setting-block {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--b2);
+	border-radius: 12px;
+	background: var(--s4);
+	overflow: hidden;
+}
+.setting-block + .setting-block { margin-top: 10px; }
+.setting-block-head {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 14px 16px;
+	border-bottom: 1px solid var(--b1);
+	background: var(--s5);
+}
+.setting-block-head .glyph {
+	flex: 0 0 auto;
+	width: 34px;
+	height: 34px;
+	display: grid;
+	place-items: center;
+	border-radius: 9px;
+	background: var(--accent-tint);
+	color: var(--accent-hi);
+}
+.setting-block-title { margin: 0; font-size: var(--fs-title); font-weight: 600; color: var(--t0); }
+.setting-block-sub { font-size: var(--fs-body); color: var(--t3); }
+.setting-block-body { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
+.setting-block-body > .status:empty { display: none; }
+.setting-block-foot {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px;
+	border-top: 1px solid var(--b1);
+}
+.setting-block-foot .btn { flex: 0 0 auto; }
+@media (max-width: 480px) {
+	.setting-block-head { flex-wrap: wrap; }
+	.setting-block-head .glyph { display: none; }
+}
+
+/* --- assuntos predominantes: analisados e ainda na caixa ------------------- */
+
+.subject-group { display: flex; flex-direction: column; gap: 10px; }
+.subject-group-head { display: flex; align-items: baseline; gap: 8px; }
+.live-stamp { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-micro); color: var(--t4); font-variant-numeric: tabular-nums; }
+.live-stamp::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--ok);
+}
+.live-stamp.stale::before { background: var(--warn); }
+.live-stamp:empty { display: none; }
+.field .title-line .info-tip { width: 1rem; height: 1rem; }
+
+/* --- status pills --------------------------------------------------------- */
+
+.pill {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	letter-spacing: 0.04em;
+	border-radius: 4px;
+	padding: 2px 6px;
+	background: var(--s6);
+	border: 1px solid var(--b2);
+	color: var(--t3);
+}
+.pill.ok { color: var(--ok); background: rgba(63, 185, 80, 0.12); border-color: transparent; }
+.pill.warn { color: var(--warn); background: rgba(229, 165, 74, 0.12); border-color: transparent; }
+.pill.bad { color: var(--danger); background: var(--danger-tint); border-color: transparent; }
+.pill.solid { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* Um tipo que o destino sabe bloquear mas ainda não tem para onde mandar: fica
+   visível, porque some-lo esconderia o que falta configurar, e apagado, porque
+   ele não está disponível hoje */
+.pill.muted { color: var(--t4); background: transparent; border-style: dashed; }
+
+.dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--t4); }
+.dot.ok { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.dot.bad { background: var(--danger); }
+
+/* Inline status line under a settings card */
+.status { font-size: var(--fs-micro); line-height: 1.55; color: var(--t4); }
+.status strong { color: var(--t1); font-weight: 500; }
+.status.ok { color: var(--ok); }
+.status.bad { color: var(--danger2); }
+
+/* --- tables --------------------------------------------------------------- */
+
+.tbl { display: flex; flex-direction: column; min-height: 0; }
+
+/* A tabela que ocupa a tela inteira e rola por dentro.
+ *
+ * Sem altura definida aqui, quem rola é o painel inteiro: o compositor e o
+ * filtro sobem junto, e o cabeçalho grudento não gruda em nada — `sticky` se
+ * ancora no `.tbl-scroll`, que só vira scrollport quando tem altura própria.
+ * Era por isso que a régua das colunas sumia no meio da lista. */
+.tbl.fill { height: 100%; }
+.tbl-head,
+.tbl-row {
+	display: grid;
+	align-items: center;
+	gap: 14px;
+	padding: 10px 22px;
+	border-bottom: 1px solid var(--b1);
+}
+.tbl-head {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--s2);
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	color: var(--t4);
+	letter-spacing: 0.06em;
+}
+.tbl-row { border-bottom-color: var(--s5); padding: 11px 22px; }
+.tbl-row:hover { background: var(--s4); }
+.tbl-empty { padding: 28px 22px; text-align: center; font-size: var(--fs-body); color: var(--t4); }
+
+/* O cabeçalho e as linhas rolam juntos, no mesmo elemento.
+ *
+ * Eram dois: o cabeçalho fora, as linhas num contêiner com `overflow-y: auto`.
+ * Duas consequências, e as duas apareciam como "a tabela está torta". A barra de
+ * rolagem estreitava só as linhas, então cada faixa ficava alguns pixels à
+ * esquerda da faixa do cabeçalho. E o `position: sticky` do cabeçalho não tinha
+ * o que grudar, porque quem rolava era o vizinho — ele sumia ao rolar.
+ *
+ * `scrollbar-gutter: stable` reserva a calha antes de a lista precisar dela: sem
+ * isso, a tabela dá um salto lateral no momento em que a primeira linha
+ * ultrapassa a altura, que é quando a régua deixa de bater. */
+.tbl-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	overflow-x: auto;
+	scrollbar-gutter: stable;
+}
+
+/* Uma coluna estreita não vira coluna espremida: abaixo desta largura a tabela
+ * rola de lado, como a de IOCs do painel de phishing já faz. Empilhar as células
+ * perderia o cabeçalho que diz o que cada valor é. */
+.tbl-scroll > .cols-wl,
+.tbl-scroll > #whitelistRows > .cols-wl { min-width: 52rem; }
+
+/* O vazio nasceu para tabela, onde ele ocupa a largura toda por natureza. Dentro
+   de uma grade de cards ele vira mais uma célula: uma coluna de 300px encostada
+   à esquerda, que se lê como um card quebrado em vez da explicação que é. Vale
+   para todas as grades — analisadores, destinos e conectores usam o mesmo vazio. */
+.grid-cards > .tbl-empty { grid-column: 1 / -1; }
+
+/* Mesma correção da whitelist, pela mesma razão: a faixa de AÇÕES era `auto`, e
+ * os botões de uma conta bloqueada não são os mesmos de uma conta ativa — cada
+ * linha media a sua própria largura, contra um cabeçalho que media a dele. */
+.cols-users { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 13rem; }
+
+/* Priorização: o ranking de fatores do score. A primeira coluna é a nota, e ela
+   vem antes do nome de propósito — é por ela que a tabela está ordenada, e uma
+   coluna de ordenação que não é a primeira obriga a varrer a linha inteira para
+   descobrir por que aquela linha está ali. */
+.cols-prio {
+	grid-template-columns: 58px minmax(140px, 1.1fr) minmax(110px, 0.9fr) minmax(180px, 2fr) 132px 118px;
+}
+.cols-prio .prio-score {
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-body);
+	color: var(--t1);
+	font-variant-numeric: tabular-nums;
+}
+.cols-prio .prio-score.off { color: var(--t5); }
+/* O peso é editável na própria linha: abrir um modal para mover um número entre
+   0 e 1 quebraria a comparação, que é a única razão de a tabela existir. */
+.prio-weight { display: flex; align-items: center; gap: 8px; }
+.prio-weight input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--accent); height: 4px; }
+.prio-weight .prio-weight-value {
+	flex: 0 0 auto;
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	color: var(--t3);
+	font-variant-numeric: tabular-nums;
+	min-width: 2.4rem;
+	text-align: right;
+}
+/* Uma linha alterada e ainda não gravada precisa se distinguir de uma gravada, ou
+   a analista sai da tela achando que salvou. */
+.tbl-row.dirty { background: var(--accent-tint); }
+
+.cols-ioc {
+	grid-template-columns: 56px minmax(140px, 1.6fr) 48px 54px minmax(160px, 1.4fr);
+	gap: 10px;
+	padding-left: 0;
+	padding-right: 0;
+}
+
+/* --- painel Phishing confirmado --------------------------------------------
+   Uma coluna só, na largura do pane, e o corpo inteiro rola junto: com três
+   colunas de painel acima, uma lista de casos rolando sozinha embaixo ficaria
+   com meia dúzia de pixels de altura.
+
+   As colunas seguem a largura do próprio painel, não a da janela — a barra de
+   navegação aberta ou recolhida muda o espaço disponível sem mudar o viewport. */
+.phish-body {
+	container: phish / inline-size;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	padding: 16px var(--gutter-pane) 0 var(--gutter-pane);
+}
+.phish-body > * { flex-shrink: 0; }
+.phish-lead { display: flex; flex-direction: column; gap: 10px; }
+
+/* Blocos de período: indicador e seletor na mesma peça. Seis numa linha quando
+   cabem; quebram em três e depois em duas sem cortar número nenhum. */
+.pane[data-view="tactic"] { container: phishpane / inline-size; }
+.windows {
+	display: grid;
+	grid-template-columns: repeat(6, minmax(0, 1fr));
+	gap: 8px;
+	margin-bottom: 12px;
+}
+/* Passos fechados, não auto-fit: com auto-fit, a largura intermediária deixava
+   cinco blocos numa linha e o de 90 dias sozinho na seguinte, lido como resto */
+@container phishpane (max-width: 50rem) { .windows { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container phishpane (max-width: 26rem) { .windows { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.window-tile {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+	min-width: 0;
+	padding: 9px 12px 10px;
+	border: 1px solid var(--b2);
+	border-radius: 8px;
+	background: var(--s4);
+	color: var(--t1);
+	font-family: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: background-color 0.15s ease-out, border-color 0.15s ease-out;
+}
+/* O clique cai sempre no botão, qualquer que seja o texto sob o cursor */
+.window-tile > * { pointer-events: none; }
+.window-tile:hover { background: var(--s7); border-color: var(--b4); }
+.window-tile:focus-visible { outline: none; box-shadow: var(--anel); }
+.window-tile.active { border-color: var(--accent); background: var(--accent-tint); }
+.window-label { font-size: var(--fs-micro); color: var(--t3); letter-spacing: 0.02em; }
+.window-tile.active .window-label { color: var(--accent-hi); }
+.window-value { font-size: var(--fs-display); font-weight: 600; line-height: 1.05; letter-spacing: -0.02em; color: var(--t0); font-variant-numeric: tabular-nums; }
+.window-delta { font-size: var(--fs-micro); color: var(--t4); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.window-delta.up { color: var(--danger2); }
+.window-delta.down { color: var(--ok); }
+.window-note { margin: -4px 0 12px; font-size: var(--fs-micro); line-height: 1.5; color: var(--t3); }
+@media (prefers-reduced-motion: reduce) { .window-tile { transition: none; } }
+.phish-campaign { align-items: center; flex-wrap: wrap; }
+.phish-campaign .mono { font-weight: 500; word-break: break-all; }
+
+.phish-dash {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 12px;
+	align-items: start;
+}
+.phish-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+@container phish (min-width: 46rem) {
+	.phish-dash { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); }
+	.phish-charts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}
+@container phish (min-width: 78rem) {
+	.phish-dash { grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) minmax(19rem, 0.95fr); }
+	.phish-charts { grid-column: auto; display: flex; align-items: stretch; }
+}
+/* A tabela de IOCs tem colunas mínimas; num card estreito ela rola dentro dele
+   em vez de cortar a coluna REMEDIAÇÃO */
+.phish-dash .tbl { overflow-x: auto; }
+
+/* A lista de casos sangra até as bordas do pane, como toda lista do app, e
+   alinha o texto das linhas com o dos cards acima */
+.phish-cases {
+	--gutter-list: var(--gutter-pane);
+	margin-inline: calc(-1 * var(--gutter-pane));
+	border-top: 1px solid var(--b1);
+}
+.phish-cases-head { padding: 16px var(--gutter-pane) 6px var(--gutter-pane); }
+.phish-cases .rows { flex: none; overflow: visible; padding-bottom: 24px; }
+
+/* Barra rotulada com o valor à direita, usada pelo ranking de remetentes. Difere
+   do .meter por carregar a legenda dentro da própria linha. Nome próprio, e não
+   .rank-row: aquele é a grade de três colunas da Visão Executiva, e declarado
+   mais abaixo ele sobrescrevia este e embaralhava o ranking. */
+.rank-bar { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rank-bar .rank-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+
+/* --- gráfico de pizza -------------------------------------------------------- */
+.donut { position: relative; flex: 0 0 auto; width: var(--donut, 5.5rem); max-width: 100%; aspect-ratio: 1; }
+.donut.lg { --donut: 8.75rem; }
+.donut svg { display: block; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+.donut-track, .donut-seg { fill: none; stroke-width: 5.2; }
+.donut-track { stroke: var(--track); }
+.donut-seg { stroke: var(--accent); transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
+.donut svg:hover .donut-seg:not(:hover) { opacity: 0.4; }
+.donut-seg.bad { stroke: var(--danger); }
+.donut-seg.warn { stroke: var(--warn); }
+.donut-seg.ok { stroke: var(--ok); }
+.donut-seg.muted { stroke: var(--b4); }
+.donut-center {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	pointer-events: none;
+}
+.donut-value { font-size: var(--fs-body); font-weight: 600; line-height: 1; color: var(--t0); font-variant-numeric: tabular-nums; }
+.donut.lg .donut-value { font-size: var(--fs-display); letter-spacing: -0.02em; }
+.donut-unit { display: none; }
+.donut.lg .donut-unit { display: block; font-size: var(--fs-micro); color: var(--t4); font-family: "Geist Mono", ui-monospace, monospace; }
+
+.auth-donuts { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: 16px 10px; }
+.auth-donut { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; text-align: center; }
+.auth-donut .donut { margin-bottom: 6px; }
+.auth-donut-name { font-size: var(--fs-body); font-weight: 600; color: var(--t1); }
+.auth-donut.failing .auth-donut-name { color: var(--danger2); }
+.auth-donut-detail { font-size: var(--fs-micro); color: var(--t3); font-variant-numeric: tabular-nums; }
+
+.tier-chart { display: flex; align-items: center; gap: 12px 22px; flex-wrap: wrap; }
+.tier-note { display: block; }
+
+.chart-legend { display: flex; flex-direction: column; gap: 9px; flex: 1 1 9rem; min-width: 0; }
+.chart-legend.inline { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px 16px; padding-top: 14px; border-top: 1px solid var(--b1); }
+.legend-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-body); color: var(--t2); }
+.chart-legend.inline .legend-row { font-size: var(--fs-micro); color: var(--t3); }
+.legend-name { flex: 1 1 auto; min-width: 0; }
+.chart-legend.inline .legend-name { flex: none; }
+.legend-count { font-family: "Geist Mono", ui-monospace, monospace; color: var(--t1); font-variant-numeric: tabular-nums; }
+.legend-pct { width: 3.2em; text-align: right; font-family: "Geist Mono", ui-monospace, monospace; font-size: var(--fs-micro); color: var(--t4); font-variant-numeric: tabular-nums; }
+
+.swatch.bad { background: var(--danger); }
+.swatch.warn { background: var(--warn); }
+.swatch.ok { background: var(--ok); }
+.swatch.muted { background: var(--b4); }
+
+/* Fatias e linhas de legenda que abrem os casos daquela fatia */
+.donut-seg.pickable { cursor: pointer; }
+.donut-seg.pickable:focus { outline: none; }
+.donut-seg.pickable:focus-visible { stroke-width: 7; }
+.donut svg:focus-within .donut-seg:not(:focus) { opacity: 0.4; }
+button.legend-row {
+	width: calc(100% + 12px);
+	margin: -4px -6px;
+	padding: 4px 6px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	font: inherit;
+	font-size: var(--fs-body);
+	text-align: left;
+	cursor: pointer;
+}
+button.legend-row:hover { background: var(--s7); }
+button.legend-row:focus-visible { outline: none; box-shadow: var(--anel); }
+
+@media (prefers-reduced-motion: reduce) { .donut-seg { transition: none; } }
+/* --- whitelist: compositor de regra ---------------------------------------
+   O problema que este bloco resolve é de agrupamento, não de enfeite: Simular e
+   Incluir agem nos campos, mas moravam na linha do filtro, junto de uma ação que
+   é da lista (Remover marcadas). Proximidade mentindo sobre relação.
+
+   Agora criar uma regra é uma região delimitada, e achar/gerenciar as que
+   existem é outra. O compositor respira (é decisão de baixa frequência e alto
+   risco); a lista abaixo continua densa, porque ali se varre centenas de linhas.
+   O contraste entre os dois intervalos é o ritmo da tela. */
+
+.wl-composer {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin: 12px 22px 18px 22px;
+	padding: 14px 16px;
+	border: 1px solid var(--b1);
+	border-radius: 10px;
+	background: var(--s4);
+}
+.wl-composer-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+/* As ações ficam na borda de baixo do próprio bloco: o olho termina de
+   preencher e encontra o que fazer com o que preencheu, sem sair do grupo. */
+.wl-composer-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	padding-top: 12px;
+	border-top: 1px solid var(--b1);
+}
+.wl-composer-hint {
+	flex: 1 1 240px;
+	min-width: 0;
+	font-size: var(--fs-micro);
+	line-height: 1.5;
+	/* --t3, não --t4: sobre a superfície do compositor o cinza mais claro dá
+	   3,8:1, e esta é a frase que explica por que o Simular está desligado — a
+	   única coisa na tela que não pode ser difícil de ler */
+	color: var(--t3);
+}
+/* Numa tela estreita a decisão muda de forma: a dica passa a ocupar a linha
+   inteira e as ações viram alvos de toque de verdade. O sistema global de botões
+   fica onde está — 30px serve para ponteiro, e mexer nele reverberaria na
+   aplicação inteira por causa de um caso que é deste bloco. */
+@media (max-width: 560px) {
+	.wl-composer { margin: 10px 14px 14px 14px; padding: 12px 13px; }
+	.wl-composer-hint { flex: 1 1 100%; }
+	.wl-composer-actions > .btn { flex: 1 1 auto; min-height: 2.5rem; }
+}
+
+/* Barra da lista: filtro à esquerda, ação em lote à direita, encostada no
+   cabeçalho da tabela que ela comanda. */
+.wl-listbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	padding: 0 22px 12px 22px;
+}
+
+/* Whitelist v2: valor+motivo, prazo, uso, autor, ações. O prazo e o contador
+   de supressões ficam na linha porque são o que faz alguém rever a regra —
+   escondidos num detalhe, ninguém abre. */
+/* Nenhuma faixa mede o próprio conteúdo.
+ *
+ * Eram `auto` em PRAZO e em AÇÕES. Uma faixa `auto` é resolvida pelo conteúdo do
+ * grid em que ela está — e aqui cada linha é o seu próprio grid, separado do
+ * cabeçalho. Como os botões variam por regra (Religar e "O que escondeu" só
+ * aparecem em algumas, Renovar só nas que expiram), cada linha chegava a uma
+ * largura diferente da vizinha e do cabeçalho: as colunas nasciam tortas e o
+ * desalinho crescia com o tamanho do nome da regra.
+ *
+ * Com `fr` de mínimo zero e larguras fixas nas duas pontas, a mesma régua sai do
+ * mesmo cálculo em todas as linhas. O que sobra é cortado com reticências pelas
+ * células, que já são .truncate. */
+.cols-wl {
+	grid-template-columns: minmax(0, 2.4fr) 9rem minmax(0, 1.2fr) minmax(0, 1fr) 15rem;
+}
+
+/* --- list rows (email queue) ---------------------------------------------- */
+
+.rows { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 0 12px 0; }
+
+/* The row's own inset plus its padding equals the list gutter, so the sender in
+ * a row starts on the same vertical line as the pane title above it. It was 8px
+ * of margin plus 14px of padding against a 14px head — every row hanging 8px to
+ * the right of the title, on every list in the application */
+.mail-row {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	margin: 2px var(--row-inset);
+	padding: 0.6875rem calc(var(--gutter-list) - var(--row-inset));
+	border-radius: 10px;
+	cursor: pointer;
+	transition: background 120ms ease;
+	background: transparent;
+}
+.mail-row:hover { background: var(--s4); }
+.mail-row.checked {
+	background: var(--accent-soft);
+	box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.mail-row.selected {
+	background: var(--s6);
+	box-shadow: inset 0 0 0 1px var(--b3);
+}
+.mail-row .rail-mark {
+	position: absolute;
+	left: 0;
+	top: 9px;
+	bottom: 9px;
+	width: 2.5px;
+	border-radius: 2px;
+	background: transparent;
+}
+.mail-row.selected .rail-mark { background: var(--accent); }
+
+/* A row whose body has not been downloaded yet. The sender and the subject are
+ * as solid as any other row's - they came from the envelope - so only the meta
+ * line, the one that says the content is loaded on demand, is dimmed. Fading
+ * the whole row would read as "less important", which is exactly what a report
+ * waiting at the back of a queue is not. */
+.mail-row.deferred .mail-meta { opacity: 0.72; font-style: italic; }
+
+/* The pager sits under the rows and does not scroll with them: "which page am I
+ * on" is a question asked at the bottom of a page, and the answer scrolling out
+ * of view with the rows it describes is no answer. The arrows are chips so they
+ * read as the same family as the order filter above the list. */
+.pager {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 8px var(--gutter-list) 9px var(--gutter-list);
+	border-top: 1px solid var(--b1);
+}
+.pager .chip { min-width: 1.75rem; }
+.pager .chip:disabled { opacity: 0.4; cursor: default; }
+.pager .chip:disabled:hover { background: transparent; color: var(--t3); }
+.pager-label { font-size: var(--fs-micro); color: var(--t2); text-align: center; }
+.pager-loader { font-size: var(--fs-micro); color: var(--t4); text-align: center; }
+.pager-loader:empty { display: none; }
+
+.mail-from { font-size: var(--fs-body); font-weight: 600; letter-spacing: -0.01em; }
+.mail-time { flex: 0 0 auto; font-size: var(--fs-micro); color: var(--t4); font-family: "Geist Mono", ui-monospace, monospace; }
+.mail-subject { font-size: var(--fs-body); color: var(--t2); width: 100%; }
+.mail-meta { font-size: var(--fs-micro); color: var(--t4); font-family: "Geist Mono", ui-monospace, monospace; width: 100%; }
+
+.search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 2rem;
+	padding: 0 10px;
+	border-radius: 7px;
+	background: var(--s5);
+	border: 1px solid var(--b2);
+}
+.search input {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	background: transparent;
+	color: var(--t0);
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-body);
+	outline: none;
+}
+.search svg { flex: 0 0 auto; color: var(--t4); }
+.search .clear {
+	flex: 0 0 auto;
+	height: 20px;
+	padding: 0 7px;
+	border: 1px solid var(--b3);
+	border-radius: 5px;
+	background: var(--s3);
+	color: var(--t3);
+	font-family: inherit;
+	font-size: var(--fs-micro);
+	cursor: pointer;
+}
+.search .clear:hover { color: var(--t0); border-color: var(--b4); }
+
+/* Bulk action bar that appears once rows are checked */
+.bulkbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--b1);
+	background: var(--accent-soft);
+}
+
+/* --- key/value header block used by the email preview --------------------- */
+
+/* A header block holds two kinds of field and used to give them one column.
+ *
+ * An address and a subject are long and are what a triage decision turns on; a
+ * timestamp, a type and a UID are short and fixed. On a symmetric grid the
+ * sender was truncated mid-domain to afford "UID 4127" the same 345px — and
+ * whether a domain ends in bradesco.com.br or bradesco.com.br.seguro.tk is the
+ * whole question. So the long fields take the row and wrap, and the short ones
+ * share one. */
+.kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 10px 18px; }
+.kv { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kv.wide { grid-column: 1 / -1; }
+.kv-key { font-size: var(--fs-micro); color: var(--t5); font-family: "Geist Mono", ui-monospace, monospace; letter-spacing: 0.06em; }
+.kv-val { font-family: "Geist Mono", ui-monospace, monospace; font-size: var(--fs-body); color: var(--t1); }
+.kv.wide .kv-val { word-break: break-word; overflow-wrap: anywhere; }
+
+.body-text {
+	margin: 0;
+	font-size: var(--fs-body);
+	line-height: 1.65;
+	color: var(--t1);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+/* Prose stops at a readable measure. Across a 1400px pane a line of body text
+ * runs about 95 characters, and the eye loses the start of the next one */
+.body-text.measure { max-width: var(--measure); }
+
+/* A statement about the data (absent, loading, failed) rather than the data
+ * itself — kept visually distinct so the two are never confused */
+.absent {
+	color: var(--t4);
+	font-style: italic;
+	white-space: normal;
+}
+
+/* --- log console ---------------------------------------------------------- */
+
+.console {
+	border: 1px solid var(--b2);
+	border-radius: 9px;
+	background: var(--s0);
+	height: 240px;
+	overflow-y: auto;
+	padding: 12px 14px;
+}
+.console p {
+	margin: 0;
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	line-height: 1.7;
+	color: var(--t2);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.console .lvl-info { color: var(--t3); }
+.console .lvl-warning { color: var(--warn); }
+.console .lvl-error { color: var(--danger); }
+
+.progress {
+	height: 6px;
+	border-radius: 3px;
+	background: var(--track);
+	overflow: hidden;
+}
+.progress > span {
+	display: block;
+	height: 100%;
+	width: 40%;
+	border-radius: 3px;
+	background: var(--accent);
+	animation: rp-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes rp-indeterminate {
+	0% { margin-left: -40%; }
+	100% { margin-left: 100%; }
+}
+
+/* --- charts --------------------------------------------------------------- */
+
+/* Stacked daily volume. Each column is a flex child whose two segments are
+ * sized as a percentage of the tallest day, so the chart needs no library and
+ * no fixed pixel maths.
+ *
+ * The column carries its own total above the bars and its date below them, so
+ * the shape and the numbers are readable without hovering — the tooltip only
+ * adds the threat/legit split. Dimming the other columns on hover is done with
+ * `:not(:hover)` rather than a JS hover index: the handoff tracked it in state
+ * because it had no stylesheet to put it in. */
+.chart {
+	display: flex;
+	align-items: stretch;
+	gap: 6px;
+	height: 142px;
+}
+.chart-col {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	cursor: default;
+}
+.chart-num {
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	line-height: 1;
+	text-align: center;
+	color: var(--t4);
+	transition: color 120ms ease;
+}
+.chart-col:hover .chart-num { color: var(--t1); }
+.chart-stack {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+	gap: 2px;
+}
+.chart-seg { min-height: 0; transition: opacity 120ms ease; }
+.chart-seg.threat { background: var(--accent); border-radius: 3px 3px 0 0; }
+.chart-seg.safe { background: var(--b3); border-radius: 0 0 3px 3px; }
+.chart:hover .chart-col:not(:hover) .chart-seg { opacity: 0.55; }
+.chart-tick {
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	line-height: 1;
+	text-align: center;
+	color: var(--t5);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.chart-tip {
+	position: absolute;
+	bottom: calc(100% + 6px);
+	left: 50%;
+	transform: translateX(-50%) translateY(3px);
+	z-index: 5;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 7px 9px;
+	border-radius: 7px;
+	border: 1px solid var(--b2);
+	background: var(--s4);
+	box-shadow: var(--shadow-menu);
+	white-space: nowrap;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 120ms ease, transform 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.chart-col:hover .chart-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
+.chart-tip-day {
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	letter-spacing: 0.04em;
+	color: var(--t4);
+}
+.chart-tip span:not(.chart-tip-day) { font-size: var(--fs-micro); color: var(--t1); }
+.chart-tip span.muted { color: var(--t3); }
+.chart-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 142px;
+	font-size: var(--fs-body);
+	color: var(--t4);
+}
+
+.swatch { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 8px; }
+.swatch.threat { background: var(--accent); }
+.swatch.safe { background: var(--b3); }
+
+/* Labelled progress bar used by the verdict distribution, the subject ranking
+ * and the IOC ranking */
+.meter { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.meter > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.meter > span.warn { background: var(--warn); }
+.meter > span.ok { background: var(--ok); }
+.meter > span.muted { background: var(--b4); }
+
+/* KPI tile */
+.kpi {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	padding: 13px 14px;
+	border-radius: 10px;
+	border: 1px solid var(--b1);
+	background: var(--s4);
+}
+.kpi-label { font-size: var(--fs-micro); color: var(--t4); letter-spacing: 0.04em; }
+.kpi-value { font-size: var(--fs-display); font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+.kpi-value.bad { color: var(--danger); }
+.kpi-value.warn { color: var(--warn); }
+.kpi-value.ok { color: var(--ok); }
+.kpi-note { font-size: var(--fs-micro); color: var(--t4); }
+
+/* Horizontal stat bar: label, track, percentage. Used by the tactic and
+ * department breakdowns, which read as a comparison rather than a ranking —
+ * the label column is fixed so the bars share one baseline. */
+.stat-row { display: flex; align-items: center; gap: 10px; }
+.stat-row .stat-label {
+	flex: 0 0 118px;
+	width: 118px;
+	font-size: var(--fs-body);
+	color: var(--t2);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.stat-row .meter { flex: 1; height: 5px; }
+.stat-row .stat-pct {
+	flex: 0 0 34px;
+	width: 34px;
+	text-align: right;
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	color: var(--t3);
+}
+
+/* Dot + title + body, for a finding the LLM wrote rather than a number */
+.insight {
+	display: flex;
+	gap: 10px;
+	padding: 11px;
+	border-radius: 8px;
+	border: 1px solid var(--b1);
+	background: var(--s3);
+}
+.insight .dot { margin-top: 5px; }
+.insight-title { font-size: var(--fs-body); font-weight: 500; color: var(--t1); }
+.insight-body { font-size: var(--fs-body); line-height: 1.5; color: var(--t3); text-wrap: pretty; }
+
+/* Compact metric tile for the case detail header strip. Smaller than .kpi:
+ * these sit four-across inside a pane, not across the full dashboard. */
+.metric {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 11px 12px;
+	border-radius: 9px;
+	border: 1px solid var(--b1);
+	background: var(--s4);
+}
+.metric-label {
+	font-size: var(--fs-micro);
+	color: var(--t4);
+	letter-spacing: 0.04em;
+	font-family: "Geist Mono", ui-monospace, monospace;
+}
+.metric-value {
+	font-size: var(--fs-title);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	font-family: "Geist Mono", ui-monospace, monospace;
+	color: var(--t0);
+}
+.metric-value.bad { color: var(--danger); }
+.metric-value.warn { color: var(--warn); }
+.metric-value.ok { color: var(--ok); }
+.metric-value.absent { color: var(--t4); font-weight: 400; }
+
+/* --- case reasoning --------------------------------------------------------
+ *
+ * Why the analysis reached its verdict, drawn as the order it was decided in.
+ * A rail and a node per step, not a stack of cards: the steps are one argument,
+ * and the thing the analyst scans for is where the verdict changed — so only
+ * those nodes fill, in the verdict's own tone. */
+
+.callout.ok { border-color: rgba(63, 185, 80, 0.32); background: rgba(63, 185, 80, 0.06); }
+.callout.ok .glyph { background: rgba(63, 185, 80, 0.14); color: var(--ok); }
+
+.trail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.trail-step {
+	position: relative;
+	display: grid;
+	grid-template-columns: 0.875rem minmax(0, 1fr) auto;
+	column-gap: 12px;
+	padding-bottom: 14px;
+}
+.trail-step:last-child { padding-bottom: 0; }
+.trail-step::before {
+	content: "";
+	position: absolute;
+	left: calc(0.4375rem - 0.5px);
+	top: 1rem;
+	bottom: 0.125rem;
+	width: 1px;
+	background: var(--b2);
+}
+.trail-step:last-child::before { display: none; }
+.trail-node {
+	width: 9px;
+	height: 9px;
+	margin: 0.3rem auto 0;
+	border-radius: 50%;
+	border: 1.5px solid var(--b4);
+	background: var(--s4);
+	color: var(--t4);
+}
+.trail-node.ok { color: var(--ok); border-color: var(--ok); }
+.trail-node.warn { color: var(--warn); border-color: var(--warn); }
+.trail-node.bad { color: var(--danger); border-color: var(--danger); }
+.trail-step.changed .trail-node { background: currentColor; box-shadow: 0 0 0 3px var(--s4); }
+.trail-stage { font-family: "Geist Mono", ui-monospace, monospace; font-size: var(--fs-micro); letter-spacing: 0.06em; color: var(--t4); }
+.trail-step.changed .trail-stage { color: var(--t2); }
+.trail-reason { font-size: var(--fs-body); line-height: 1.55; color: var(--t3); text-wrap: pretty; overflow-wrap: anywhere; }
+.trail-step.changed .trail-reason { color: var(--t1); }
+.trail-step > .pill { align-self: start; margin-top: 1px; }
+
+.evidence { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-width: var(--measure); }
+.evidence li {
+	position: relative;
+	padding-left: 16px;
+	font-size: var(--fs-body);
+	line-height: 1.55;
+	color: var(--t1);
+	overflow-wrap: anywhere;
+}
+.evidence li::before {
+	content: "";
+	position: absolute;
+	left: 3px;
+	top: 0.72em;
+	width: 6px;
+	height: 1px;
+	background: var(--t4);
+}
+
+.agent { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--b1); background: var(--s3); }
+.score-factor { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; font-size: var(--fs-body); color: var(--t3); }
+.score-factor strong { color: var(--t1); font-weight: 500; }
+
+/* One observable of the case. The value may be a 300-character URL: it wraps to
+ * two lines instead of truncating to one, because the part that gives a phishing
+ * link away is usually past the domain */
+.obs-row {
+	display: grid;
+	grid-template-columns: 5.25rem minmax(0, 1fr) auto;
+	align-items: start;
+	gap: 5px 12px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--s6);
+}
+.obs-row:last-child { border-bottom: none; }
+.obs-row > .pill { margin-top: 1px; justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.obs-value {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	font-size: var(--fs-body);
+	line-height: 1.5;
+	color: var(--t1);
+	word-break: break-all;
+}
+.obs-flags { grid-column: 2 / 4; font-size: var(--fs-body); line-height: 1.5; color: var(--t4); overflow-wrap: anywhere; }
+.obs-flags strong { color: var(--t1); font-weight: 500; }
+.obs-flags .bad { color: var(--danger2); }
+.obs-flags .warn { color: var(--warn); }
+.obs-row.revealed { animation: obs-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes obs-in { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .obs-row.revealed { animation: none; } }
+
+.obs-more {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	width: 100%;
+	min-height: 2.375rem;
+	border: 0;
+	border-top: 1px solid var(--b1);
+	background: transparent;
+	color: var(--accent-hi);
+	font: inherit;
+	font-size: var(--fs-body);
+	cursor: pointer;
+	transition: background 120ms ease;
+}
+.obs-more:hover { background: var(--s5); }
+.obs-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.obs-more svg { transition: transform 180ms ease; }
+.obs-more.open svg { transform: rotate(180deg); }
+
+.reclass-quote {
+	margin: 0;
+	padding-left: 11px;
+	border-left: 1px solid rgba(63, 185, 80, 0.45);
+	font-size: var(--fs-body);
+	line-height: 1.6;
+	color: var(--t1);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-width: var(--measure);
+}
+
+/* SPF / DKIM / DMARC result. Reuses the verdict palette because that is
+ * exactly what it is: a pass/fail an analyst scans for. */
+.auth-pill {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	letter-spacing: 0.03em;
+	border-radius: 4px;
+	padding: 2px 6px;
+	color: var(--t3);
+	background: var(--s6);
+	border: 1px solid var(--b2);
+}
+.auth-pill.pass { color: var(--ok); background: rgba(63, 185, 80, 0.12); border-color: rgba(63, 185, 80, 0.25); }
+.auth-pill.fail { color: var(--danger); background: var(--danger-tint); border-color: var(--danger-line); }
+.auth-pill.warn { color: var(--warn); background: rgba(229, 165, 74, 0.12); border-color: rgba(229, 165, 74, 0.25); }
+/* --- "Como entregue" -------------------------------------------------------
+ *
+ * The frame below holds markup somebody hostile wrote. Everything in this block
+ * is about making that unmistakable without dressing it as an alarm: it is the
+ * normal state of every email on this screen, and a red banner on all of them
+ * would be tuned out by the end of the first shift.
+ */
+
+/* What was switched off so this view could exist. Quiet, factual, and always
+ * present — an analyst reading a layout needs to know which parts of it were
+ * withheld, and "no warning" must not be able to mean "nothing was blocked" */
+.inert-strip {
+	display: flex;
+	align-items: flex-start;
+	gap: 9px;
+	padding: 9px 11px;
+	border-radius: 8px;
+	border: 1px solid var(--b2);
+	background: var(--s5);
+	color: var(--t3);
+	font-size: var(--fs-body);
+	line-height: 1.5;
+}
+.inert-strip svg { flex: 0 0 auto; margin-top: 1px; color: var(--t4); }
+
+.frame-shell {
+	display: flex;
+	flex-direction: column;
+	border-radius: 9px;
+	border: 1px solid var(--b2);
+	overflow: hidden;
+	background: var(--s5);
+}
+.frame-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 7px 9px 7px 11px;
+	border-bottom: 1px solid var(--b2);
+	font-size: var(--fs-micro);
+	color: var(--t4);
+	letter-spacing: 0.04em;
+}
+/* Fixed height with its own scrollbar, and a control to take the pane. The
+ * document is sandboxed without same-origin, so nothing out here can measure it
+ * — and handing an attacker's markup this page's origin to save a click is not
+ * a trade worth making */
+.frame-shell iframe {
+	display: block;
+	width: 100%;
+	height: 26rem;
+	border: 0;
+	background: #fff;
+}
+.frame-shell.expanded iframe { height: 44rem; }
+
+/* One attachment: what it says it is, what it actually is, and the hash that
+ * goes into the next tool. Never the file */
+.att-row {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 10px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--b1);
+	background: var(--s5);
+}
+.att-name { font-size: var(--fs-body); font-weight: 600; color: var(--t1); }
+.att-size { flex: 0 0 auto; font-size: var(--fs-micro); color: var(--t4); }
+.att-type { font-size: var(--fs-micro); color: var(--t4); }
+/* A .pdf that is really a DOS executable is not a detail, it is the finding */
+.att-type.mismatch { color: var(--danger2); }
+.att-type.mismatch .att-declared { color: var(--danger2); }
+.att-hash { font-size: var(--fs-micro); color: var(--t3); }
+
+.auth-strip { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.auth-strip .pair { display: flex; align-items: center; gap: 7px; }
+.auth-strip .pair > span:first-child {
+	font-size: var(--fs-micro);
+	color: var(--t4);
+	font-family: "Geist Mono", ui-monospace, monospace;
+}
+
+/* Observable row: type, value, which analyzer spoke, its verdict */
+.obs-row {
+	display: grid;
+	grid-template-columns: 78px minmax(120px, 1fr) minmax(0, 130px) 76px;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--s6);
+}
+.obs-row:last-child { border-bottom: none; }
+.obs-row .pill { justify-self: start; }
+.obs-row .obs-source { font-size: var(--fs-micro); color: var(--t4); }
+
+/* Says out loud that a panel has nothing to show, and why. Never a zero, never
+ * a placeholder number — an empty state that looks like data is a lie in a
+ * tool whose whole job is telling the analyst what is real. */
+/* --t3, not the --t4/--t5 the handoff uses for chrome: this is a sentence the
+ * analyst has to actually read to know why a panel is blank, so it has to clear
+ * 4.5:1 against --s4. The dim tertiary tokens only reach ~3:1 and are reserved
+ * for labels and ticks that repeat information already on screen. */
+.empty-note {
+	font-size: var(--fs-body);
+	line-height: 1.55;
+	color: var(--t3);
+	text-wrap: pretty;
+}
+
+/* Marks a control whose backing endpoint does not exist yet. Visible, legible,
+ * and obviously inert — better than hiding the affordance and better than
+ * wiring it to nothing. */
+.pending {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+/* .btn:disabled also dims; without this the two stack and the label stops
+ * being readable, which defeats the point of showing the control at all. */
+.btn.pending:disabled { opacity: 0.6; }
+.pending-tag {
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	letter-spacing: 0.04em;
+	border-radius: 4px;
+	padding: 1.5px 5px;
+	color: var(--t4);
+	border: 1px solid var(--b2);
+	background: var(--s6);
+}
+
+/* Ranked row: value on the left, count on the right */
+.rank-row {
+	display: grid;
+	grid-template-columns: 1fr 54px 74px;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--s6);
+}
+.rank-row:last-child { border-bottom: none; }
+
+/* --- chat ----------------------------------------------------------------- */
+
+/* A conversa e o compositor dividem uma coluna só, centrada no pane. Antes a
+ * thread tinha largura máxima sem margem automática — encostava à esquerda —
+ * enquanto o compositor ocupava a largura inteira: as duas bordas não batiam. */
+.chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px; --chat-column: 760px; }
+.chat-thread { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: var(--chat-column); margin-inline: auto; }
+.chat-row { display: flex; }
+.chat-row.user { justify-content: flex-end; }
+.bubble {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-width: 88%;
+	padding: 11px 14px;
+	border-radius: 11px;
+	border: 1px solid var(--b1);
+	background: var(--s4);
+}
+.chat-row.user .bubble { background: var(--accent); border-color: var(--accent); }
+.chat-row.user .bubble .bubble-text { color: #fff; }
+.chat-row.info .bubble { background: var(--s3); border-style: dashed; }
+/* Prompt injection warning: the case tried to steer the model, and the analyst
+   is about to read its answer. --warn is defined in both themes */
+.chat-row.warn .bubble { background: var(--s3); border-color: var(--warn); }
+.chat-row.warn .bubble-role { color: var(--warn); }
+.bubble-role {
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	letter-spacing: 0.06em;
+	color: var(--t4);
+}
+.chat-row.user .bubble-role { color: rgba(255, 255, 255, 0.75); }
+.bubble-text {
+	margin: 0;
+	font-size: var(--fs-body);
+	line-height: 1.6;
+	color: var(--t1);
+	white-space: pre-wrap;
+	word-break: break-word;
+	text-wrap: pretty;
+}
+.composer {
+	border-top: 1px solid var(--b1);
+	padding: 12px 20px 16px 20px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 9px;
+}
+.composer > * { width: 100%; max-width: 760px; }
+.composer-box {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 9px 10px;
+	border-radius: 9px;
+	border: 1px solid var(--b2);
+	background: var(--s5);
+}
+.composer-box input {
+	flex: 1;
+	min-width: 0;
+	min-height: 1.5rem;
+	border: none;
+	background: transparent;
+	color: var(--t0);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	outline: none;
+}
+.composer-note { font-size: var(--fs-micro); color: var(--t5); }
+
+/* --- modals --------------------------------------------------------------- */
+
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 100; }
+.modal {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: 420px;
+	max-width: calc(100% - 48px);
+	max-height: calc(100% - 48px);
+	z-index: 101;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	padding: 20px;
+	border-radius: 12px;
+	border: 1px solid var(--b2);
+	background: var(--s4);
+	box-shadow: var(--shadow-modal);
+	overflow-y: auto;
+}
+.modal-head { display: flex; align-items: flex-start; gap: 12px; }
+.modal-title { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
+.modal-sub { font-size: var(--fs-micro); color: var(--t4); font-family: "Geist Mono", ui-monospace, monospace; }
+.modal-foot {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	justify-content: flex-end;
+	padding-top: 4px;
+	border-top: 1px solid var(--b1);
+}
+.modal-close {
+	flex: 0 0 auto;
+	width: 26px;
+	height: 26px;
+	border: 1px solid var(--b2);
+	border-radius: 6px;
+	background: var(--s5);
+	color: var(--t3);
+	font-family: inherit;
+	font-size: var(--fs-title);
+	line-height: 1;
+	cursor: pointer;
+}
+.modal-close:hover { color: var(--t0); border-color: var(--b4); }
+
+/* --- seletor de modelo LLM ------------------------------------------------- */
+
+.model-field { cursor: pointer; }
+.model-field:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.model-picker {
+	/* Wide enough that the selected chip keeps its full name next to the
+	   image/file marks and the check */
+	width: 540px;
+	gap: 14px;
+	padding: 22px 22px 20px;
+	overflow: hidden;
+}
+.model-picker .modal-title { font-size: 1.0625rem; font-weight: 700; }
+.model-picker .modal-sub { font-family: inherit; font-size: 0.75rem; color: var(--t4); }
+.model-picker .modal-close {
+	display: grid;
+	place-items: center;
+	border: none;
+	background: transparent;
+	color: var(--t3);
+}
+.model-picker .modal-close:hover { color: var(--t0); }
+
+.model-search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 2.125rem;
+	padding: 0 11px;
+	border: 1px solid var(--b3);
+	border-radius: 7px;
+	background: var(--s3);
+	color: var(--t3);
+}
+.model-search:focus-within { border-color: var(--b4); }
+.model-search input {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	background: transparent;
+	color: var(--t0);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	outline: none;
+}
+.model-search input::placeholder { color: var(--t5); }
+
+.model-groups {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	min-height: 0;
+	overflow-y: auto;
+	margin: 0 -4px;
+	padding: 0 4px 2px;
+}
+.model-group { display: flex; flex-direction: column; gap: 8px; }
+.model-group-head {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: var(--t1);
+}
+.model-group-count { font-weight: 400; color: var(--t4); }
+.model-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 5px 5px;
+}
+.model-chip {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	height: 1.8125rem;
+	padding: 0 10px;
+	border: 1px solid var(--b2);
+	border-radius: 6px;
+	background: var(--s5);
+	color: var(--t1);
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: 0.78rem;
+	text-align: left;
+	cursor: pointer;
+}
+.model-chip:hover { border-color: var(--b4); }
+.model-chip.selected {
+	border-color: var(--accent-hi);
+	background: var(--accent-soft2);
+}
+.model-chip-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-chip-caps { display: flex; gap: 4px; color: var(--t4); }
+.model-chip-check { color: var(--accent); display: grid; place-items: center; }
+.model-logo { flex: 0 0 auto; display: grid; place-items: center; width: 14px; height: 14px; }
+.model-logo-mono {
+	border-radius: 3px;
+	color: #fff;
+	font-family: inherit;
+	font-size: 9px;
+	font-weight: 700;
+	line-height: 1;
+}
+.model-empty { margin: 4px 0; font-size: var(--fs-body); color: var(--t4); }
+
+@media (max-width: 30rem) {
+	.model-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --- toast ---------------------------------------------------------------- */
+
+.toast-dock {
+	position: fixed;
+	bottom: 18px;
+	right: 60px;
+	z-index: 200;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: flex-end;
+}
+.toast {
+	max-width: 380px;
+	padding: 10px 13px;
+	border-radius: 9px;
+	border: 1px solid var(--b2);
+	background: var(--s4);
+	color: var(--t1);
+	font-size: var(--fs-body);
+	line-height: 1.5;
+	box-shadow: var(--shadow-menu);
+}
+.toast.bad { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger2); }
+.toast.ok { border-color: rgba(63, 185, 80, 0.35); color: var(--ok); }
+
+/* --- login ---------------------------------------------------------------- */
+
+.auth {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	grid-template-columns: 1.05fr 1fr;
+	background: var(--s0);
+	color: var(--t0);
+}
+.auth-aside {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	padding: 56px;
+	background: linear-gradient(180deg, var(--s1), var(--s0));
+	border-right: 1px solid var(--b1);
+	overflow: hidden;
+}
+.auth-aside .glow {
+	position: absolute;
+	top: -140px;
+	left: -120px;
+	width: 460px;
+	height: 460px;
+	border-radius: 50%;
+	background: radial-gradient(circle, rgba(37, 99, 235, 0.2), transparent 68%);
+	pointer-events: none;
+}
+.auth-brand { display: flex; align-items: center; gap: 11px; position: relative; }
+.auth-brand img { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; flex: 0 0 34px; }
+.auth-brand-name { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; }
+.auth-brand-sub { font-size: var(--fs-micro); color: var(--t4); letter-spacing: 0.04em; }
+.auth-pitch { position: relative; display: flex; flex-direction: column; gap: 18px; max-width: 420px; }
+.auth-pitch h1 {
+	margin: 0;
+	font-size: var(--fs-hero);
+	line-height: 1.12;
+	font-weight: 600;
+	letter-spacing: -0.03em;
+	text-wrap: pretty;
+}
+.auth-pitch p { margin: 0; font-size: var(--fs-body); line-height: 1.6; color: var(--t3); text-wrap: pretty; }
+.auth-foot {
+	position: relative;
+	display: flex;
+	gap: 26px;
+	font-size: var(--fs-micro);
+	color: var(--t4);
+	font-family: "Geist Mono", ui-monospace, monospace;
+}
+/* `.auth` é `position: fixed; inset: 0`, então a página nunca rola: quem tem de
+   rolar é esta coluna. Enquanto o formulário era só usuário e senha isso não
+   aparecia; o passo de configuração do segundo fator (QR, instruções, chave
+   manual) passa da altura da janela numa tela de notebook, e sem isto o botão
+   de confirmar ficava fora de alcance.
+
+   `min-height: 0` porque um item de grid não encolhe abaixo do próprio conteúdo
+   sem isso — e sem encolher não há o que rolar.
+
+   As duas linhas de `align-items` são uma só decisão: centralizar conteúdo mais
+   alto que o contêiner faz o topo dele transbordar para fora do alcance da
+   barra de rolagem, e `safe center` é exatamente o remédio — centraliza quando
+   cabe, alinha ao topo quando não cabe. Quem não entende `safe` descarta a
+   segunda linha e fica com a primeira, que nunca corta nada. */
+.auth-main {
+	display: flex;
+	align-items: flex-start;
+	align-items: safe center;
+	justify-content: center;
+	padding: 48px;
+	min-height: 0;
+	overflow-y: auto;
+}
+.auth-form { width: 100%; max-width: 352px; display: flex; flex-direction: column; gap: 22px; }
+.auth-form h2 { margin: 0; font-size: var(--fs-display); font-weight: 600; letter-spacing: -0.02em; }
+.auth-form .lead { margin: 0; font-size: var(--fs-body); color: var(--t4); }
+.auth-form .stack { display: flex; flex-direction: column; gap: 14px; }
+.auth-label { font-size: var(--fs-micro); font-weight: 500; color: var(--t3); letter-spacing: 0.02em; }
+.auth-error {
+	padding: 9px 11px;
+	border-radius: 8px;
+	border: 1px solid var(--danger-line);
+	background: var(--danger-soft);
+	color: var(--danger2);
+	font-size: var(--fs-body);
+}
+.auth-btn {
+	height: 40px;
+	border: none;
+	border-radius: 8px;
+	background: var(--accent);
+	color: #fff;
+	font-family: inherit;
+	font-size: var(--fs-body);
+	font-weight: 600;
+	cursor: pointer;
+}
+.auth-btn:hover { background: var(--accent-hi); }
+.auth-btn:disabled { opacity: 0.65; cursor: default; }
+/* O SSO é <a>, não <button>: o fluxo começa com uma navegação de verdade para o
+ * provedor. Daí o flex, que um botão já ganha do agente de usuário e um link não */
+a.auth-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	text-decoration: none;
+}
+.auth-btn.secondary {
+	background: var(--s2);
+	color: var(--t1);
+	border: 1px solid var(--b2);
+}
+.auth-btn.secondary:hover { background: var(--s3); }
+/* Regra dos dois lados: a linha atravessa, o rótulo abre espaço no meio dela */
+.auth-or {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: -6px 0;
+	color: var(--t5);
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	letter-spacing: 0.08em;
+}
+.auth-or::before,
+.auth-or::after { content: ""; flex: 1; height: 1px; background: var(--b1); }
+.auth-info {
+	padding: 9px 11px;
+	border-radius: 8px;
+	border: 1px solid var(--b2);
+	background: var(--s1);
+	color: var(--t2);
+	font-size: var(--fs-body);
+	line-height: 1.5;
+}
+.auth-note { text-align: center; color: var(--t5); font-size: var(--fs-micro); margin: 0; }
+
+/* --- Segundo fator (TOTP) na tela de login ------------------------------- */
+.mfa-enroll { display: flex; flex-direction: column; gap: 14px; }
+.mfa-steps {
+	margin: 0;
+	padding-left: 17px;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	font-size: var(--fs-body);
+	line-height: 1.5;
+	color: var(--t3);
+}
+/* O fundo branco é do próprio SVG (ver mfa.qr_data_uri): um QR preto sobre o
+   tema escuro é um quadrado que nenhuma câmera lê. A moldura clara em volta dá
+   à imagem a zona de silêncio que a norma pede, sem depender de o gerador a
+   ter desenhado */
+.mfa-qr {
+	align-self: center;
+	padding: 10px;
+	border-radius: 10px;
+	background: #fff;
+	line-height: 0;
+}
+.mfa-qr img { display: block; width: 164px; height: 164px; }
+.mfa-manual { font-size: var(--fs-body); color: var(--t4); }
+.mfa-manual summary { cursor: pointer; color: var(--t3); }
+.mfa-manual p { margin: 9px 0 6px; line-height: 1.5; }
+/* A chave é lida e digitada por uma pessoa, num telefone, olhando para a tela:
+   quebra em qualquer ponto e seleciona inteira com um clique */
+.mfa-manual code {
+	display: block;
+	padding: 8px 10px;
+	border-radius: 7px;
+	border: 1px solid var(--b2);
+	background: var(--s1);
+	color: var(--t2);
+	font-size: var(--fs-body);
+	letter-spacing: 0.06em;
+	word-break: break-all;
+	user-select: all;
+}
+
+@media (max-width: 860px) {
+	.auth { grid-template-columns: 1fr; }
+	.auth-aside { display: none; }
+}
+
+/* --- mesa de trabalho ------------------------------------------------------ */
+
+/* A decisão, acima da evidência. Uma faixa e não um card: é um controle da tela,
+ * não mais um bloco de conteúdo para ler. Os dois botões carregam o ponto do
+ * veredito que produzem, para "legítimo" e "malicioso" não dependerem só do
+ * rótulo num olhar rápido de fim de turno */
+.decision-bar {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px 14px;
+	border-radius: 10px;
+	border: 1px solid var(--b2);
+	background: var(--s3);
+}
+.decision-bar .btn { gap: 8px; }
+.decision-bar .btn .dot { flex: 0 0 7px; width: 7px; height: 7px; }
+
+/* O número do escopo: quantas pessoas. Em tamanho de indicador porque é a
+ * primeira coisa que muda a prioridade de um caso, e em tabular-nums porque
+ * atualiza enquanto a campanha ainda chega */
+.scope-count {
+	font-size: var(--fs-display);
+	font-weight: 600;
+	line-height: 1;
+	letter-spacing: -0.02em;
+	color: var(--t0);
+	font-variant-numeric: tabular-nums;
+}
+.scope-count.absent { color: var(--t4); }
+.scope-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto;
+	align-items: baseline;
+	gap: 10px;
+	padding: 8px 0;
+	border-top: 1px solid var(--b1);
+	font-size: var(--fs-body);
+	color: var(--t2);
+}
+.scope-row .mono { font-size: var(--fs-micro); color: var(--t4); font-variant-numeric: tabular-nums; }
+.scope-row.current { color: var(--t0); }
+
+/* O assistente ao lado do caso. Estreito, e com a conversa na largura dele —
+ * a coluna de 760px do Chat AI não cabe aqui e ficaria cortada */
+.pane.side {
+	flex: 0 1 20rem;
+	width: 20rem;
+	min-width: 18rem;
+	border-left: 1px solid var(--b1);
+}
+/* Com o assistente aberto, quem cede espaço é a lista, não o caso: a 1440px as
+ * três colunas na largura normal deixavam o detalhe no mínimo e o e-mail
+ * renderizado com 350px — a evidência ficava menor que a conversa sobre ela */
+#conteudo.assistant-open > .pane.list {
+	flex-basis: var(--pane-list-min);
+	width: var(--pane-list-min);
+}
+.pane.side .chat-scroll { padding: 14px; }
+.pane.side .chat-thread { max-width: none; }
+.pane.side .composer { padding: 10px 14px 14px 14px; }
+.pane.side .composer > * { max-width: none; }
+.pane.side .bubble { max-width: 94%; }
+
+/* Numa tela estreita o assistente cobre o detalhe em vez de espremer as três
+ * colunas abaixo do legível; fechá-lo devolve o caso. 1280px é onde menu, lista
+ * no mínimo, detalhe no mínimo e assistente no mínimo deixam de caber lado a lado */
+@media (max-width: 1280px) {
+	.pane.side {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 20;
+		width: min(24rem, 100%);
+		background: var(--s2);
+		box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+	}
+}
+/* Uma liberação aprendida: o que casa, de onde veio, quanto já agiu, e o estado */
+.memory-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 6px 14px;
+	padding: 12px 14px;
+	border-radius: 9px;
+	border: 1px solid var(--b1);
+	background: var(--s4);
+}
+.memory-row.inactive { opacity: 0.62; }
+.memory-row .memory-key { font-size: var(--fs-body); color: var(--t0); overflow-wrap: anywhere; }
+.memory-row .memory-meta { font-size: var(--fs-micro); color: var(--t4); font-variant-numeric: tabular-nums; }
+.memory-row .memory-reason { grid-column: 1 / -1; margin: 0; font-size: var(--fs-body); color: var(--t3); line-height: 1.5; }
+.memory-row .memory-actions { display: flex; gap: 6px; align-items: flex-start; }
+
+/* A âncora do assistente sobreposto em tela estreita */
+#conteudo { position: relative; }
+
+/* Um botão que liga e desliga um painel diz em que estado está */
+.btn.secondary[aria-pressed="true"] { background: var(--s7); color: var(--t0); border-color: var(--b3); }
+
+/* --- auditoria ------------------------------------------------------------ */
+
+/* A tela é uma tabela que ocupa a coluna inteira, com os filtros em cima e o
+ * assistente ao lado (o mesmo .pane.side do assistente do caso, que já sabe
+ * cobrir a tabela abaixo de 1280px em vez de espremê-la). */
+.audit-pane { container: auditpane / inline-size; }
+
+.audit-filters {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.4fr);
+	gap: 12px 14px;
+	padding: 14px var(--gutter-pane) 12px var(--gutter-pane);
+	border-bottom: 1px solid var(--b1);
+	background: var(--s3);
+}
+.audit-field { gap: 5px; }
+.audit-period { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.audit-period-row { gap: 8px; flex-wrap: wrap; }
+.audit-period-or { font-size: var(--fs-micro); color: var(--t5); }
+.audit-date .input { width: 9.75rem; }
+/* O seletor de data nativo segue o tema da tela, não o do sistema */
+[data-theme="dark"] .audit-date .input { color-scheme: dark; }
+[data-theme="light"] .audit-date .input { color-scheme: light; }
+
+@container auditpane (max-width: 60rem) {
+	.audit-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container auditpane (max-width: 42rem) {
+	.audit-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.audit-field-wide { grid-column: 1 / -1; }
+}
+@container auditpane (max-width: 30rem) {
+	.audit-filters { grid-template-columns: minmax(0, 1fr); }
+}
+
+.audit-summary {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px var(--gutter-pane);
+	border-bottom: 1px solid var(--b1);
+}
+.audit-summary:empty { display: none; }
+.audit-summary-line { margin: 0; font-size: var(--fs-body); line-height: 1.7; color: var(--t3); text-wrap: pretty; }
+.audit-summary-line strong { color: var(--t0); font-weight: 600; font-variant-numeric: tabular-nums; }
+.audit-token {
+	display: inline-block;
+	max-width: 22rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	vertical-align: bottom;
+	white-space: nowrap;
+	padding: 0 6px;
+	border: 1px solid var(--b2);
+	border-radius: 5px;
+	background: var(--s5);
+	color: var(--t1);
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	line-height: 1.6;
+}
+.audit-summary-warn { margin: 0; font-size: var(--fs-micro); line-height: 1.55; color: var(--warn); }
+
+/* A régua da tabela. Hora primeiro e estreita — o dia vem no separador —, e o
+ * detalhe fica com a sobra, porque é o campo mais longo e o menos lido de
+ * relance. Abaixo de 62rem a tabela rola de lado, como a whitelist */
+.cols-audit {
+	grid-template-columns: 4.75rem minmax(9rem, 1.2fr) 6.75rem minmax(8rem, 1fr) minmax(8rem, 1.2fr) 7.5rem minmax(10rem, 2fr);
+	gap: 12px;
+}
+.audit-tbl .tbl-head,
+.audit-tbl .tbl-row { padding-left: var(--gutter-pane); padding-right: var(--gutter-pane); }
+/* A tabela fica com a altura que sobra entre os filtros e o paginador */
+.audit-tbl { flex: 1; height: auto; min-height: 0; }
+.audit-tbl .tbl-scroll > .cols-audit,
+.audit-tbl #auditRows > .tbl-row,
+.audit-tbl #auditRows > .audit-day,
+.audit-tbl #auditRows > .audit-expand { min-width: 62rem; }
+.audit-tbl .tbl-row { padding-top: 8px; padding-bottom: 8px; }
+
+.audit-day {
+	padding: 14px var(--gutter-pane) 6px var(--gutter-pane);
+	border-bottom: 1px solid var(--b1);
+	font-size: var(--fs-micro);
+	font-weight: 500;
+	color: var(--t3);
+}
+.audit-day:first-child { padding-top: 10px; }
+
+.audit-row { cursor: pointer; }
+.audit-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.audit-row.open { background: var(--s4); border-bottom-color: transparent; }
+.audit-time { font-size: var(--fs-micro); color: var(--t2); font-variant-numeric: tabular-nums; }
+.audit-event { font-size: var(--fs-body); font-weight: 500; color: var(--t1); }
+.audit-dim { font-size: var(--fs-micro); color: var(--t3); }
+.audit-who { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.audit-link {
+	min-width: 0;
+	padding: 0;
+	border: none;
+	background: none;
+	color: var(--t1);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	text-align: left;
+	cursor: pointer;
+	text-decoration: underline;
+	text-decoration-color: transparent;
+	text-underline-offset: 3px;
+	transition: text-decoration-color 0.15s ease-out, color 0.15s ease-out;
+}
+.audit-link:hover { color: var(--accent-hi); text-decoration-color: currentColor; }
+.audit-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.audit-role { flex: 0 0 auto; font-size: var(--fs-micro); color: var(--t4); }
+.audit-anon { font-size: var(--fs-body); color: var(--t5); }
+
+/* O registro inteiro, aberto sob a linha */
+.audit-expand {
+	padding: 4px var(--gutter-pane) 16px var(--gutter-pane);
+	border-bottom: 1px solid var(--b1);
+	background: var(--s4);
+}
+.audit-kv {
+	display: grid;
+	grid-template-columns: 6rem minmax(0, 1fr);
+	gap: 7px 16px;
+	margin: 0;
+	max-width: 72rem;
+}
+.audit-kv dt {
+	padding-top: 2px;
+	font-family: "Geist Mono", ui-monospace, monospace;
+	font-size: var(--fs-micro);
+	letter-spacing: 0.06em;
+	color: var(--t4);
+	text-transform: uppercase;
+}
+.audit-kv dd {
+	margin: 0;
+	font-size: var(--fs-body);
+	line-height: 1.55;
+	color: var(--t1);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.audit-kv dd.mono { font-size: var(--fs-micro); line-height: 1.8; }
+.audit-expand-actions { gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+
+.audit-empty-title { margin: 0 0 6px 0; font-size: var(--fs-body); color: var(--t1); }
+.audit-empty-note { margin: 0 auto 12px auto; max-width: 46ch; font-size: var(--fs-body); line-height: 1.55; color: var(--t4); }
+
+/* Carregando: a forma da tabela antes dos dados. Recarregar com dados na tela
+ * só esmaece o que já está lá — a régua não some a cada tecla digitada */
+.audit-skeleton { cursor: default; }
+.audit-skeleton:hover { background: transparent; }
+.skel {
+	display: block;
+	height: 0.625rem;
+	border-radius: 4px;
+	background: linear-gradient(90deg, var(--s5) 0%, var(--s7) 50%, var(--s5) 100%);
+	background-size: 200% 100%;
+	animation: audit-skel 1.3s ease-in-out infinite;
+}
+.audit-skeleton .skel:nth-child(odd) { width: 70%; }
+@keyframes audit-skel { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+#auditRows { transition: opacity 0.18s ease-out; }
+#auditRows.audit-stale { opacity: 0.55; }
+
+.audit-pager {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 2.75rem;
+	padding: 6px var(--gutter-pane);
+	border-top: 1px solid var(--b1);
+}
+
+/* O assistente: o que ele lê fica escrito em cima da conversa */
+.audit-ai-scope {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--b1);
+	background: var(--s3);
+}
+.audit-ai-scope:empty { display: none; }
+.audit-ai-facts {
+	display: flex;
+	justify-content: space-between;
+	gap: 10px;
+	width: 100%;
+	font-size: var(--fs-micro);
+	color: var(--t4);
+}
+.audit-ai-note { margin: 0; font-size: var(--fs-micro); line-height: 1.55; color: var(--t3); }
+.audit-assistant .bubble.pending .bubble-text { color: var(--t4); animation: audit-wait 1.4s ease-in-out infinite; }
+@keyframes audit-wait { 50% { opacity: 0.45; } }
+/* Sugestões são frases, não rótulos: lidas da esquerda, como a conversa */
+.audit-assistant .composer .chip { text-align: left; line-height: 1.4; padding-top: 4px; padding-bottom: 4px; }
+
+/* Configurações → Auditoria: quanto da trilha já está ocupado */
+.audit-usage { display: flex; flex-direction: column; gap: 8px; }
+.audit-usage:empty { display: none; }
+.audit-usage-line { margin: 0; font-size: var(--fs-body); color: var(--t3); font-variant-numeric: tabular-nums; }
+.audit-usage-line strong { color: var(--t0); font-weight: 600; }
+.audit-usage-bar { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.audit-usage-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.25s ease-out; }

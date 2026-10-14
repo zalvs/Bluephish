@@ -1,0 +1,46 @@
+__pycache__/
+*.pyc
+
+# Local docker secrets and overrides
+docker/.env
+docker/docker-compose.override.yml
+docker/vol/
+
+# graphify (github.com/Graphify-Labs/graphify): regenerated locally with
+# `graphify extract . --code-only && graphify cluster-only . --no-label`
+graphify-out/
+
+# Transcrições das sessões do Claude Code, arquivadas junto do projeto.
+# Guardam saída de ferramenta: arquivos de configuração, cabeçalhos de e-mail
+# analisados, respostas de API. São registro de trabalho, não código-fonte, e
+# não pertencem ao histórico do repositório — nem aqui, que é privado. Privado
+# hoje não é privado sempre: repositório vira público, ganha colaborador, é
+# forkado, e o log de sessão vai junto sem ninguém reler o que havia nele.
+.claude/history/
+.claude/worktrees/
+
+# Local backups of the frontend taken before a redesign pass. They are stale
+# duplicates of app/static and app/templates: committing one would put a second,
+# outdated copy of the interface in the repository.
+.bluephising-backup-*/
+
+# Impeccable: a configuração compartilhada (config.json) é versionada de
+# propósito — é onde as exceções do detector de design ficam em um lugar só,
+# revisável. O cache e o override por máquina não são: um é derivado, o outro é
+# preferência de quem está na frente do teclado.
+.impeccable/hook.cache.json
+.impeccable/config.local.json
+
+# Backup que a migração do whitelist v1→v2 deixa ao lado do arquivo migrado. É
+# estado daquela instalação, não código: commitá-lo colocaria uma cópia velha e
+# permanente da whitelist antiga no repositório, que ninguém mais lê e todo
+# mundo confunde com a atual.
+app/whitelist.v1.backup.json
+docker/thephish_conf_files/whitelist.v1.backup.json
+
+# Banco SQLite (usuários, log de auditoria, histórico de análises) e o par TLS.
+# É estado da instalação, não código: no container isto é um volume montado
+# (docker-compose: ./vol/thephish_data), e rodar a suíte de testes localmente
+# cria o mesmo diretório — foi assim que uma cópia dele entrou num commit.
+app/data/
+.gstack/

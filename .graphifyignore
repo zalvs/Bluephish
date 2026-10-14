@@ -1,0 +1,11 @@
+# Paths kept out of the knowledge graph: generated, vendored or binary content
+# that adds nodes without adding edges worth reasoning about.
+
+# Screenshots and diagrams
+pictures/
+
+# Runtime state produced by the containers, never source
+docker/vol/
+
+# Graphify's own output
+graphify-out/

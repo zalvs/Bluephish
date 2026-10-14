@@ -1,0 +1,10 @@
+From: "Financeiro" <cobranca@marca-reaI-seguro.example>
+Reply-To: recebimento@outrodominio.example
+To: analista@empresa.com
+Subject: URGENTE: fatura vencida, regularize em 24h
+Date: Wed, 10 Sep 2026 09:00:00 -0300
+Authentication-Results: mx.empresa.com; spf=fail smtp.mailfrom=marca-reaI-seguro.example; dkim=none; dmarc=fail
+List-Unsubscribe: <https://marca-reaI-seguro.example/u>
+Content-Type: text/plain
+
+Clique em https://marca-reaI-seguro.example/pagar para evitar o bloqueio.

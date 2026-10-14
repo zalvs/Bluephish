@@ -1,0 +1,80 @@
+# Basic CI: install the dependencies and run a syntax/lint check on every
+# push and pull request that targets the main branch
+name: Python application
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  thephish-app:
+    name: ThePhish app (Python 3.8)
+    # ubuntu-22.04 is used because the app targets Python 3.8 (same as the Docker image),
+    # which is not available on ubuntu-latest runners
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.8"
+          cache: "pip"
+          cache-dependency-path: app/requirements.txt
+      - name: Install system dependencies
+        # libmagic1 for python-magic; the toolchain and OpenSSL headers because
+        # yara-python has no wheel for 3.8 and is compiled from source, exactly
+        # as app/Dockerfile does it
+        run: sudo apt-get update && sudo apt-get install -y libmagic1 build-essential libssl-dev
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install flake8
+      - name: Lint with flake8
+        run: |
+          # Fail the build on syntax errors and undefined names
+          flake8 app --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Full lint as a non-blocking report
+          flake8 app --count --exit-zero --max-complexity=10 --max-line-length=200 --statistics
+      - name: Byte-compile the application
+        run: python -m compileall app
+      - name: Run the test suite
+        # A partir de `app/`: os testes importam os modulos como irmaos e leem
+        # `configuration.json` relativo ao diretorio de trabalho, exatamente como
+        # o processo faz no container.
+        #
+        # Nenhum deles toca a rede, e os que precisam de disco usam tmpdir — o
+        # que permite mante-los bloqueantes. Ate aqui o CI so provava que o
+        # codigo compila; o contrato do veredito (analisador malicioso convicta,
+        # `info` nao vale `safe`, o LLM e o score so elevam) nao era verificado
+        # por nada, e e o tipo de regressao que nao levanta excecao nenhuma.
+        working-directory: app
+        run: python -m unittest discover -p "test_*.py" --verbose
+
+  hive-ai-agent:
+    name: hive_ai_agent (Python 3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: hive_ai_agent/requirements.txt
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r hive_ai_agent/requirements.txt
+          pip install flake8
+      - name: Lint with flake8
+        run: |
+          flake8 hive_ai_agent --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 hive_ai_agent --count --exit-zero --max-complexity=12 --max-line-length=200 --statistics
+      - name: Byte-compile the agent
+        run: python -m compileall hive_ai_agent

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>bluephish — Entrar</title>
+	<link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/img/bluephish-logo.png', v=asset_version) }}">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="{{ url_for('static', filename='assets/css/bluephish.css', v=asset_version) }}">
+</head>
+
+<body>
+<div class="auth">
+
+	<div class="auth-aside">
+		<div class="glow"></div>
+
+		<div class="auth-brand">
+			<img src="{{ url_for('static', filename='assets/img/bluephish-logo.png', v=asset_version) }}" alt="bluephish">
+			<div style="display:flex;flex-direction:column;gap:1px">
+				<span class="auth-brand-name">BluePhish</span>
+				<span class="auth-brand-sub mono">THREAT ANALYSIS PLATFORM</span>
+			</div>
+		</div>
+
+		<div class="auth-pitch">
+			<h1>Análise tática de phishing, em tempo real.</h1>
+			<p>Triagem automática da caixa de denúncias, extração de IOCs e avaliação de engenharia social em um único painel operacional.</p>
+		</div>
+
+		<!-- O rodapé dizia "ThePhish 2.0 / TheHive · MISP": o nome do projeto de
+		     origem, e uma pilha de terceiros anunciada como se fosse obrigatória.
+		     Nenhuma das duas coisas é verdade hoje — o registro do caso é um
+		     destino configurável (TheHive, Jira ou disco), e nomear um deles na
+		     tela de login promete uma dependência que a instalação pode não ter. -->
+		<div class="auth-foot">
+			<span>bluephish 2.0</span>
+			<span>Detecção · Resposta · Registro</span>
+		</div>
+	</div>
+
+	<div class="auth-main" data-mfa-stage="{{ mfa_stage }}">
+		<!-- method="post" is a deliberate fallback: the submit is normally
+		     intercepted by login.js, but if the script ever fails to load the
+		     browser must never send the credentials as a GET query string -->
+		<form class="auth-form {{ 'hidden' if mfa_stage else '' }}" id="loginForm" method="post" action="api/auth/login" autocomplete="off">
+			<div style="display:flex;flex-direction:column;gap:6px">
+				<h2>Acessar o painel</h2>
+				<p class="lead">Use suas credenciais corporativas.</p>
+			</div>
+
+			<div class="stack">
+				<label class="field">
+					<span class="auth-label">Usuário</span>
+					<input class="input" id="username" name="username" type="text" autocomplete="username" style="height:38px" required autofocus>
+				</label>
+				<label class="field">
+					<span class="auth-label">Senha</span>
+					<input class="input" id="password" name="password" type="password" autocomplete="current-password" style="height:38px" required>
+				</label>
+			</div>
+
+			<!-- "Manter conectado" aparece no handoff, mas auth.py não tem sessão
+			     persistente: fica visível e inerte, com o caminho real dito em voz
+			     alta. A senha é reposta por um global_admin em Usuários, ou pelo
+			     CLI (manage.py reset-password) — o código de seis dígitos do passo
+			     seguinte é o segundo fator, não um caminho de reposição de senha.
+			     Ver ROADMAP.md. -->
+			<!-- flex-wrap: abaixo de ~420px o aside some e o formulário fica com
+			     279px; sem quebrar, a dica de recuperação espremeria o rótulo do
+			     checkbox em duas linhas irregulares -->
+			<div class="row" style="gap:8px 12px;flex-wrap:wrap">
+				<label class="row pending" style="gap:7px;font-size:12px;color:var(--t3)"
+					title="Sessão persistente ainda não implementada">
+					<input type="checkbox" disabled style="width:13px;height:13px">
+					Manter conectado
+				</label>
+				<span style="flex:1 1 180px;font-size:12px;color:var(--t3)">Esqueceu a senha? Peça a reposição a um global_admin.</span>
+			</div>
+
+			{# Um código fechado vira frase aqui dentro; o que volta do provedor de
+			   identidade nunca é escrito nesta tela. Ver auth.SSO_ERRORS. #}
+			{% set sso_messages = {
+				'not_configured': 'O SSO corporativo não está configurado nesta instalação.',
+				'provider': 'O provedor de identidade recusou o login.',
+				'expired': 'O pedido de login expirou. Tente de novo.',
+				'no_username': 'O provedor não informou o usuário. Peça a quem administra o Entra ID para incluir o e-mail no token.',
+				'group_overage': 'O token não trouxe seus grupos porque há grupos demais na sua conta. Peça a quem administra o Entra ID para usar App Roles.',
+				'no_group': 'Sua conta não está em nenhum grupo com acesso ao painel.',
+				'provisioning': 'Não foi possível preparar a conta para este usuário.'
+			} %}
+			{% if session_ended %}
+			<div class="auth-info" role="status">A sessão foi encerrada porque a aba do painel foi fechada. Entre de novo para continuar.</div>
+			{% endif %}
+
+			<div class="auth-error {{ '' if sso_error else 'hidden' }}" id="loginError" role="alert">{{ sso_messages.get(sso_error, '') }}</div>
+
+			<button class="auth-btn" id="loginBtn" type="submit">Entrar</button>
+
+			{% if sso_available %}
+			<!-- O botão só existe no HTML quando há provedor configurado e ligado:
+			     uma instalação sem SSO não ganha um botão que só sabe recusar
+			     (mesma régua do "Manter conectado" acima, que é declaradamente
+			     inerte porque a sessão persistente não existe). -->
+			<div class="auth-or"><span>OU</span></div>
+
+			<a class="auth-btn secondary" id="ssoBtn" href="{{ url_for('sso_start') }}">
+				<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<rect x="1.6" y="3.4" width="12.8" height="9.2" rx="1.6"></rect>
+					<path d="M2.2 4.6 8 8.9l5.8-4.3"></path>
+				</svg>
+				Entrar com SSO corporativo
+			</a>
+			{% endif %}
+
+			<p class="auth-note">Uso restrito a pessoas autorizadas. Todas as tentativas de acesso são registradas.</p>
+		</form>
+
+		<!-- Segundo passo. Fica na mesma tela, e não numa página própria, porque
+		     nesta altura não existe sessão nenhuma: a senha (ou o retorno do
+		     provedor de identidade) só abriu um desafio, e é ele que este
+		     formulário responde. Ver o bloco "Segundo fator obrigatório" em
+		     auth.py.
+
+		     O servidor decide qual dos dois passos abre, pelo data-mfa-stage
+		     acima: 'enroll' para quem ainda não configurou (mostra o QR),
+		     'verify' para quem já tem o aplicativo. Vazio quando se chega pela
+		     senha, e aí quem revela o passo é a resposta do login. -->
+		<form class="auth-form hidden" id="mfaForm" method="post" action="api/auth/mfa/verify" autocomplete="off">
+			<div style="display:flex;flex-direction:column;gap:6px">
+				<h2 id="mfaTitle">Verificação em duas etapas</h2>
+				<p class="lead" id="mfaLead">Digite o código de 6 dígitos do seu aplicativo autenticador.</p>
+			</div>
+
+			<!-- Passo de configuração: só existe para quem ainda não tem o
+			     aplicativo pareado com esta conta -->
+			<div class="mfa-enroll hidden" id="mfaEnroll">
+				<ol class="mfa-steps">
+					<li>Instale o Google Authenticator, o Microsoft Authenticator ou o Authy.</li>
+					<li>Leia o QR abaixo com o aplicativo.</li>
+					<li>Digite o código que ele mostrar.</li>
+				</ol>
+				<div class="mfa-qr">
+					<!-- O src chega do servidor como data: (SVG). A CSP permite
+					     img-src 'self' data:, e o QR não passa por nenhuma URL:
+					     o segredo estaria nela -->
+					<img id="mfaQr" alt="QR code para parear o aplicativo autenticador" width="164" height="164">
+				</div>
+				<details class="mfa-manual">
+					<summary>Não consigo ler o QR</summary>
+					<p>Cadastre a conta manualmente no aplicativo com esta chave:</p>
+					<code class="mono" id="mfaSecret">—</code>
+				</details>
+			</div>
+
+			<label class="field">
+				<span class="auth-label">CÓDIGO DE 6 DÍGITOS</span>
+				<!-- inputmode numeric abre o teclado numérico no celular;
+				     one-time-code deixa o iOS oferecer o código copiado -->
+				<input class="input mono" id="mfaCode" name="code" type="text" inputmode="numeric"
+					autocomplete="one-time-code" maxlength="7" placeholder="000000"
+					style="height:38px;letter-spacing:0.24em;font-size:15px" required autofocus>
+			</label>
+
+			<div class="auth-error hidden" id="mfaError" role="alert"></div>
+
+			<button class="auth-btn" id="mfaBtn" type="submit">Confirmar e entrar</button>
+			<button class="auth-btn secondary" id="mfaCancelBtn" type="button">Cancelar</button>
+
+			<p class="auth-note">Perdeu o acesso ao aplicativo? Peça a um global_admin para redefinir sua verificação em duas etapas.</p>
+		</form>
+	</div>
+
+</div>
+
+<!-- External script: the CSP allows scripts only from 'self', so an inline block
+     would be blocked and the form would fall back to a native submit -->
+<script src="{{ url_for('static', filename='assets/js/login.js', v=asset_version) }}"></script>
+</body>
+
+</html>

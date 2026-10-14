@@ -1,0 +1,8 @@
+From: Colega <colega@empresa.com>
+To: analista@empresa.com
+Subject: Ata da reuniao
+Date: Wed, 10 Sep 2026 09:00:00 -0300
+Authentication-Results: mx.empresa.com; spf=pass smtp.mailfrom=empresa.com; dkim=pass header.i=@empresa.com; dmarc=pass
+Content-Type: text/plain
+
+Segue a ata em anexo.
