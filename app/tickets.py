@@ -225,16 +225,25 @@ def accepts_verdict(min_verdict, verdict):
 # Configuração — mesmo contrato dos analisadores e dos destinos de bloqueio    #
 # --------------------------------------------------------------------------- #
 
-# TheHive ships enabled: before this refactor every analysis created a case
-# there unconditionally, and an upgrade that silently stopped doing that would
-# look like the application had lost the cases. The others default to off.
-DEFAULT_ENABLED = ('thehive',)
+# A fresh installation runs on Bluephish alone, with no TheHive and no Jira, so
+# the destination that ships on is the one that needs no service: the disk. The
+# history screens then have somewhere to read from since the first analysis, and
+# no analysis tries to reach a TheHive that is not there.
+DEFAULT_ENABLED = ('disk',)
+
+# An installation that already used TheHive keeps it on: before this refactor
+# every analysis created a case there unconditionally, and an upgrade that
+# silently stopped doing that would look like the application had lost the cases.
+# load_config() tells the two apart (a saved TheHive key, or destinations already
+# saved).
+UPGRADE_ENABLED = ('thehive',)
 
 
-def default_config():
+def default_config(upgrade = False):
+	enabled_by_default = UPGRADE_ENABLED if upgrade else DEFAULT_ENABLED
 	config = {}
 	for spec in DESTINATIONS:
-		entry = {'enabled': spec['id'] in DEFAULT_ENABLED}
+		entry = {'enabled': spec['id'] in enabled_by_default}
 		for field in spec.get('credentials', []):
 			entry[field['key']] = field.get('default', '')
 		for field in spec.get('settings', []):
@@ -244,13 +253,12 @@ def default_config():
 
 
 def load_config(path = CONFIG_FILE):
-	config = default_config()
 	try:
 		with open(path) as conf_file:
 			conf_dict = json.load(conf_file)
 		stored = conf_dict.get(CONFIG_SECTION, {})
 	except Exception:
-		return config
+		return default_config()
 
 	# The TheHive URL and API key have lived under `thehive` since long before
 	# this section existed, and `save_config` below still writes them there —
@@ -258,6 +266,7 @@ def load_config(path = CONFIG_FILE):
 	# from their old home unless this section overrides them, so an upgrade needs
 	# no migration and nobody retypes a key.
 	legacy = conf_dict.get('thehive', {}) or {}
+	config = default_config(upgrade = bool(stored) or bool(legacy.get('apikey')))
 	if legacy.get('url'):
 		config['thehive']['url'] = legacy['url']
 	if legacy.get('apikey'):

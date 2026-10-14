@@ -1,6 +1,6 @@
 # Social engineering analysis with an LLM
 
-ThePhish can send the reported email (subject, clean body text, attached or inline images)
+Bluephish can send the reported email (subject, clean body text, attached or inline images)
 together with the sender authentication results and the analyzers' findings and link
 destinations to an LLM, either local (Ollama, llama.cpp, vLLM) or a hosted OpenAI-compatible
 provider such as OpenRouter, to detect **Business Email Compromise (BEC)** and other
@@ -23,9 +23,9 @@ and would therefore be classified as *Safe* by the reputation analyzers alone.
   with `"format": "json"` (forces valid JSON output). Setup: `ollama pull llama3`.
 - **OpenAI-compatible API**: any other endpoint (e.g. `http://localhost:8000/v1/chat/completions`)
   uses the OpenAI chat completions format — works with llama.cpp server, vLLM, LM Studio, LocalAI.
-- **Docker**: the ThePhish container must reach the LLM on the host — the default in
+- **Docker**: the Bluephish container must reach the LLM on the host — the default in
   `docker/thephish_conf_files/configuration.json` is `http://host.docker.internal:11434/api/chat`.
-  On Linux add to the ThePhish service in `docker-compose.yml`:
+  On Linux add to the Bluephish service in `docker-compose.yml`:
   `extra_hosts: ["host.docker.internal:host-gateway"]`.
 
 ## How it works

@@ -97,39 +97,6 @@
 			"subjectPrefix": "[BluePhish]"
 		}
 	},
-	"ticketing": {
-		"thehive": {
-			"enabled": true,
-			"url": "http://thehive:9000",
-			"apikey": "",
-			"tags": "email,ThePhish",
-			"mispId": "MISP THP",
-			"tlp": 2,
-			"pap": 2,
-			"minVerdict": "all"
-		},
-		"jira": {
-			"enabled": false,
-			"url": "",
-			"authType": "basic",
-			"user": "",
-			"token": "",
-			"project": "",
-			"issueType": "Task",
-			"labels": "bluephish",
-			"attachEml": "sim",
-			"verifyTls": "sim",
-			"minVerdict": "Suspicious"
-		},
-		"disk": {
-			"enabled": false,
-			"path": "/root/thephish/data/analises",
-			"writeEml": "sim",
-			"writeBody": "não",
-			"minVerdict": "all",
-			"retentionDays": 0
-		}
-	},
 	"caseEvidence": {
 		"storeOriginal": true,
 		"retentionDays": 90,

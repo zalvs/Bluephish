@@ -1,4 +1,4 @@
-# ThePhish — Architecture & Migration Guide
+# Bluephish — Architecture & Migration Guide
 
 > Reference document for migrating this deployment to a new environment.
 > Generated from the state of the code at commit `ba15d53`.
@@ -11,12 +11,12 @@
 
 ### 1.1 What this project does
 
-ThePhish is an automated phishing-email analysis platform for a SOC/CSIRT. It reads a
+Bluephish is an automated phishing-email analysis platform for a SOC/CSIRT. It reads a
 monitored mailbox, extracts the observables from each suspicious email (URLs, domains,
 IPs, addresses, attachment hashes), runs them through its own reputation analyzers
 (§4.9), asks a Large Language Model for a social-engineering assessment, and produces a
 final verdict — `Safe`, `Suspicious` or `Malicious` — handed to every enabled recording
-destination: a case in TheHive (the default), and/or a Jira issue, a disk archive, and any
+destination: a disk archive (the default), and/or a case in TheHive, a Jira issue, and any
 generic connectors (§4.10). With none enabled, nothing is recorded.
 
 Bluephish was inspired by [emalderson/ThePhish](https://github.com/emalderson/ThePhish)
@@ -106,8 +106,7 @@ bulletin quoting an attack phrase matches. See §8.3.
 
 ### 1.2.1 The weighted score (`scoring.py`)
 
-The verdict above is categorical, and that is the whole of what the Cortex-era
-pipeline produced. A category answers *what this is*; it does not answer *what I
+The verdict above is categorical. A category answers *what this is*; it does not answer *what I
 open first*, and forty Suspicious cases on a Monday are forty indistinguishable
 lines. The score orders that queue.
 
@@ -269,8 +268,8 @@ depends on analyzers running.
 | Database | SQLAlchemy 1.4.46 + SQLite | Users, whitelist rule state and suppressions, analysis history, reclassifications, analysis fingerprints and verdict memory (§5.1); the cases themselves are recorded by the enabled destinations (§4.10). |
 | Front-end | Vanilla JS and CSS (`bluephish.js`, `login.js`, `bluephish.css`) | No build step. The Socket.IO 4.0.1 client is loaded from cdnjs and the Geist fonts from Google Fonts; the old Bootstrap and Font Awesome assets are removed from the image (`app/Dockerfile`). |
 | Case management | TheHive 4.1.9-1 | |
-| Analyzers | In-process (`analyzers.py`, §4.9) | VirusTotal, AbuseIPDB, YARA, etc. — no Cortex. |
-| Verdict email | `mailer.py` — SMTP | Replaced Cortex's Mailer responder. |
+| Analyzers | In-process (`analyzers.py`, §4.9) | VirusTotal, AbuseIPDB, YARA, etc. |
+| Verdict email | `mailer.py` — SMTP | Sent by the application itself. |
 | Threat sharing | MISP (optional) | Export of malicious cases, done by TheHive's MISP connector at the app's request (`export_to_misp`, when `misp.id` is set); the app never calls MISP. The connector ships disabled in `docker/thehive/application.conf` while `misp.id` ships set, so out of the box the case records "a exportação para o MISP falhou". |
 | Orchestration | Docker Compose | |
 
@@ -283,7 +282,7 @@ the interface and its assets are BluePhish. The remaining "thephish" names are c
 leftovers.
 
 ```
-ThePhish/
+Bluephish/
 ├── app/                             # Flask application (built into the image)
 │   ├── __init__.py                  # Empty package marker
 │   │
@@ -315,7 +314,7 @@ ThePhish/
 │   ├── ioc_noise.py                 # Observables the extractor finds that are not what they look like
 │   ├── spam_headers.py              # Bulk-mail markers in the headers (RFC 2369/8058)
 │   ├── run_analysis.py              # Analyzer orchestration, LLM call, verdict, whitelist and memory
-│   ├── analyzers.py                 # Native observable analyzers (§4.9) — what replaced Cortex
+│   ├── analyzers.py                 # Native observable analyzers (§4.9)
 │   ├── analyzer_guides.py           # Prose shown on the analyzer screen (families, per-analyzer)
 │   ├── custom_analyzers.py          # Analyst-defined analyzers + the SSRF guard (§4.5.1)
 │   ├── pinned_http.py               # HTTP pinned to the address the SSRF guard approved (§4.5.1)
@@ -376,7 +375,8 @@ ThePhish/
 │   └── Dockerfile
 │
 ├── docker/
-│   ├── docker-compose.yml           # All services; ports bound to 127.0.0.1
+│   ├── docker-compose.yml           # Bluephish; port bound to 127.0.0.1
+│   ├── docker-compose.integrations.yml  # Optional: TheHive, MISP, AI agent (docs/integrations.md)
 │   ├── README.md
 │   ├── .env.example                 # Template for .env (setup.sh generates the real one)
 │   ├── .env                         # SECRETS — gitignored, see §5.4
@@ -851,11 +851,10 @@ incident, and it must not be one click away from "mark as legitimate". Rules:
 
 ### 4.9 Native analyzers
 
-`analyzers.py` is what replaced Cortex. The old pipeline submitted every observable to
-Cortex and read back a taxonomy **level** — `info`, `safe`, `suspicious` or `malicious` —
-and the verdict logic downstream only ever counted those levels. The level was therefore
-the real contract, and it is the contract this module reproduces by calling each vendor
-directly. `run_analysis.analyze_observables` now calls `analyzers.run()` in-process (§7.1).
+`analyzers.py` runs the analyzers in-process. Each one returns a taxonomy **level** —
+`info`, `safe`, `suspicious` or `malicious` — and the verdict logic downstream only counts
+those levels, so the level is the contract between an analyzer and the verdict.
+`run_analysis.analyze_observables` calls `analyzers.run()` in-process (§7.1).
 
 - **The registry is the interface.** Each analyzer declares its identity, the observable
   types it can judge, the credential fields to collect and the tunable thresholds. The
@@ -879,8 +878,8 @@ directly. `run_analysis.analyze_observables` now calls `analyzers.run()` in-proc
 
 > **A 429 is not a verdict — but today it lands as `info`.** `RateLimited` is a distinct
 > exception, and `run_analysis.run_jobs` has a requeue loop (up to `RATE_LIMIT_RETRIES = 3`
-> rounds, `RATE_LIMIT_WAIT_SECONDS = 60` apart) for results marked `retryable` — the job
-> Cortex's "delayed jobs" did. Nothing marks them yet: `run()` catches `RateLimited` with
+> rounds, `RATE_LIMIT_WAIT_SECONDS = 60` apart) for results marked `retryable` — it retries a lookup
+> a vendor rate-limited. Nothing marks them yet: `run()` catches `RateLimited` with
 > every other `AnalyzerError` and returns `info` with the reason, and a custom analyzer's 429
 > is a plain `AnalyzerError`. A rate-limited lookup is therefore recorded as `info` carrying
 > the vendor's message and, because it carries an error, it is not cached, so the next
@@ -1191,10 +1190,13 @@ report row to those ids from the first parse to the verdict, and nothing in the
 pipeline waits on a TheHive id. TheHive is the first entry of `DESTINATIONS`, and
 `create_thehive()` builds the case *after* the verdict, from the report.
 `dispatch()` runs it first only because it produces the case number the later
-destinations carry as `caseRef`. It ships enabled (`DEFAULT_ENABLED = ('thehive',)`)
-because an upgrade that silently stopped creating cases would look like lost cases.
-Turning it off is a setting like any other; its card says the history screens read
-every enabled destination, so switching off the only one empties them (§4.8).
+destinations carry as `caseRef`. On a fresh installation only the disk destination ships
+enabled (`DEFAULT_ENABLED = ('disk',)`), because it is the one that needs no service.
+An installation that already had a TheHive key saved, or destinations already saved,
+keeps TheHive on (`UPGRADE_ENABLED`): an upgrade that silently stopped creating cases
+would look like lost cases. Turning a destination off is a setting like any other; its
+card says the history screens read every enabled destination, so switching off the only
+one empties them (§4.8).
 
 What the module does is build the seam:
 

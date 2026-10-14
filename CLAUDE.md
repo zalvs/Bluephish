@@ -127,7 +127,7 @@ graphify update .
 
 ## Contexto mínimo do projeto
 
-ThePhish: análise automatizada de e-mails de phishing para SOC/CSIRT. Lê uma caixa
+Bluephish: análise automatizada de e-mails de phishing para SOC/CSIRT. Lê uma caixa
 monitorada, extrai observáveis, passa pelos analisadores de reputação, pede uma avaliação
 de engenharia social a um LLM e grava o veredito nos destinos habilitados — TheHive, Jira, disco e conectores genéricos, em qualquer combinação.
 

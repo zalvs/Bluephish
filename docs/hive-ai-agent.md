@@ -119,7 +119,7 @@ curl -XPOST http://localhost:8008/webhook/thehive -H 'Content-Type: application/
 ## Behavior notes
 
 - **Event filter**: only `Creation`/`create` of `Case`/`Observable`; everything else is ignored.
-- **Cooldown** (`case_cooldown_seconds`, default 120 s): a ThePhish case creation fires one
+- **Cooldown** (`case_cooldown_seconds`, default 120 s): a Bluephish case creation fires one
   event per observable in a burst; the agent analyzes the case once per window.
 - **Similarity**: strong matches = same registered domain, same mail domain, IP in the same
   /24 (v4) or /64 (v6); weak matches = same TLD (capped by `max_weak_matches`). The LLM is

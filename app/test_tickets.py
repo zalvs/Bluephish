@@ -432,19 +432,87 @@ class RegistryIntegrity(unittest.TestCase):
 			for field in spec['credentials'] + spec['settings']:
 				self.assertIn(field['key'], config[spec['id']])
 
-	def test_only_thehive_ships_enabled(self):
-		# Antes da refatoração toda análise criava um caso no TheHive; um upgrade
-		# que parasse de criar pareceria que a aplicação perdeu os casos. Os outros
-		# destinos são adesão explícita.
+	def test_only_the_disk_ships_enabled_on_a_fresh_installation(self):
+		# Uma instalação nova roda só com o Bluephish, sem TheHive nem Jira: o único
+		# destino que funciona sem nenhum serviço é o disco. Os outros são adesão
+		# explícita (quem já usava o TheHive é tratado em DestinationDefaults).
 		config = tickets.default_config()
-		self.assertTrue(config['thehive']['enabled'])
+		self.assertTrue(config['disk']['enabled'])
+		self.assertFalse(config['thehive']['enabled'])
 		self.assertFalse(config['jira']['enabled'])
-		self.assertFalse(config['disk']['enabled'])
 
 	def test_a_configuration_without_the_section_still_loads(self):
 		config = tickets.load_config(path = 'no-such-file.json')
 		self.assertFalse(config['jira']['enabled'])
 		self.assertEqual(config['disk']['minVerdict'], 'all')
+
+
+class DestinationDefaults(unittest.TestCase):
+	"""Qual destino vem ligado, e para quem.
+
+	Uma instalação nova roda só com o Bluephish. O destino que funciona sem nenhum
+	serviço é o disco, então é ele que vem ligado: as telas de histórico têm de onde
+	ler desde a primeira análise, e nenhuma análise tenta falar com um TheHive que
+	não existe. Quem já usava o TheHive não pode sentir a diferença — uma atualização
+	que parasse de criar casos pareceria que a aplicação os perdeu —, então ter uma
+	chave do TheHive salva, ou destinos já gravados, mantém o comportamento de antes.
+	"""
+
+	def setUp(self):
+		import tempfile
+		handle, self.path = tempfile.mkstemp(suffix = '.json')
+		os.close(handle)
+
+	def tearDown(self):
+		os.unlink(self.path)
+
+	def write(self, content):
+		with open(self.path, 'w') as conf_file:
+			json.dump(content, conf_file)
+
+	def test_a_fresh_installation_records_to_disk_and_not_to_thehive(self):
+		self.write({'thehive': {'url': 'http://thehive:9000', 'apikey': ''}})
+
+		config = tickets.load_config(path = self.path)
+
+		self.assertTrue(config['disk']['enabled'])
+		self.assertFalse(config['thehive']['enabled'])
+		self.assertFalse(config['jira']['enabled'])
+
+	def test_an_unreadable_file_is_treated_as_a_fresh_installation(self):
+		config = tickets.load_config(path = 'no-such-file.json')
+
+		self.assertTrue(config['disk']['enabled'])
+		self.assertFalse(config['thehive']['enabled'])
+
+	def test_a_saved_thehive_key_keeps_thehive_on_after_an_upgrade(self):
+		self.write({'thehive': {'url': 'http://thehive:9000', 'apikey': 'chave-real'}})
+
+		config = tickets.load_config(path = self.path)
+
+		self.assertTrue(config['thehive']['enabled'])
+		self.assertFalse(config['disk']['enabled'])
+
+	def test_destinations_already_saved_are_respected_as_they_were_saved(self):
+		self.write({
+			'thehive': {'url': 'http://thehive:9000', 'apikey': ''},
+			'ticketing': {'thehive': {'enabled': False}, 'disk': {'enabled': True}}
+		})
+
+		config = tickets.load_config(path = self.path)
+
+		self.assertFalse(config['thehive']['enabled'])
+		self.assertTrue(config['disk']['enabled'])
+
+	def test_an_installation_that_saved_the_section_keeps_thehive_as_its_default(self):
+		# Gravou a seção sem dizer nada sobre o TheHive: é uma instalação de antes,
+		# e para ela o padrão continua sendo o de sempre
+		self.write({'ticketing': {'jira': {'enabled': True}}})
+
+		config = tickets.load_config(path = self.path)
+
+		self.assertTrue(config['thehive']['enabled'])
+		self.assertTrue(config['jira']['enabled'])
 
 
 class TheHiveCredentials(unittest.TestCase):

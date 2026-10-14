@@ -1,17 +1,17 @@
-# Microsoft 365 (OAuth 2.0) setup for ThePhish
+# Microsoft 365 (OAuth 2.0) setup for Bluephish
 
-Since Microsoft disabled basic authentication on Exchange Online, ThePhish supports
+Since Microsoft disabled basic authentication on Exchange Online, Bluephish supports
 Modern Authentication (OAuth 2.0) using the **client credentials flow**
 (app-only access, no interactive login required — suitable for a headless service).
 
 When Microsoft 365 is selected in the **Email synchronization** panel of the web
-interface, ThePhish reads the mailbox through the **Microsoft Graph API**; the IMAP
+interface, Bluephish reads the mailbox through the **Microsoft Graph API**; the IMAP
 XOAUTH2 path described below is still supported through the legacy configuration.
 
 ## 1. Register an application in Microsoft Entra ID (Azure AD)
 
 1. Go to **Microsoft Entra admin center → Identity → Applications → App registrations → New registration**.
-2. Name it (e.g. `ThePhish-IMAP`), single tenant, no redirect URI needed.
+2. Name it (e.g. `Bluephish-IMAP`), single tenant, no redirect URI needed.
 3. Note down the **Application (client) ID** and the **Directory (tenant) ID**.
 4. Under **Certificates & secrets → New client secret**, create a secret and note down its **value**
    (it is shown only once).
@@ -25,7 +25,7 @@ Microsoft 365 provider configured from the web interface):
 2. Select **Application permissions → Mail.ReadWrite** (read/write is needed so that the
    processed emails can be marked as read).
 3. Click **Grant admin consent** for the tenant.
-4. Optionally restrict the app to the ThePhish mailbox only with an
+4. Optionally restrict the app to the Bluephish mailbox only with an
    [application access policy](https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access):
    `New-ApplicationAccessPolicy -AppId <CLIENT_ID> -PolicyScopeGroupId <MailEnabledSecurityGroup> -AccessRight RestrictAccess`.
 
@@ -50,7 +50,7 @@ Connect-ExchangeOnline -Organization <tenant>.onmicrosoft.com
 
 # ObjectId = the "Object ID" of the ENTERPRISE APPLICATION (service principal),
 # not the object id of the app registration
-New-ServicePrincipal -AppId <APPLICATION_CLIENT_ID> -ObjectId <SERVICE_PRINCIPAL_OBJECT_ID> -DisplayName "ThePhish IMAP"
+New-ServicePrincipal -AppId <APPLICATION_CLIENT_ID> -ObjectId <SERVICE_PRINCIPAL_OBJECT_ID> -DisplayName "Bluephish IMAP"
 
 # Give the app full access to the ThePhish mailbox only
 Add-MailboxPermission -Identity "thephish@yourdomain.com" -User <SERVICE_PRINCIPAL_OBJECT_ID> -AccessRights FullAccess
@@ -62,7 +62,7 @@ If IMAP is disabled for the mailbox, enable it:
 Set-CASMailbox -Identity "thephish@yourdomain.com" -ImapEnabled $true
 ```
 
-## 4. Configure ThePhish
+## 4. Configure Bluephish
 
 Edit `app/configuration.json` (or `docker/thephish_conf_files/configuration.json` when using Docker):
 
@@ -98,7 +98,7 @@ Token acquisition and caching are handled by `app/m365_auth.py` using MSAL:
   expiry (client-credentials tokens last ~60–90 minutes; there is no refresh token in
   this flow — a new token is simply requested).
 - The token is passed to Exchange Online through the SASL `XOAUTH2` mechanism on the
-  existing `imaplib` connection, so the whole email parsing logic of ThePhish is unchanged.
+  existing `imaplib` connection, so the email parsing logic is the same for every provider.
 
 ## Troubleshooting
 

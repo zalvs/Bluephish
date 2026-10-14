@@ -1,51 +1,26 @@
 ## The Docker stack
 
-**The installation guide is the [root README](../README.md).** Clone, run `./setup.sh`, create
-the first administrator, configure through the web interface. This file only covers what is
-specific to the containers: what runs, and the two services that have their own admin UI to
-set up (MISP and TheHive).
-
-> This file used to be a second, full installation guide inherited from upstream. It
-> contradicted the root README on almost every step — it cloned the upstream repository, told
-> you to edit `configuration.json` by hand, and sent you to `http://localhost:8080` when the
-> interface is HTTPS-only. Two guides that disagree is what makes a repository hard to
-> install, so the flow now lives in one place.
+**The installation guide is the [root README](../README.md).** This file only covers what is
+specific to the containers.
 
 ### What runs
+
+`docker compose up -d` starts a single container:
 
 | Service | Port (localhost) | Image | Needed for |
 |---|---|---|---|
 | **thephish** | **8080 (HTTPS)** | built from `../app` | the application itself |
-| thehive | 9000 | `thehiveproject/thehive4:4.1.9-1` | case management, and one of the sources of the Cases/Phishing/Executive screens — **optional, see below** |
-| cassandra | (internal) | `cassandra:3.11` | TheHive's database |
-| misp | 80 / 443 | `coolacid/misp-docker:core-v2.4.148a` | exporting malicious cases — **optional** |
-| mysql · redis | (internal) | `mysql:8.0.26` · `redis:6.2.5` | MISP's backing stores |
-| hive-ai-agent | 8008 | built from `../hive_ai_agent` | optional IOC correlation on webhooks |
 
-Every port is published on `127.0.0.1` only. There is **no Cortex and no Elasticsearch**: the
-analyzers run inside the ThePhish container (`app/analyzers.py`), configured from its own
-**Integrações → Analisadores** screen, and the verdict emails go out over SMTP from
-`app/mailer.py`. Both used to be Cortex's job.
+TheHive, MISP and the AI companion agent are optional and live in
+`docker-compose.integrations.yml`; see [integrations](../docs/integrations.md) to run them.
 
-MISP is the one service you can drop entirely. Its ports 80/443 collide with any local web
-server, and nothing in the analysis pipeline needs it — only the export of a `Malicious` case.
-To do without it, comment out the `misp`, `mysql` and `redis` services **and** remove `misp`
-from the `depends_on` list of `thephish` — compose refuses a dependency on a service that no
-longer exists.
-
-**TheHive can also be dropped**, with a cost the table cannot express. The analysis does not
-go through it any more: observables live in the ThePhish container's memory from parsing to
-verdict, and TheHive receives the finished report like Jira and disk do. The **Cases**,
-**Phishing** and **Executive** screens read their history from the enabled destinations, so
-removing TheHive only empties them if neither disk nor Jira is recording — and Jira records
-answer less (no observable counts) than TheHive or disk do. Comment out `thehive`,
-`cassandra` and `hive-ai-agent` (it only works on TheHive webhooks), and remove `thehive`
-from the `depends_on` of `thephish`, only if Jira or disk is your record of truth — that also
-frees about 3 GB of RAM, which is most of the stack's requirement.
+Every port is published on `127.0.0.1` only. The analyzers run inside the Bluephish container
+(`app/analyzers.py`), configured from the **Integrações → Analisadores** screen, and the
+verdict emails go out over SMTP from `app/mailer.py`.
 
 ### Where the app calls out to
 
-The ThePhish container makes outbound connections you should know about before putting it
+The Bluephish container makes outbound connections you should know about before putting it
 behind a restrictive egress policy: the mailbox (IMAP or Microsoft Graph), the LLM endpoint,
 every enabled analyzer vendor (and each analyst-defined analyzer), the SMTP relay, each
 enabled ticket destination, Entra ID (`login.microsoftonline.com`: SSO sign-in and the app
@@ -62,13 +37,13 @@ addresses are the ones you type.
 
 Two traps, both the same trap:
 
-- A destination **inside this stack** is reached by Docker service name, not `localhost` —
-  `http://thehive:9000`, never `http://localhost:9000`. Inside the container, `localhost` is
-  the container.
+- A service started from the **integrations file** is reached by Docker service name, not
+  `localhost`: `http://thehive:9000`, never `http://localhost:9000`. Inside the container,
+  `localhost` is the container.
 - A destination **on the host machine** (a self-hosted Jira, an internal Splunk) is reached at
-  `host.docker.internal`, which `docker-compose.yml` already maps for `hive-ai-agent` via
-  `extra_hosts`. Add the same `extra_hosts` entry to the `thephish` service if you need it
-  there.
+  `host.docker.internal`, which `docker-compose.integrations.yml` maps for `hive-ai-agent` via
+  `extra_hosts`. Add `extra_hosts: ["host.docker.internal:host-gateway"]` to the `thephish`
+  service in `docker-compose.yml` if you need it there.
 
 > This is also why a connector (**Integrações → Tickets**, below the built-in destinations —
 > [architecture](../docs/conectores-genericos.md) ·
@@ -76,59 +51,6 @@ Two traps, both the same trap:
 > tick *allow internal network*: from inside a container, "the internal network" includes the
 > whole compose network and the host. The destination is re-checked on every dispatch, not
 > only when you save it.
-
-### Setting up TheHive
-
-TheHive does **not** prompt you to create an account: it ships with a published default.
-
-1. Go to `http://localhost:9000` and log in with `admin@thehive.local` / `secret`.
-2. **Change that password now.** It is a documented default, and port 9000 is open on the host.
-3. *Organisations* → **New organisation**, any name.
-4. Inside it, **Create new user** with profile `org-admin`, set a password, then
-   **Create API key** → **Reveal**.
-5. Paste `http://thehive:9000` and that key into the **TheHive** card on ThePhish's **Integrações → Tickets** tab.
-   The URL is the Docker service name, not `localhost` — inside the container, `localhost` is
-   the container.
-
-### Configure the MISP container (optional)
-
-Skip this whole section unless you want malicious cases exported to MISP.
-
-1. Go to `https://localhost` and log in with the default credentials `admin@admin.test` /
-   `admin`. **Change the password immediately**, same reasoning as above.
-2. *Administration* → *Add Organization*: give it a name, **Generate UUID**, submit.
-3. *Administration* → *Add User*: email `sync_user@<yourdomain>`, your organization, role
-   **Sync User**. Open the user, **Add authentication key**, and save the key.
-4. Optionally enable feeds: *Sync Actions* → *List Feeds* → *Load default feed metadata* →
-   select → *Enable selected*.
-
-Then wire TheHive to it — **this is what is missing by default**, and without it every
-malicious case records *"a exportação para o MISP falhou"* in the TheHive destination's outcome. Uncomment the MISP block
-in `thehive/application.conf` and put the authentication key in it:
-
-```
-play.modules.enabled += org.thp.thehive.connector.misp.MispModule
-misp {
-  interval: 5 min
-  servers: [
-    {
-      name = "MISP THP"                       # must match the MISP export name on the TheHive card (Integrações → Tickets)
-      url = "https://misp/"
-      auth {
-        type = key
-        key = "<AuthenticationKeyOfTheSyncUser>"
-      }
-      wsConfig { ssl { loose { acceptAnyCertificate: true } } }
-    }
-  ]
-}
-```
-
-TheHive reads that file only at startup, so restart it:
-
-```bash
-docker compose restart thehive
-```
 
 ### Testar a metodologia de score no container
 
@@ -157,7 +79,7 @@ ele não é atualizado pelo `git pull`, e não precisa ser.
 docker compose exec thephish python3 manage.py weights
 ```
 
-**Pontuar um `.eml` sem rede, sem cota de fornecedor e sem TheHive:**
+**Pontuar um `.eml` sem rede, sem cota de fornecedor e sem destino de registro:**
 
 ```bash
 docker compose exec thephish python3 manage.py score samples/newsletter.eml \
@@ -208,9 +130,9 @@ aparecem como "não pontuado", nunca como zero.
 
 ### Notes
 
-**Linux file ownership.** The containers write into `vol/`, and on Linux the directories are
-created as root while TheHive runs as uid 1000. If the logs fill with permission errors once
-the files exist:
+**Linux file ownership (only with the integrations).** The containers write into `vol/`, and on
+Linux the directories are created as root while TheHive runs as uid 1000. If the logs fill with
+permission errors once the files exist:
 
 ```bash
 docker compose stop
@@ -224,6 +146,7 @@ mid-analysis. Another browser is the simpler fix; to stay on Firefox, in `about:
 `network.http.network-changed.timeout` from 5 to 60 and set
 `network.websocket.extensions.permessage-deflate` to `false`.
 
-> **⚠️ This stack is a minimal configuration, not a production deployment.** The backing
-> stores run with development credentials and the certificates are self-signed. For production,
-> follow the official installation guides of TheHive and MISP.
+> **⚠️ This stack is a minimal configuration, not a production deployment.** The certificate is
+> self-signed, and the optional services in the integrations file run with development
+> credentials. For production, put Bluephish behind a reverse proxy with TLS and install any
+> integration from its maintainers' own guides.
