@@ -1,6 +1,8 @@
-Bluephish — automated phishing email analysis
+# Bluephish — automated phishing email analysis
 
-Automated phishing-email analysis for a SOC/CSIRT. ThePhish reads a monitored mailbox,
+[Português (Brasil)](README.pt-BR.md) · **English**
+
+Automated phishing-email analysis for a SOC/CSIRT. Bluephish reads a monitored mailbox,
 extracts the observables from each suspicious email (URLs, domains, IPs, addresses,
 attachment hashes), runs them through its own reputation analyzers, asks an **LLM**
 for a social-engineering assessment, and produces a verdict — `Safe`, `Suspicious` or
@@ -255,9 +257,10 @@ Drop your rules there and leave the analyzer's path at the default. That directo
 mount, so rules survive a rebuild and you do not need to restart anything to add one.
 
 **Verdict emails** used to leave through Cortex's *Mailer* responder. They now go out over
-SMTP, configured in **Settings → E-mail → Servidor de envio (SMTP)**. There is **one switch per notice** in **Settings → Notifications** — analysis started, Safe, Malicious, and the errata, which starts off — plus the SMTP server's own switch in the E-mail tab, and a notice leaves only when its switch **and** the SMTP server are both on.
-notice** — analysis started, Safe, Malicious, and the errata, which starts off — plus the SMTP
-server's own switch below them, and a notice leaves only when its switch **and** the SMTP
+SMTP, configured in **Settings → E-mail → Servidor de envio (SMTP)**. There is **one switch per
+notice** in **Settings → Notifications** — analysis started, Safe, Malicious, and the errata, which
+starts off — plus the SMTP server's own switch below them, and a notice leaves only when its
+switch **and** the SMTP
 server are both on. A Suspicious verdict never mails the reporter, and a reanalysis mails
 nobody. The **Test** button opens the session, negotiates TLS and authenticates — and
 deliberately sends no message, so it never mails anyone by accident.
