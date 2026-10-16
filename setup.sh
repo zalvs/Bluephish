@@ -29,6 +29,8 @@ done
 # The compose files to use, always from inside docker/. Without -f, Compose reads
 # docker-compose.yml and merges a local docker-compose.override.yml on its own;
 # once -f is given it stops doing that, so the override is added back by hand.
+cd "$(dirname "$0")"
+REPO_ROOT="$(pwd)"
 COMPOSE_FILES=()
 if [ "$WITH_INTEGRATIONS" = 1 ]; then
 	COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.integrations.yml)
@@ -37,8 +39,6 @@ if [ "$WITH_INTEGRATIONS" = 1 ]; then
 	fi
 fi
 
-cd "$(dirname "$0")"
-REPO_ROOT="$(pwd)"
 ENV_FILE="docker/.env"
 
 say()  { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
@@ -120,11 +120,16 @@ fi
 ( cd docker && docker compose ${COMPOSE_FILES[@]+"${COMPOSE_FILES[@]}"} up -d --build )
 
 # --- 4. wait for the interface ----------------------------------------------
-say "Waiting for the web interface on https://localhost:8080"
+# The port is read from Compose, so a docker-compose.override.yml that remaps it works.
+PUBLISHED="$( cd docker && docker compose ${COMPOSE_FILES[@]+"${COMPOSE_FILES[@]}"} port thephish 8080 2>/dev/null | head -1 | tr -d '\015' )"
+HOST_PORT="${PUBLISHED##*:}"
+HOST_PORT="${HOST_PORT:-8080}"
+URL="https://localhost:${HOST_PORT}"
+say "Waiting for the web interface on ${URL}"
 deadline=$(( $(date +%s) + 300 ))
-until curl -sk -m 3 -o /dev/null https://localhost:8080/login 2>/dev/null; do
+until curl -sk -m 3 -o /dev/null "${URL}/login" 2>/dev/null; do
 	if [ "$(date +%s)" -ge "$deadline" ]; then
-		warn "not up after 5 minutes. Check the logs with:  docker logs thephish"
+		warn "not up after 5 minutes. Check the logs with:  cd docker && docker compose logs --tail 100 thephish"
 		exit 1
 	fi
 	sleep 5
@@ -140,12 +145,12 @@ CONTAINER_NAME="${CONTAINER_NAME:-thephish}"
 
 if [ "$( docker exec "$CONTAINER_NAME" python3 manage.py list-users 2>/dev/null | grep -cE '^[0-9]+' || true )" -gt 0 ]; then
 	say "Setup complete"
-	printf '    Users already exist. Sign in at https://localhost:8080\n\n'
+	printf '    Users already exist. Sign in at %s\n\n' "$URL"
 else
 	say "Setup complete - one manual step left"
 	printf '    There is deliberately no default account. Create the first administrator\n'
 	printf '    (you will be prompted for a password, which is never echoed or logged):\n\n'
 	printf '        docker exec -it %s python3 manage.py create-admin\n\n' "$CONTAINER_NAME"
-	printf '    Then open https://localhost:8080 and accept the self-signed certificate\n'
+	printf '    Then open %s and accept the self-signed certificate\n' "$URL"
 	printf '    warning once (the session cookie requires HTTPS).\n\n'
 fi

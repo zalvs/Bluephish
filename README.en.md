@@ -92,12 +92,12 @@ docker compose exec thephish python3 manage.py create-admin
 ```
 
 You are asked for a username and a password (at least **12 characters**), typed twice and
-never shown on screen. (`thephish` is the Docker service name and stays that way in the
+never shown on screen (this needs an interactive terminal: use `docker compose exec` without `-T`). (`thephish` is the Docker service name and stays that way in the
 commands.)
 
 ### 6. Open Bluephish
 
-Go to **<https://localhost:8080>**.
+Go to **<https://localhost:8080>**. To check without a browser, `curl -k -s -o /dev/null -w '%{http_code}' https://localhost:8080/login` should print `200`.
 
 The certificate is self-signed, so the browser warns once: choose *Advanced*, then *Proceed to
 localhost* (in Firefox, *Accept the Risk and Continue*). Use `https` and `localhost`: the login

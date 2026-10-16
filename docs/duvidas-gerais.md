@@ -29,7 +29,11 @@ CA interna):
 1. **Tenha os dois arquivos em formato PEM:** o certificado e a chave privada **sem senha**.
    Se o certificado veio com cadeia intermediária, ponha o certificado do servidor e depois as
    intermediárias **no mesmo arquivo**. O certificado precisa ser o **par** da chave: com um
-   par errado a aplicação não sobe (veja o fim desta resposta).
+   par errado a aplicação não sobe: confira **antes de copiar** (o comando não imprime nada se
+   for um par):
+   ```bash
+   diff <(openssl x509 -in seu-certificado.pem -noout -pubkey) <(openssl pkey -in sua-chave.pem -pubout) && echo "par OK"
+   ```
 2. **Guarde os atuais**, para poder voltar:
    ```bash
    cd docker/vol/thephish_data
@@ -81,8 +85,9 @@ Detalhes que importam:
 ## Como mudo a porta?
 
 A porta padrão é a **8080**, ligada só a `127.0.0.1`. Mude-a **depois** da primeira instalação
-(o `setup.sh` espera a resposta na 8080) e **sem editar o `docker-compose.yml`**, para as
-atualizações com `git pull` não conflitarem:
+(o `setup.sh` lê a porta publicada, então o arquivo abaixo pode ser criado antes ou depois do
+primeiro `./setup.sh`) e **sem editar o `docker-compose.yml`**, para as atualizações com
+`git pull` não conflitarem:
 
 1. Crie o arquivo `docker/docker-compose.override.yml` (o git o ignora) com:
    ```yaml
@@ -101,6 +106,18 @@ atualizações com `git pull` não conflitarem:
 
 O `!override` exige o **Docker Compose 2.24 ou mais novo** (confira com `docker compose version`).
 Sem ele, a porta nova **se soma** à antiga e as duas ficam abertas, em vez de uma trocar a outra.
+
+**Já existe outro Bluephish/ThePhish no mesmo computador?** O contêiner se chama `thephish` e a
+imagem `thephish-custom:latest`; um segundo `up` brigaria pelo nome e um `build` sobrescreveria
+a imagem do outro. Defina outros nomes em `docker/.env`:
+
+```bash
+BLUEPHISH_CONTAINER=bluephish2
+BLUEPHISH_IMAGE=bluephish2:local
+```
+
+Nesse caso, troque também `thephish` por esse nome nos comandos `docker exec` e `docker inspect`
+(os `docker compose ... thephish` usam o nome do serviço e continuam iguais).
 
 ## Como acesso de outra máquina?
 
@@ -148,6 +165,11 @@ docker compose up -d --build thephish
 O `--build` é necessário: um simples `restart` sobe a imagem **antiga**. Seus dados em
 `docker/vol/` e suas credenciais são mantidos.
 
+O `docker-compose.override.yml`, se existir, o git ignora e continua valendo; o `up -d --build`
+aplica os dois. O `whitelist.json` também é gravado pela aplicação: se o aborto do `git pull`
+citar esse arquivo, use o mesmo procedimento abaixo trocando o nome e, depois, reimporte suas
+regras pela interface (Whitelist → Importar) a partir da cópia guardada.
+
 **Se o `git pull` abortar** com `Your local changes to the following files would be overwritten
 by merge: docker/thephish_conf_files/configuration.json`, é porque a versão nova também mexeu
 nesse arquivo, que guarda as suas credenciais. Isso é raro e tem solução sem perder nada.
@@ -184,15 +206,16 @@ git update-index --skip-worktree $F    # 4. trava o arquivo de novo
 
 ## Como faço backup e restauro?
 
-O que importa fica em três lugares: `docker/vol/` (banco de dados, trilha de auditoria,
-mensagens guardadas, chaves TLS), `docker/thephish_conf_files/` (configuração e whitelist) e
-`docker/.env` (a chave de sessão).
+O que importa fica em quatro lugares: `docker/vol/` (banco de dados, trilha de auditoria,
+mensagens guardadas, chaves TLS), `docker/thephish_conf_files/` (`configuration.json` e
+`whitelist.json`, as regras dos analistas), `docker/.env` (a chave de sessão) e, se você criou,
+`docker/docker-compose.override.yml` (porta, nomes).
 
 **Backup**, na raiz do repositório. Pare a aplicação antes, para o banco ficar consistente:
 
 ```bash
 cd docker && docker compose stop thephish && cd ..
-tar czf bluephish-backup-$(date +%F).tar.gz docker/vol docker/thephish_conf_files docker/.env
+tar czf bluephish-backup-$(date +%F).tar.gz docker/vol docker/thephish_conf_files docker/.env $(ls docker/docker-compose.override.yml 2>/dev/null)
 cd docker && docker compose start thephish
 ```
 

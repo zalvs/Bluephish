@@ -29,8 +29,11 @@ CA):
 1. **Have both files in PEM format:** the certificate and the private key **without a
    passphrase**. If the certificate came with an intermediate chain, put the server
    certificate followed by the intermediates **in the same file**. The certificate must be
-   the **pair** of the key: with a wrong pair the application does not start (see the end of
-   this answer).
+   the **pair** of the key: with a wrong pair the application does not start, so check **before copying** (the command
+   prints nothing if it is a pair):
+   ```bash
+   diff <(openssl x509 -in your-certificate.pem -noout -pubkey) <(openssl pkey -in your-key.pem -pubout) && echo "pair OK"
+   ```
 2. **Keep the current ones**, so you can go back:
    ```bash
    cd docker/vol/thephish_data
@@ -80,8 +83,8 @@ Details that matter:
 
 ## How do I change the port?
 
-The default port is **8080**, bound to `127.0.0.1` only. Change it **after** the first
-installation (`setup.sh` waits for an answer on 8080) and **without editing
+The default port is **8080**, bound to `127.0.0.1` only. `setup.sh` reads the published port,
+so the file below can be created before or after the first `./setup.sh`; **do not edit
 `docker-compose.yml`**, so `git pull` updates do not conflict:
 
 1. Create the file `docker/docker-compose.override.yml` (git ignores it) with:
@@ -102,6 +105,18 @@ installation (`setup.sh` waits for an answer on 8080) and **without editing
 `!override` needs **Docker Compose 2.24 or newer** (check with `docker compose version`).
 Without it, the new port is **added** to the old one and both stay open, instead of one
 replacing the other.
+
+**Is another Bluephish/ThePhish already on the same computer?** The container is called
+`thephish` and the image `thephish-custom:latest`; a second `up` would fight over the name and
+a `build` would overwrite the other one's image. Set other names in `docker/.env`:
+
+```bash
+BLUEPHISH_CONTAINER=bluephish2
+BLUEPHISH_IMAGE=bluephish2:local
+```
+
+Then use that name instead of `thephish` in `docker exec` and `docker inspect` commands (the
+`docker compose ... thephish` ones use the service name and stay the same).
 
 ## How do I access it from another machine?
 
@@ -150,6 +165,11 @@ docker compose up -d --build thephish
 The `--build` is needed: a plain `restart` starts the **old** image. Your data in
 `docker/vol/` and your credentials are kept.
 
+A `docker-compose.override.yml`, if you have one, is ignored by git and stays in force; `up
+-d --build` applies both. `whitelist.json` is also written by the application: if the abort
+names that file, use the same procedure below with that name, then re-import your rules in
+the interface (Whitelist → Import) from the copy you kept.
+
 **If `git pull` aborts** with `Your local changes to the following files would be overwritten
 by merge: docker/thephish_conf_files/configuration.json`, it is because the new version also
 changed that file, which holds your credentials. This is rare and has a fix that loses
@@ -186,16 +206,17 @@ git update-index --skip-worktree $F    # 4. lock the file again
 
 ## How do I back up and restore?
 
-What matters lives in three places: `docker/vol/` (database, audit trail, stored messages,
-TLS keys), `docker/thephish_conf_files/` (configuration and whitelist) and `docker/.env` (the
-session key).
+What matters lives in four places: `docker/vol/` (database, audit trail, stored messages,
+TLS keys), `docker/thephish_conf_files/` (`configuration.json` and `whitelist.json`, the
+analysts' rules), `docker/.env` (the session key) and, if you created it,
+`docker/docker-compose.override.yml` (port, names).
 
 **Back up**, from the repository root. Stop the application first so the database is
 consistent:
 
 ```bash
 cd docker && docker compose stop thephish && cd ..
-tar czf bluephish-backup-$(date +%F).tar.gz docker/vol docker/thephish_conf_files docker/.env
+tar czf bluephish-backup-$(date +%F).tar.gz docker/vol docker/thephish_conf_files docker/.env $(ls docker/docker-compose.override.yml 2>/dev/null)
 cd docker && docker compose start thephish
 ```
 

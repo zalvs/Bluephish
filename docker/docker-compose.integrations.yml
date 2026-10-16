@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Optional integrations. None of this is needed to run Bluephish.
 #
 # Used together with the main file, from this directory:

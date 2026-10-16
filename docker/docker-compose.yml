@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Bluephish. `docker compose up -d` starts the application and nothing else.
 #
 # TheHive and MISP are optional integrations and live in
@@ -11,8 +9,8 @@ services:
     restart: unless-stopped
     build:
       context: ../app
-    image: thephish-custom:latest
-    container_name: thephish
+    image: ${BLUEPHISH_IMAGE:-thephish-custom:latest}
+    container_name: ${BLUEPHISH_CONTAINER:-thephish}
     ports:
       - '127.0.0.1:8080:8080'
     environment:
