@@ -31,7 +31,7 @@ the credentials. Click **Salvar** when done.
   password will not work.
 - **Microsoft 365:** **TENANT ID**, **CLIENT ID**, **CLIENT SECRET** and the mailbox of an
   Azure AD app registration with the **`Mail.ReadWrite`** application permission and admin
-  consent. Walkthrough: [`m365-oauth-setup.md`](../m365-oauth-setup.md). Add
+  consent. Walkthrough: [`m365-oauth-setup.md`](m365-oauth-setup.md). Add
   **`User.Read.All`** to the same registration to enable **Configurações → Departamentos**,
   which reads each reporter's department from Entra ID and feeds the "Departamentos mais
   visados" card. Without it that card stays empty; nothing else is affected.
@@ -67,7 +67,7 @@ Open **SISTEMA → Configurações → IA** (language model) and **Análise auto
 Pick the provider from the dropdown and it fills the endpoint for you; then set the model
 (e.g. `qwen2.5:7b` locally, or `anthropic/claude-3.5-sonnet` on OpenRouter). For local
 Ollama, pull the model first: `ollama pull qwen2.5:7b`. More detail in
-[`llm-analysis.md`](../llm-analysis.md); provider documentation: <https://docs.ollama.com/>,
+[`llm-analysis.md`](llm-analysis.md); provider documentation: <https://docs.ollama.com/>,
 <https://openrouter.ai/docs>.
 
 The **Escalonamento** block, in the same tab, decides how much the LLM is trusted:

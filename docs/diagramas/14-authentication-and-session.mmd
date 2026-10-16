@@ -1,0 +1,77 @@
+flowchart TD
+  A0("Analyst in Browser (BluePhish UI)")
+  L1["First factor: local password<br/>POST /api/auth/login"]
+  L2{"auth_source<br/>is sso?"}
+  L3{"account<br/>locked?"}
+  L4{"user exists and<br/>password ok?"}
+  F1["User.register_failed_login()<br/>5th failure: locked 15 min"]
+  DENY["401 generic error<br/>same for every refusal"]
+  S1["First factor: SSO (OIDC + PKCE)<br/>GET /auth/sso/start<br/>sso.begin(): flow kept in session"]
+  IDP["Identity provider<br/>(Entra ID / OIDC)"]
+  S2{"GET /auth/sso/callback<br/>checks pass?"}
+  S3{"sso.role_for_claims()<br/>finds a mapped group<br/>or App Role?"}
+  S4["models.sso_sign_in()<br/>create sso account or update role<br/>clears failed_logins and lock"]
+  SE["redirect<br/>/login?sso_error=code<br/>fixed code list"]
+  subgraph MFAG["Second factor: mandatory TOTP"]
+    CH["auth._start_mfa_challenge()<br/>session cleared, mfa_pending set<br/>no login_user yet"]
+    C1{"_challenge_user():<br/>under 10 min and<br/>not locked?"}
+    CR["restart: 401<br/>login.js back to password form"]
+    M0{"User.mfa_is_enrolled()?"}
+    M1["POST /api/auth/mfa/setup<br/>new secret and QR, then<br/>POST /api/auth/mfa/activate"]
+    M2["POST /api/auth/mfa/verify<br/>step must be newer than<br/>mfa_last_counter"]
+    M3{"mfa.verify():<br/>code matches?"}
+    F2["User.register_failed_login()<br/>same counter as the password, 401"]
+    OK["auth._complete_login()<br/>reset failures, login_user,<br/>start_session(), stamp mfa_ok"]
+  end
+  subgraph REQ["Every request, sign-in included"]
+    R1["CSRFProtect: token check on<br/>POST / PUT / PATCH / DELETE"]
+    R8["400 CSRF error (Flask-WTF)<br/>token or Referer missing or wrong"]
+    R2{"endpoint in<br/>PRE_SESSION_ENDPOINTS?"}
+    R3{"enforce_session_policy():<br/>anonymous, or<br/>session valid?"}
+    R4{"enforce_mfa_policy():<br/>anonymous, or<br/>mfa_ok stamp?"}
+    R5["audit, forget sid, logout_user<br/>session cleared<br/>401 or redirect /login"]
+    R6{"requires_role(minimum):<br/>authenticated and<br/>has_role_at_least?"}
+    R7["anonymous: 401 or redirect /login<br/>role too low: 403 and audit<br/>authorization_denied"]
+    R9["view runs<br/>after_request: security headers<br/>and csrf_token cookie"]
+  end
+  A0 -->|"password"| L1
+  A0 -->|"SSO button"| S1
+  L1 --> L2
+  L2 -->|"yes"| DENY
+  L2 -->|"no"| L3
+  L3 -->|"yes"| DENY
+  L3 -->|"no"| L4
+  L4 -->|"no, known user"| F1
+  L4 -->|"no, unknown user"| DENY
+  F1 --> DENY
+  L4 --->|"yes"| CH
+  S1 -->|"refused"| SE
+  S1 --> IDP
+  IDP -->|"authorization code"| S2
+  S2 -->|"no"| SE
+  S2 -->|"yes"| S3
+  S3 -->|"no"| SE
+  S3 -->|"yes"| S4
+  S4 -->|"ValueError"| SE
+  S4 ---> CH
+  CH -->|"/login or login.js"| C1
+  C1 -->|"no"| CR
+  C1 -->|"yes"| M0
+  M0 -->|"no: enroll"| M1
+  M0 -->|"yes: verify"| M2
+  M1 --> M3
+  M2 --> M3
+  M3 -->|"no"| F2
+  M3 -->|"yes"| OK
+  F2 -->|"next code"| C1
+  OK -->|"signed session cookie"| R1
+  R1 -->|"token invalid"| R8
+  R1 -->|"ok, or GET"| R2
+  R2 -->|"yes"| R9
+  R2 -->|"no"| R3
+  R3 -->|"no"| R5
+  R3 -->|"yes"| R4
+  R4 -->|"no"| R5
+  R4 -->|"yes"| R6
+  R6 -->|"no"| R7
+  R6 -->|"yes"| R9

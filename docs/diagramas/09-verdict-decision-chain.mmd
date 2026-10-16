@@ -1,0 +1,74 @@
+flowchart TD
+  START["run_analysis.terminate_analysis()<br/>inputs: analyzer, LLM, auth,<br/>bulk, injection, content key"]
+  BASE["1. Analyzer baseline<br/>malicious result: Malicious<br/>suspicious: Suspicious, else Safe"]
+  LLM0{"2. LLM detected social engineering<br/>and verdict Safe or Suspicious?"}
+  LLM1{"2a. risk ≥ malicious_escalation?"}
+  LLM1G{"council trusts autonomous action<br/>AND sender domain<br/>not authenticated?"}
+  MAL1("Malicious (autonomous)")
+  LLM2{"2b. verdict Suspicious<br/>and risk ≥ High?"}
+  MAL2("Malicious (combined signal)")
+  LLM3{"2c. verdict Safe and risk ≥<br/>escalation_threshold?<br/>(RFC 8058 gate: at least High)"}
+  SUS1("Suspicious")
+  INJ{"3. Prompt-injection floor<br/>prompt_guard.inspect() found<br/>markers and verdict Safe?"}
+  SUS2("Suspicious")
+  CNC{"4. AI council floor<br/>llm_council.main() set<br/>holdForHuman and verdict Safe?"}
+  SUS3("Suspicious")
+  COV{"5. Coverage floor: verdict Safe,<br/>no LLM answer, no analyzer<br/>result other than info?"}
+  SUS4("Suspicious")
+  MODE{"6. scoring mode?"}
+  SCO["scoring.compute()<br/>current verdict as floor<br/>gives score, tier, spam label"]
+  T1{"tier phishing and verdict<br/>Safe or Suspicious?"}
+  AUTHG{"sender domain<br/>authenticated?"}
+  MAL3("Malicious")
+  SUS5("Safe becomes Suspicious<br/>Suspicious stays")
+  T2{"tier suspicious, verdict Safe<br/>and label not spam?"}
+  SUS6("Suspicious")
+  WL{"7. Whitelist: active sender rule,<br/>domain authenticated, Reply-To<br/>aligned, verdict not Safe?"}
+  ATT{"malicious attachment? (hash or<br/>file observable marked IoC)"}
+  REG{"register_downgrade()<br/>within limits and recorded?"}
+  SAFE1("Safe (demotion counted)")
+  VM{"8. Verdict memory: not Safe,<br/>identical message reclassified<br/>legitimate, checks pass?"}
+  SAFE2("Safe (demotion counted)")
+  FINAL["Final verdict<br/>whitelist_state.record_analysis()<br/>reporter notice if eligible (diagram 7)"]
+
+  START --> BASE --> LLM0
+  LLM0 -->|"no"| INJ
+  LLM0 -->|"yes"| LLM1
+  LLM1 -->|"yes"| LLM1G
+  LLM1 -->|"no"| LLM2
+  LLM1G -->|"yes"| MAL1
+  LLM1G -->|"no: withheld"| LLM2
+  LLM2 -->|"yes"| MAL2
+  LLM2 -->|"no"| LLM3
+  LLM3 -->|"yes"| SUS1
+  LLM3 -->|"no"| INJ
+  MAL1 --> INJ
+  MAL2 --> INJ
+  SUS1 --> INJ
+  INJ -->|"yes"| SUS2 --> CNC
+  INJ -->|"no"| CNC
+  CNC -->|"yes"| SUS3 --> COV
+  CNC -->|"no"| COV
+  COV -->|"yes"| SUS4 --> MODE
+  COV -->|"no"| MODE
+  MODE -->|"off"| WL
+  MODE -->|"advisory / escalate"| SCO
+  SCO -->|"advisory"| WL
+  SCO -->|"escalate"| T1
+  T1 -->|"yes"| AUTHG
+  AUTHG -->|"no"| MAL3
+  AUTHG -->|"yes"| SUS5
+  T1 -->|"no"| T2
+  T2 -->|"yes"| SUS6
+  T2 -->|"no"| WL
+  MAL3 --> WL
+  SUS5 --> WL
+  SUS6 --> WL
+  WL -->|"no"| VM
+  WL -->|"yes"| ATT
+  ATT -->|"yes: kept"| VM
+  ATT -->|"no"| REG
+  REG -->|"yes"| SAFE1 --> FINAL
+  REG -->|"no: kept"| VM
+  VM -->|"yes"| SAFE2 --> FINAL
+  VM -->|"no"| FINAL

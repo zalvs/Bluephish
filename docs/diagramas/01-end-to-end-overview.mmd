@@ -1,0 +1,80 @@
+flowchart TD
+    PH["Phishing email"]
+    REP["Reporter"]
+    ANL["Analyst"]
+    MB["Monitored mailbox<br/>Microsoft 365 Graph,<br/>Gmail IMAP or legacy IMAP"]
+
+    subgraph APP["Bluephish app: intake and analysis"]
+        POLL["Mailbox queue, read-only<br/>list_emails.main()<br/>every unread email"]
+        SCH["Scheduler (off by default)<br/>each cycle: newest unread,<br/>analyzed oldest first"]
+        FETCH["case_from_email.main()<br/>fetches the message<br/>and marks it read"]
+        HAS{"Has a message/rfc822<br/>or octet-stream part?"}
+        ATT["Analyze that part as the<br/>reported email, reporter =<br/>From of the outer message"]
+        RAW["Analyze the message itself<br/>(raw), notices go to the<br/>monitored mailbox address"]
+        START["Start notice to the reporter<br/>notify_start_of_analysis()<br/>(start notice on, SMTP on)"]
+        RUN["run_analysis.main() (diagram 7)<br/>in-process analyzers,<br/>then the LLM assessment"]
+        VERD{"Final verdict (diagram 9)<br/>terminate_analysis()"}
+        TELL["Verdict email to reporter<br/>(that verdict's notice on,<br/>SMTP on, not a reanalysis)"]
+        HOLD["No email to the reporter<br/>the record waits<br/>for a human"]
+        DISP["tickets.dispatch() (diagram 11)<br/>each enabled destination<br/>whose minVerdict is met"]
+    end
+
+    subgraph EXT["External services"]
+        direction LR
+        VEND["Analyzer vendors<br/>get observables"]
+        LLMP["LLM provider gets<br/>email, findings<br/>and images"]
+    end
+
+    ANL2["Analyst"]
+
+    subgraph HDEST["History destinations"]
+        direction LR
+        TH["TheHive (optional)<br/>Safe, Malicious: resolved<br/>Suspicious: case left open"]
+        JI["Jira<br/>default minimum:<br/>Suspicious"]
+        DK["Disk archive<br/>(on by default)"]
+    end
+    GC["Generic connectors<br/>write-only"]
+
+    subgraph APP2["Bluephish app: work queues"]
+        DESK["Filas de Trabalho<br/>Suspicious and Malicious<br/>not yet reclassified"]
+        DEC{"Analyst decision<br/>(diagram 12)"}
+        FP["Marcar como legítimo<br/>the record becomes Safe<br/>errata if on and ticked"]
+        CONF["Confirmar malicioso<br/>raise or confirm Malicious<br/>record leaves the queue"]
+        REAN["Reanalyze kept original<br/>run_analysis.main() again<br/>new record, no email"]
+    end
+
+    SMTP["SMTP server"]
+    REP2["Reporter"]
+
+    PH -->|"lands in an inbox"| REP
+    REP -->|"forwards as attachment"| MB
+    PH -->|"or arrives directly"| MB
+    MB -->|"polled on a timer"| POLL
+    ANL -->|"Analyze, up to 50"| POLL
+    MB -->|"per analysisMode"| SCH
+    POLL -->|"chosen emails"| FETCH
+    SCH --> FETCH
+    FETCH --> HAS
+    HAS -->|"yes"| ATT
+    HAS -->|"no"| RAW
+    ATT --> START
+    RAW --> START
+    START --> RUN
+    RUN --> EXT
+    RUN --> VERD
+    VERD -->|"Safe or Malicious"| TELL
+    VERD -->|"Suspicious"| HOLD
+    TELL -->|"then"| DISP
+    HOLD -->|"then"| DISP
+    DISP -->|"TheHive first"| HDEST
+    DISP -->|"connectors last"| GC
+    ANL2 -->|"works the queue"| DESK
+    HDEST -->|"history"| DESK
+    DESK --> DEC
+    DEC --> FP
+    DEC --> CONF
+    DESK -->|"any analyst"| REAN
+    START -->|"notice"| SMTP
+    TELL -->|"notice"| SMTP
+    FP -->|"errata"| SMTP
+    SMTP -->|"email"| REP2

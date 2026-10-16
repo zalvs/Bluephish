@@ -1,8 +1,8 @@
 # Diagrams
 
-How Bluephish works today, drawn from the code. Each diagram is [Mermaid](https://mermaid.js.org/) text that
-GitHub renders in place, so it is reviewed and versioned like the code it describes. Where a diagram and the
-code disagree, the code is right and the diagram is a bug.
+How Bluephish works today, drawn from the code. Each diagram is written as [Mermaid](https://mermaid.js.org/) text
+in `docs/diagramas/*.mmd`, so it is reviewed and versioned like the code it describes, and shown here as the SVG
+rendered from that text. Where a diagram and the code disagree, the code is right and the diagram is a bug.
 
 The product's interface is branded **BluePhish**; the service, the container and the code path keep the
 `thephish` name ([§2](BLUEPHISH_ARCHITECTURE.md#2-folder-structure)). The *why* behind each design choice lives in
@@ -48,88 +48,9 @@ How a suspicious email becomes a verdict, who hears about it, and where it ends 
 
 The verdict decides everything after it. Safe and Malicious answer the reporter: they get a verdict email (when that notice and SMTP are both on), and TheHive resolves the case. Suspicious is this application's "a human decides" state. Nobody is emailed, the TheHive case stays open, and the record waits in the analyst's work queues until someone reclassifies or confirms it. Malicious records also wait in a queue of their own until an analyst confirms them. The reporter has already been answered and the case resolved, so confirming changes no verdict the reporter saw: it records the decision, writes it back to the destination and takes the record out of the queue. That later decision appears here only at overview level. [diagram 12](#12-after-the-verdict) details it.
 
-```mermaid
-flowchart TD
-    PH["Phishing email"]
-    REP["Reporter"]
-    ANL["Analyst"]
-    MB["Monitored mailbox<br/>Microsoft 365 Graph,<br/>Gmail IMAP or legacy IMAP"]
+[![Diagram 1: End-to-end overview](docs/diagramas/01-end-to-end-overview.svg)](docs/diagramas/01-end-to-end-overview.svg)
 
-    subgraph APP["Bluephish app: intake and analysis"]
-        POLL["Mailbox queue, read-only<br/>list_emails.main()<br/>every unread email"]
-        SCH["Scheduler (off by default)<br/>each cycle: newest unread,<br/>analyzed oldest first"]
-        FETCH["case_from_email.main()<br/>fetches the message<br/>and marks it read"]
-        HAS{"Has a message/rfc822<br/>or octet-stream part?"}
-        ATT["Analyze that part as the<br/>reported email, reporter =<br/>From of the outer message"]
-        RAW["Analyze the message itself<br/>(raw), notices go to the<br/>monitored mailbox address"]
-        START["Start notice to the reporter<br/>notify_start_of_analysis()<br/>(start notice on, SMTP on)"]
-        RUN["run_analysis.main() (diagram 7)<br/>in-process analyzers,<br/>then the LLM assessment"]
-        VERD{"Final verdict (diagram 9)<br/>terminate_analysis()"}
-        TELL["Verdict email to reporter<br/>(that verdict's notice on,<br/>SMTP on, not a reanalysis)"]
-        HOLD["No email to the reporter<br/>the record waits<br/>for a human"]
-        DISP["tickets.dispatch() (diagram 11)<br/>each enabled destination<br/>whose minVerdict is met"]
-    end
-
-    subgraph EXT["External services"]
-        direction LR
-        VEND["Analyzer vendors<br/>get observables"]
-        LLMP["LLM provider gets<br/>email, findings<br/>and images"]
-    end
-
-    ANL2["Analyst"]
-
-    subgraph HDEST["History destinations"]
-        direction LR
-        TH["TheHive (optional)<br/>Safe, Malicious: resolved<br/>Suspicious: case left open"]
-        JI["Jira<br/>default minimum:<br/>Suspicious"]
-        DK["Disk archive<br/>(on by default)"]
-    end
-    GC["Generic connectors<br/>write-only"]
-
-    subgraph APP2["Bluephish app: work queues"]
-        DESK["Filas de Trabalho<br/>Suspicious and Malicious<br/>not yet reclassified"]
-        DEC{"Analyst decision<br/>(diagram 12)"}
-        FP["Marcar como legítimo<br/>the record becomes Safe<br/>errata if on and ticked"]
-        CONF["Confirmar malicioso<br/>raise or confirm Malicious<br/>record leaves the queue"]
-        REAN["Reanalyze kept original<br/>run_analysis.main() again<br/>new record, no email"]
-    end
-
-    SMTP["SMTP server"]
-    REP2["Reporter"]
-
-    PH -->|"lands in an inbox"| REP
-    REP -->|"forwards as attachment"| MB
-    PH -->|"or arrives directly"| MB
-    MB -->|"polled on a timer"| POLL
-    ANL -->|"Analyze, up to 50"| POLL
-    MB -->|"per analysisMode"| SCH
-    POLL -->|"chosen emails"| FETCH
-    SCH --> FETCH
-    FETCH --> HAS
-    HAS -->|"yes"| ATT
-    HAS -->|"no"| RAW
-    ATT --> START
-    RAW --> START
-    START --> RUN
-    RUN --> EXT
-    RUN --> VERD
-    VERD -->|"Safe or Malicious"| TELL
-    VERD -->|"Suspicious"| HOLD
-    TELL -->|"then"| DISP
-    HOLD -->|"then"| DISP
-    DISP -->|"TheHive first"| HDEST
-    DISP -->|"connectors last"| GC
-    ANL2 -->|"works the queue"| DESK
-    HDEST -->|"history"| DESK
-    DESK --> DEC
-    DEC --> FP
-    DEC --> CONF
-    DESK -->|"any analyst"| REAN
-    START -->|"notice"| SMTP
-    TELL -->|"notice"| SMTP
-    FP -->|"errata"| SMTP
-    SMTP -->|"email"| REP2
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/01-end-to-end-overview.mmd`](docs/diagramas/01-end-to-end-overview.mmd)</sub>
 
 - **Layout.** The Bluephish app is drawn as two boxes, intake and analysis above and the work queues below, with the recording destinations between them. The Reporter and the Analyst are each drawn twice, at the top and at the bottom. That only keeps the arrows short: each pair is one actor. The monitored mailbox is Microsoft 365 (Graph), Gmail (IMAP) or a legacy IMAP section.
 - **Two ways in, one fetch.** `case_from_email.main()` decides per message, not per setting. If the message has a message/rfc822 or application/octet-stream part, that part is analyzed as the reported email and the From of the outer message is the reporter. Otherwise the message itself is analyzed, and every notice goes to the monitored mailbox address. Mailing the verdict to the sender of a raw email would mean mailing it to the phisher.
@@ -150,48 +71,9 @@ The stack as docker/docker-compose.yml declares it, plus the optional services f
 
 The analyzers run inside the Bluephish app (analyzers.py), and the verdict email goes out through mailer.py. That is why most arrows leave the stack, with nothing inside the stack in between. They go to the Monitored mailbox, the LLM provider and the Identity provider (Entra ID / OIDC), and one arrow goes to the stack of external services that only the app calls: analyzer vendors, hosts named in the reported email, SMTP, Jira, blocking destinations, syslog and generic connectors. The app never talks to MISP. For a Malicious case it asks TheHive to export.
 
-```mermaid
-flowchart TD
-    U["Browser (BluePhish UI)<br/>socket.io client and fonts<br/>from cdnjs, Google Fonts"]
-    IDP["Identity provider<br/>(Entra ID / OIDC)"]
-    subgraph HOST["Docker host: every published port on 127.0.0.1"]
-        TP["Bluephish app, :8080<br/>thephish_app.py<br/>Flask-SocketIO, eventlet"]
-        SCH["Scheduler: off by default<br/>inbox poll: on by default<br/>queue loader, as greenlets"]
-        subgraph MOUNTS["Bind mounts of thephish"]
-            direction LR
-            CONF["thephish_conf_files/<br/>configuration.json,<br/>whitelist.json"]
-            DATA["vol/thephish_data<br/>thephish.db, auth.log,<br/>originals/, rendered/"]
-        end
-        DISK["Disk archive: report folders<br/>configurable path,<br/>default data/analises"]
-        THEHIVE["TheHive, 127.0.0.1:9000<br/>thehive4:4.1.9-1<br/>+ cassandra:3.11 over CQL"]
-        MISP["MISP, 127.0.0.1:80, 443<br/>misp-docker:core-v2.4.148a<br/>+ mysql:8.0.26, redis:6.2.5"]
-    end
-    MBX["Monitored mailbox<br/>Gmail or legacy IMAP,<br/>or Microsoft Graph"]
-    LLM["LLM provider<br/>Ollama /api/chat or<br/>OpenAI-compatible API"]
-    subgraph OUTG["External services called by the app"]
-        direction LR
-        VEND["Analyzer vendors<br/>analyzers.py,<br/>custom_analyzers.py"]
-        WEB["Hosts named in the email<br/>redirect hops: unshorten.py<br/>images: email_render.py"]
-        SMTP["SMTP server<br/>mailer.py"]
-        JIRA["Jira<br/>tickets.py"]
-        BLOCK["Blocking destinations<br/>(EOP / firewalls)<br/>responders.py"]
-        SYS["Syslog / SIEM<br/>audit_store.py"]
-        CONN["Generic connectors<br/>connectors.py, incl.<br/>volume alert webhooks"]
-    end
+[![Diagram 2: Deployment (Docker Compose)](docs/diagramas/02-deployment-docker-compose.svg)](docs/diagramas/02-deployment-docker-compose.svg)
 
-    U -->|"HTTPS + Socket.IO"| TP
-    U -.->|"sign-in redirect"| IDP
-    TP -->|"tokens"| IDP
-    TP -->|"read / write"| MOUNTS
-    MOUNTS -.->|"default path"| DISK
-    TP --> DISK
-    SCH ---->|"poll"| MBX
-    TP ---->|"fetch"| MBX
-    TP ----->|"thehive4py + REST"| THEHIVE
-    THEHIVE -..->|"export on Malicious"| MISP
-    TP -->|"chat API"| LLM
-    TP -----------> OUTG
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/02-deployment-docker-compose.mmd`](docs/diagramas/02-deployment-docker-compose.mmd)</sub>
 
 - **Solid arrows are network or file I/O. Dashed arrows are indirect or conditional.** The browser is redirected to Entra ID to sign in. The dashed 'default path' arrow from the bind mounts means the Disk archive sits inside the data mount (vol/thephish_data) only while it keeps its default path. The MISP export is done by TheHive's MispModule at the app's request: tickets.py create_thehive calls export_to_misp. That module ships commented out in docker/thehive/application.conf, yet the committed live configuration sets misp.id to 'MISP THP', so out of the box every Malicious case asks for an export and records that it failed. thephish still declares depends_on misp (next to depends_on thehive). Dropping MISP from the compose file therefore takes more than deleting three services.
 - **Only configuration.json, whitelist.json and vol/thephish_data survive a rebuild.** Their paths are under docker/. The two config files are mounted one file at a time from thephish_conf_files/, and vol/thephish_data is mounted at /root/thephish/data. The app keeps users, history, the audit trail and evidence there: thephish.db (SQLite), auth.log, the TLS pair, originals/, rendered/ and volume_alerts.json. The code is COPYed into the image (app/Dockerfile), so a git pull needs docker compose build, not a restart. tickets.py writes the Disk archive's report folders. The Disk archive, the YARA rules and any other path you configure must stay under /root/thephish/data, or they disappear with the container layer. tickets.py warns about this when it probes the disk destination. configuration.json is written at runtime and marked skip-worktree ([§5.4](BLUEPHISH_ARCHITECTURE.md#54-configuration-files-and-secrets), [§7.8](BLUEPHISH_ARCHITECTURE.md#78-the-live-configuration-carries-real-secrets-and-is-skip-worktree)).
@@ -212,52 +94,9 @@ This diagram shows the Python modules of app/, grouped by responsibility, and th
 
 Grouping keeps the picture readable; it does not mean the files of a group form one unit. The table under the diagram says what each module does and which module inside a group an edge lands on. pinned_http.py sits under six modules from four groups, because it is the connection half of the SSRF guard ([§4.5.1](BLUEPHISH_ARCHITECTURE.md#451-analyzers-the-analyst-defines)); the guard's own logic is in [diagram 15](#15-ssrf-guard-chain).
 
-```mermaid
-flowchart TD
-  APP["thephish_app.py<br/>the hub: routes, loops"]
-  RUN["run_analysis.py<br/>one analysis, end to end"]
-  WEB["Web, auth and CLI<br/>auth.py, mfa.py, sso.py<br/>models.py, manage.py<br/>generate_cert.py<br/>analyzer_guides.py<br/>responder_guides.py"]
-  MAIL["Mailbox, reported email<br/>list_emails.py<br/>inbox_pages.py<br/>email_provider.py<br/>graph_mail.py, m365_auth.py<br/>email_render.py<br/>render_store.py<br/>volume_alerts.py"]
-  PIPE["Extraction and analyzers<br/>case_from_email.py<br/>ioc_noise.py, spam_headers.py<br/>analyzers.py<br/>custom_analyzers.py<br/>unshorten.py, scoring.py<br/>whitelist.py<br/>whitelist_state.py<br/>whitelist_migration.py<br/>departments.py<br/>graph_directory.py"]
-  LLM["LLM<br/>llm_council.py<br/>llm_analysis.py<br/>llm_catalog.py<br/>prompt_guard.py"]
-  DEST["Destinations, notices, history<br/>tickets.py, connectors.py<br/>mailer.py, history.py<br/>case_insights.py"]
-  POST["After the verdict<br/>reclassification.py<br/>errata.py, case_scope.py<br/>verdict_memory.py<br/>case_evidence.py<br/>eml_store.py, responders.py"]
-  AUDIT["Audit trail<br/>audit_store.py<br/>audit_trail.py"]
-  INFRA["Infrastructure<br/>pinned_http.py<br/>socket_guard.py<br/>ws_logger.py"]
+[![Diagram 3: Application modules](docs/diagramas/03-application-modules.svg)](docs/diagramas/03-application-modules.svg)
 
-  APP -->|"case_from_email.main()"| PIPE
-  APP -->|"run_analysis.main()"| RUN
-  APP -->|"RBAC, session"| WEB
-  APP -->|"polling, queue"| MAIL
-  APP -->|"history screens"| DEST
-  APP -->|"settings, chat"| LLM
-  APP -->|"desk routes"| POST
-  APP -->|"Auditoria routes"| AUDIT
-  APP -->|"live log"| INFRA
-
-  RUN -->|"analyzers, score"| PIPE
-  RUN -->|"council, guard"| LLM
-  RUN -->|"dispatch, notices"| DEST
-  RUN -->|"memory, scope"| POST
-
-  WEB -->|"audit_store.apply()"| AUDIT
-  INFRA -->|"session policy"| WEB
-  MAIL -->|"volume alerts"| DEST
-  PIPE -->|"provider, token"| MAIL
-  POST -->|"decision, errata"| DEST
-  POST -->|"register_downgrade()"| PIPE
-  AUDIT -->|"validate_destination()"| PIPE
-  MAIL -->|"validate_destination()"| PIPE
-  DEST -->|"guard, registry"| PIPE
-  WEB -->|"manage.py commands"| PIPE
-  AUDIT -->|"prompt_guard"| LLM
-
-  PIPE -->|"pinned_http"| INFRA
-  MAIL -->|"pinned_http"| INFRA
-  DEST -->|"pinned_http"| INFRA
-  POST -->|"pinned_http"| INFRA
-  INFRA -->|"address check"| PIPE
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/03-application-modules.mmd`](docs/diagramas/03-application-modules.mmd)</sub>
 
 - **Read each edge from the importing group to the group it imports.** The label names the entry point or the family of routes, not every call; the table below says which module on each side the edge stands for.
 - **The hub coordinates the after-verdict modules, and they do not import each other.** reclassification.py never imports errata.py or verdict_memory.py. The reclassify route in thephish_app.py first calls reclassification.record(). It then writes the decision back through tickets.reclassify_*(). Only for a false positive, and only if the analyst asks, it then calls errata.send() and verdict_memory.learn(). learn() is admin-only for the content and sender scopes (thephish_app.py:4697-4895). Reanalysis works the same way: case_evidence.fetch(), then case_from_email.main_from_eml(), then run_analysis.main() (thephish_app.py:4564-4586). [diagram 12](#12-after-the-verdict) shows that flow.
@@ -320,78 +159,9 @@ Three entry points drawn here reach the same pipeline: POST /analysis (one email
 
 The Bluephish app lifeline is thephish_app.py. Two lifelines stand for more than one system. Vendors and LLM is the Analyzer vendors (analyzers.py, custom_analyzers.py), which analyze_observables() calls, and the LLM provider, which llm_council.main() calls. Destinations is TheHive, Jira and the Disk archive, which tickets.dispatch() reaches, and the Generic connectors, which connectors.dispatch() reaches.
 
-```mermaid
-sequenceDiagram
-    participant Browser as Browser (BluePhish UI)
-    participant App as Bluephish app
-    participant Mailbox as Monitored mailbox
-    participant CFE as case_from_email.py
-    participant RA as run_analysis.py
-    participant SMTP as SMTP server
-    participant Ext as Vendors and LLM
-    participant Dest as Destinations
+[![Diagram 4: Analysis of one reported email (sequence)](docs/diagramas/04-analysis-of-one-reported-email-sequence.svg)](docs/diagramas/04-analysis-of-one-reported-email-sequence.svg)
 
-    alt Analyst analyzes one email
-        Browser->>App: POST /analysis (mailUID, sid)
-        Note over App: requires_analyst<br/>400 empty mailUID, 404 not queued
-    else Analyst analyzes a selection
-        Browser->>App: POST /analysis-selected
-        Note over App: 1 to 50 UIDs, analyze_one_email()<br/>per queued UID, in order
-    else Scheduler cycle
-        Note over App: scheduler_loop(): enabled,<br/>nextRunAt due, no cycle running
-        App->>App: run_automatic_analysis()
-        App--)Browser: autoAnalysis cycle_start
-        App->>Mailbox: list_emails.main() (diagram 5)
-        Mailbox-->>App: pending emails
-        Note over App: oldest maxPerCycle first,<br/>analyze_one_email() for each
-    end
-    Note over Browser,RA: WebSocketLogger: logs go to the<br/>requester or inbox room only
-    App->>CFE: case_from_email.main(), under analysis_semaphore
-    CFE->>Mailbox: provider.fetch(mail_uid)
-    Mailbox-->>CFE: raw message, marked read
-    CFE->>CFE: obtain_eml(): attachment or raw email, reporter
-    CFE->>CFE: analyze_message(): observables (diagram 6)
-    CFE-->>App: observables, reporter, subject, body, ...
-    Note over App,CFE: None, already read or failed:<br/>run_analysis.main() not called
-    App->>RA: run_analysis.main(wsl, observables, reporter, ...)
-    opt notificationFlags.start and SMTP server on
-        RA->>SMTP: start notice
-        Note over RA,SMTP: mailer.send(): a failed or disabled<br/>send is only a logWarning
-    end
-    alt spamSkipAnalysis on, bulk, authenticated,<br/>no attachment
-        RA->>RA: reputation analyzers skipped
-    else otherwise
-        RA->>Ext: analyze_observables(): Analyzer vendors (diagram 8)
-        Ext-->>RA: level per job: info, safe, suspicious, malicious
-    end
-    RA->>RA: prompt_guard.inspect(subject and body)
-    RA->>Ext: llm_council.main(): LLM provider (diagram 10)
-    Ext-->>RA: risk level and justification, or None
-    RA->>RA: terminate_analysis(): verdict, score (diagram 9)
-    alt Safe or Malicious, its flag and SMTP server on
-        RA->>SMTP: verdict notice
-    else Suspicious, or the flag off
-        Note over RA: the reporter is not mailed
-    end
-    RA->>RA: departments.resolve_from_file(reporter)
-    RA->>Dest: tickets.dispatch(): TheHive, Jira, Disk archive
-    Note over RA,Dest: TheHive first, enabled only,<br/>minVerdict must accept
-    Dest-->>RA: outcome per destination, record reference
-    opt a record reference came back
-        RA->>RA: remember_analysis() (diagram 12)
-    end
-    RA->>Dest: connectors.dispatch(): Generic connectors (diagram 15)
-    RA-->>App: verdict, llm_result, score_result
-    alt Analyst analyzes one email
-        App-->>Browser: JSON verdict, llmAnalysis, score
-    else Analyst analyzes a selection
-        App--)Browser: release_analyzed_email() push
-        App-->>Browser: JSON analyzed, failed, results
-    else Scheduler cycle
-        App--)Browser: release_analyzed_email() push
-        App--)Browser: autoAnalysis cycle_end
-    end
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/04-analysis-of-one-reported-email-sequence.mmd`](docs/diagramas/04-analysis-of-one-reported-email-sequence.mmd)</sub>
 
 - **Entry gates.** POST /analysis sits behind requires_analyst. An empty mailUID answers 400, and a UID not in queued_mail_uids() answers 404. POST /analysis-selected takes 1 to 50 mailUIDs and the sid, and runs analyze_one_email() per UID, in order. UIDs no longer queued are skipped. For the Scheduler, nextRunAt follows intervalMinutes, and the listing is list_emails.main(limit = pageSize, newest first). From that listing it takes the oldest maxPerCycle. The autoAnalysis cycle_start event goes to the inbox room.
 - **Logging.** WebSocketLogger sends each line as a Socket.IO logInfo, logWarning or logError event. It goes to the requesting socket of the same session (socket_guard.log_target) or, for the Scheduler, to the inbox room. With neither, the line is dropped. It is never broadcast.
@@ -412,90 +182,9 @@ This diagram replaces the old list_emails_activity.png ("connect to IMAP, select
 
 The pivot is inbox_hydrated. Every body the application holds goes back into the next listing as `have`, and the provider describes those messages from their envelope instead of downloading them again. Without it, a mailbox that has not changed is downloaded again every minute. On Gmail that used up the account's daily IMAP download budget by mid-afternoon ([§7.7.1](BLUEPHISH_ARCHITECTURE.md#771-the-daily-bandwidth-budget-is-a-trap-and-it-fails-as-a-connection-error)).
 
-```mermaid
-flowchart TD
-  BR["Browser (BluePhish UI)"]
-  MB["Monitored mailbox"]
-  HYD[("inbox_hydrated<br/>bodies held in memory")]
-  RS[("render_store.py<br/>stored layouts")]
+[![Diagram 5: Listing the mailbox](docs/diagramas/05-listing-the-mailbox.svg)](docs/diagramas/05-listing-the-mailbox.svg)
 
-  P1{"Polling on and<br/>mailbox configured?"}
-  LST["GET /list<br/>the refresh button"]
-  P2["list_emails.main()<br/>under analysis_semaphore,<br/>have = UIDs already held"]
-  PROV{"email_sync.provider?"}
-  GP["GraphProvider<br/>Graph API, MSAL token"]
-  IP["ImapProvider<br/>Gmail or legacy imap"]
-  LU["list_unread():<br/>every unread message"]
-  HAVE{"Page 1 at each end:<br/>UID already held?"}
-  ENV["Stub from the envelope<br/>bodyLoaded false"]
-  BODY["Download the body<br/>message stays unread"]
-  MODE{"Carries an<br/>attached .eml?"}
-  ATT["'Attached .eml' row"]
-  RAW["'Raw Email' row"]
-  ASM["assemble_queue()<br/>in the provider's order"]
-  REC["record_listing()<br/>held bodies over stubs"]
-  PUSH["push_inbox_state()<br/>'inbox' event"]
-
-  L2["Background loader:<br/>inbox_pages.next_batch()<br/>at most 10 UIDs"]
-  L4["list_emails.peek_many()<br/>under analysis_semaphore"]
-  L5["entry_and_layout()<br/>remote images off"]
-  L6{"receivedAt still<br/>matches the listing?"}
-  L8["remember_loaded_email()<br/>body and layout kept"]
-  L9["'inboxProgress' event<br/>rows just ready"]
-
-  C3["GET /email/uid<br/>peek, stays unread"]
-  C4["GET /email-rendered/uid<br/>'Como entregue'"]
-  AN["Analyze (diagram 4, diagram 6)<br/>provider.fetch() marks read"]
-  VA["volume_alerts.evaluate()<br/>then fire(): mail, webhook"]
-  SCH["Scheduler (diagram 4)<br/>newest end only, no have,<br/>never feeds the queue"]
-
-  P1 -->|"no: sleep"| P1
-  P1 -->|"yes"| P2
-  BR -->|"refresh"| LST
-  LST --> P2
-  P2 --> PROV
-  PROV -->|"m365"| GP
-  PROV -->|"gmail or legacy imap"| IP
-  GP --> MB
-  IP --> MB
-  MB --> LU
-  LU -->|"middle pages"| ENV
-  LU -->|"page 1"| HAVE
-  HAVE -->|"yes"| ENV
-  HAVE -->|"no"| BODY
-  BODY --> MODE
-  MODE -->|"yes"| ATT
-  MODE -->|"no"| RAW
-  ATT --> ASM
-  RAW --> ASM
-  ENV --> ASM
-  ASM --> REC
-  REC --> HYD
-  REC --> PUSH
-  PUSH --> BR
-  REC -.->|"polling cycle only"| VA
-  SCH -.->|"same provider"| MB
-
-  L2 --> L4
-  L4 -.->|"peek"| MB
-  L4 --> L5
-  L5 --> L6
-  L6 -->|"yes"| L8
-  L6 -->|"no: skip UID"| L9
-  L8 --> HYD
-  L8 --> RS
-  L8 --> L9
-  L9 --> BR
-  L9 -.->|"rows ready"| VA
-
-  BR -->|"open a row"| C3
-  BR -->|"Como entregue"| C4
-  C3 -.->|"peek"| MB
-  C4 -.->|"peek"| MB
-  C3 --> HYD
-  C4 <--> RS
-  BR -.->|"analyze"| AN
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/05-listing-the-mailbox.mmd`](docs/diagramas/05-listing-the-mailbox.mmd)</sub>
 
 - **Held bodies feed the next listing.** Every UID in inbox_hydrated goes into the next list_emails.main() call as `have` — that is the loop that keeps an unchanged mailbox from being downloaded again ([§7.7.1](BLUEPHISH_ARCHITECTURE.md#771-the-daily-bandwidth-budget-is-a-trap-and-it-fails-as-a-connection-error)). The diagram shows it in the list_emails.main() label (have = UIDs already held) rather than as an arrow back from inbox_hydrated.
 - **Four callers, one provider.** The polling cycle, GET /list (the refresh button), the background loader and the click routes all reach the mailbox through the provider that email_provider.create_provider() builds from `email_sync.provider`. That is GraphProvider for m365, with an app-only token from m365_auth.py (MSAL). Anything else gets ImapProvider (IMAP4_SSL), either on imap.gmail.com with an App Password or from the legacy `imap` section (basic or XOAUTH2). Every one of those reads holds analysis_semaphore, so a listing never opens a second IMAP session next to an analysis. Only the loader limits the lock to the mail-server trip and parses outside it. The poll, GET /list and the click routes parse under it, and a 'Como entregue' render with images also fetches those images under it. GET /list runs list_emails.main(all_pending=True, have) too, then record_listing() and the push, but no volume alert. It works with polling off, and with polling off it is the only thing that fills the queue.
@@ -516,59 +205,9 @@ This diagram covers what case_from_email.py does between "an analyst or the Sche
 
 The module's name is historical: **this stage creates no case and never calls TheHive**. collect_observables() keeps the list in memory with local ids, and the analysis reads it from there. run_analysis.py records the finished analysis afterwards, through tickets.dispatch() ([diagram 7](#7-running-the-analysis-and-closing-it), [diagram 11](#11-recording-destinations-and-history)).
 
-```mermaid
-flowchart TD
-    subgraph ENTRY["Entry points in thephish_app.py"]
-        direction TB
-        E1("Analyst: POST /analysis<br/>or /analysis-selected")
-        E1S("Scheduler:<br/>run_automatic_analysis()")
-        E2("Analyst: POST /api/cases/<br/>case_ref/reanalyze, bytes<br/>via case_evidence.fetch()")
-    end
-    E1 --> M["case_from_email.main()"]
-    E1S --> M
-    E2 --> MF["case_from_email.main_from_eml()"]
-    M --> P["prepare(): configs,<br/>email provider, whitelist"]
-    MF --> P
-    P -->|"setup fails"| FAIL("error logged and emitted,<br/>return None: caller stops,<br/>nothing is analyzed")
-    P -->|"main()"| FETCH["provider.fetch(mail_uid)<br/>IMAP or M365 Graph,<br/>marks the message read"]
-    P -->|"main_from_eml()"| PARSEB["email.message_from_bytes()<br/>kept reported message,<br/>no attached .eml search"]
-    FETCH -->|"exception"| FAIL
-    FETCH -->|"None"| FAIL
-    FETCH --> OBT["obtain_eml()<br/>reporter = From header<br/>of the forwarding email"]
-    OBT -->|"exception"| FAIL
-    OBT --> HAS{"message/rfc822 or<br/>octet-stream part?"}
-    HAS -->|"no"| RAW["obtain_raw_eml(): fetched<br/>email itself, reporter =<br/>Monitored mailbox address"]
-    HAS -->|"yes"| AM
-    RAW --> AM
-    PARSEB -->|"unparseable"| FAIL
-    PARSEB --> AM["analyze_message()"]
-    AM --> AUTH["extract_authentication_results()<br/>first Authentication-Results,<br/>else Received-SPF"]
-    AUTH --> BULK["spam_headers.scan()<br/>+ one_click_signed()<br/>bulk_signals: no verdict"]
-    BULK --> PE["parse_eml()<br/>decode Subject, read<br/>selected header fields"]
-    PE -->|"header values"| IOC
-    PE --> WALK{"each MIME part"}
-    WALK -->|"image"| IMG["collect_image_part()<br/>kept for the LLM<br/>vision step"]
-    WALK -->|"text part"| BODY["text/plain, text/html body<br/>(HTML URL-decoded), also<br/>clean text sent to the LLM"]
-    WALK -->|"attachment"| ATT{"sha256 matched by<br/>ruleset.match_hash?"}
-    BODY --> IOC
-    IOC["search_observables():<br/>ioc_finder finds mail,<br/>ipv4, domain, url"]
-    PRE{"non-public IP, or only an<br/>app store package id?"}
-    WL{"whitelist rule matches?"}
-    DROP["dropped, logged only"]
-    IOC -->|"ip, domain"| PRE
-    IOC -->|"url"| WL
-    PRE -->|"yes"| DROP
-    PRE -->|"no"| WL
-    WL -->|"yes"| SUP["_suppressed_by(): skipped,<br/>whitelist_state.record_match()"]
-    ATT -->|"yes"| SUP
-    IOC -->|"mail: never suppressed"| COL["collect_observables(): flat<br/>in-memory list, ids obs-N,<br/>plus file_message/rfc822"]
-    WL -->|"no"| COL
-    ATT -->|"no"| COL
-    IMG -->|"images"| RET
-    COL --> RET["return observables,<br/>images, eml_bytes ...<br/>no case, no TheHive call"]
-    RET --> RA["run_analysis.main() (diagram 7)"]
-    RA -.->|"after tickets.dispatch()"| CE["run_analysis.remember_analysis()<br/>case_evidence.keep() into<br/>eml_store.py (data/originals)"]
-```
+[![Diagram 6: Extracting observables](docs/diagramas/06-extracting-observables.svg)](docs/diagramas/06-extracting-observables.svg)
+
+<sub>Click the image to open it full size. Source: [`docs/diagramas/06-extracting-observables.mmd`](docs/diagramas/06-extracting-observables.mmd)</sub>
 
 - **No case is created here.** Nothing in case_from_email.py imports or calls TheHive. The observable ids are local (obs-N), and the analyzer jobs are keyed to them ([diagram 8](#8-choosing-and-running-analyzers)). TheHive is one of the recording destinations, and run_analysis.py writes to them only after the verdict ([diagram 11](#11-recording-destinations-and-history)). The dotted edge is where the app keeps its own copy of the reported message ([§7.15](BLUEPHISH_ARCHITECTURE.md#715-the-application-keeps-the-original-message-eml_storepy)). That copy is made only once tickets.dispatch() has returned a record reference from a destination, and only while caseEvidence.storeOriginal is on (default on). The destinations may store the message too (Disk writeEml, Jira attachEml, see [diagram 11](#11-recording-destinations-and-history)).
 - **Entry points.** Every entry runs under analysis_semaphore. The batch route POST /analysis-selected and the Scheduler's run_automatic_analysis() both go through analyze_one_email(). Like POST /analysis, they call case_from_email.main(wsl, mail_uid). The reanalysis route passes the bytes from case_evidence.fetch() to case_from_email.main_from_eml(wsl, eml_bytes, reporter), which parses them with email.message_from_bytes(eml_bytes).
@@ -589,95 +228,9 @@ This diagram follows what run_analysis.main() does with the observables case_fro
 
 The order matters for one reason: the verdict and the verdict email to the Reporter are both settled before any destination is contacted. The rule in this module is that nothing after the verdict can change the verdict or bring the analysis down. A destination that fails, a department lookup that fails and an original that can't be stored each end up as a warning in the log. A fingerprint the database refuses is dropped by case_scope.record(), which never raises. None of them ever becomes a failed analysis.
 
-```mermaid
-flowchart TD
-  S("Scheduler, Analyst,<br/>or reanalysis (notify off)")
-  subgraph SETUP["Setup"]
-    CFG{"Config files<br/>readable?"}
-    WL["whitelist.load()<br/>error: empty ruleset"]
-  end
-  subgraph NOTIFY["Notify start of analysis"]
-    N1{"notify and<br/>start flag on?"}
-    N2["send_notification()<br/>mailer.py, SMTP server"]
-  end
-  subgraph ANALYZE["Analyze observables"]
-    SK{"spamSkipAnalysis<br/>conditions hold?"}
-    AO["analyze_observables()<br/>in-process, see diagram 8"]
-    SKIP["reputation lookups<br/>skipped"]
-  end
-  subgraph LLMSTEP["LLM analysis"]
-    PG["prompt_guard.inspect()<br/>subject and body"]
-    LC["llm_council.main(), diagram 10<br/>None when off or down"]
-    FP["case_scope.fingerprint()<br/>message keys, once"]
-  end
-  subgraph TERM["Terminate analysis"]
-    TA["terminate_analysis()<br/>ordered rules, see diagram 9"]
-    V{"verdict?"}
-    NF{"notify and that<br/>verdict's flag on?"}
-    NM["verdict email to<br/>the Reporter via SMTP"]
-    NN["no email to<br/>the Reporter"]
-  end
-  subgraph RECORD["Record the result, see diagram 11"]
-    DEP["departments.resolve_from_file()<br/>empty on failure"]
-    BR["tickets.build_report()"]
-    DI["tickets.dispatch()<br/>enabled, minVerdict met,<br/>TheHive first"]
-    TH["TheHive case<br/>Safe, Malicious resolved<br/>Suspicious left open"]
-    JD["Jira issue /<br/>Disk archive folder"]
-    DF["failed or refused:<br/>warning, others run"]
-    RR["record_reference()"]
-  end
-  subgraph REMEMBER["Remember the analysis, see diagram 12"]
-    RA{"any record<br/>reference?"}
-    CS["case_scope.record()"]
-    CE["case_evidence.keep()<br/>original .eml"]
-    CW["nothing kept:<br/>warning"]
-  end
-  GC["connectors.dispatch()<br/>Generic connectors"]
-  RET("return verdict,<br/>llm_result, score_result")
-  ABORT("return None, None, None<br/>no verdict")
+[![Diagram 7: Running the analysis and closing it](docs/diagramas/07-running-the-analysis-and-closing-it.svg)](docs/diagramas/07-running-the-analysis-and-closing-it.svg)
 
-  S --> CFG
-  CFG -->|"no"| ABORT
-  CFG -->|"yes"| WL
-  WL --> N1
-  N1 -->|"yes"| N2
-  N1 -->|"no"| SK
-  N2 -->|"sent or warning"| SK
-  N2 -.->|"exception"| ABORT
-  SK -->|"yes"| SKIP
-  SK -->|"no"| AO
-  AO -.->|"exception"| ABORT
-  AO --> PG
-  SKIP --> PG
-  PG --> LC
-  LC --> FP
-  FP --> TA
-  TA -.->|"exception"| ABORT
-  TA --> V
-  V -->|"Suspicious"| NN
-  V -->|"Safe or Malicious"| NF
-  NF -->|"yes"| NM
-  NF -->|"no"| NN
-  NM -->|"sent or warning"| DEP
-  NN --> DEP
-  DEP --> BR
-  BR --> DI
-  DI --> TH
-  DI --> JD
-  DI --> DF
-  TH --> RR
-  JD --> RR
-  RR --> RA
-  DF --> RA
-  RA -->|"yes"| CS
-  RA -->|"no"| GC
-  CS --> CE
-  CE -->|"kept, or not needed"| GC
-  CE -->|"eml present,<br/>nothing kept"| CW
-  CW --> GC
-  DI -.->|"unexpected exception"| RET
-  GC --> RET
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/07-running-the-analysis-and-closing-it.mmd`](docs/diagramas/07-running-the-analysis-and-closing-it.mmd)</sub>
 
 - **Dotted edges are the failures the code catches explicitly.** An exception while reading the configuration (logging_conf.json and configuration.json), sending the start notice, running the analyzers or in terminate_analysis() aborts the run with (None, None, None), and the caller shows no verdict. Two steps fall back with a warning instead of aborting. If the spamSkipAnalysis read fails, the analyzers run. If the message fingerprint fails, the keys stay empty and verdict memory is skipped. whitelist.load() and llm_council.main() sit outside any try and rely on their own never-raise contracts; on a load error the ruleset is empty and nothing is released. After the verdict, one try block covers building the report, dispatching to the destinations, remembering the analysis and the connectors. An exception there logs a warning and the verdict is still returned.
 - **main() wraps remember_analysis() in a nested try.** A failure there can cost the scope row, the stored original and the reanalysis link-back (produced['recordRefs']), but never the generic connectors.
@@ -697,82 +250,9 @@ This diagram shows what happens inside run_analysis.analyze_observables(). It st
 
 The work runs in three steps, each drawn as a box. Step 1 follows the redirects of every URL, so a destination can be planned along with the other observables. Step 2, run_analysis.plan_jobs(), pairs each observable with each analyzer that is enabled and allowed to receive that type. Step 3, run_analysis.run_jobs(), runs the jobs on a green pool of 8. An analyzer that could not look always reports info with the reason attached, never safe ([§7.6](BLUEPHISH_ARCHITECTURE.md#76-an-analyzer-that-reports-nothing-is-not-an-analyzer-that-says-safe)).
 
-```mermaid
-flowchart TD
-    START("run_analysis.main() calls<br/>analyze_observables() - diagram 7")
-    CFG["Read settings once per analysis:<br/>analyzers.load_config(),<br/>custom_analyzers.load_all()"]
-    subgraph S_UNSHORT["Step 1 - redirects of every URL"]
-        direction TB
-        U1{"Another url observable<br/>in the list as it was<br/>before Step 1?"}
-        U2["unshorten.resolve(): HEAD first,<br/>up to 10 hops, pinned connection,<br/>each via validate_destination()"]
-        U3{"Chain ended on a URL<br/>other than the original?"}
-        U4{"Final URL matches<br/>the whitelist?"}
-        U5{"Already a url<br/>observable?"}
-        U6["Append a new url observable,<br/>tag unshortened_url"]
-        U1 -->|"yes"| U2 --> U3
-        U3 -->|"no"| U1
-        U3 -->|"yes"| U4
-        U4 -->|"yes: match recorded"| U1
-        U4 -->|"no"| U5
-        U5 -->|"yes"| U1
-        U5 -->|"no"| U6 --> U1
-    end
-    subgraph S_PLAN["Step 2 - plan_jobs(), every pair"]
-        direction TB
-        N1{"Native: enabled, and<br/>analyzers.sends()<br/>the base type?"}
-        C1{"Custom: enabled, and<br/>the saved definition<br/>lists the base type?"}
-        JOB["Planned job: observable,<br/>kind, id, name"]
-        DROP["Pair not planned:<br/>no report, no error"]
-        N1 -->|"yes"| JOB
-        N1 -->|"no"| DROP
-        C1 -->|"yes"| JOB
-        C1 -->|"no"| DROP
-    end
-    EMPTY{"Plan empty?"}
-    WARN["Warn: no analyzer applies,<br/>the verdict rests on the LLM<br/>assessment and the diagram 9 floors"]
-    FILES["write_file_observable(): only<br/>the attachments a planned job<br/>needs, to a per-analysis temp dir"]
-    subgraph S_RUN["Step 3 - run_jobs(): pool of 8"]
-        direction TB
-        RJ["run_job() in a greenlet"]
-        FILEP{"File observable whose<br/>attachment was not written?"}
-        CK{"Fresh cache entry for<br/>kind, id, type, value?"}
-        KIND{"Job kind?"}
-        NAT["analyzers.run(): the vendor<br/>client returns a signal, then<br/>level_for() applies thresholds"]
-        CUS["custom_analyzers.run(): URL<br/>revalidated, pinned, no redirects<br/>(diagram 15), value map gives the level"]
-        FAIL{"Client raised?"}
-        INFOE["Level info plus the reason:<br/>it did not look, never safe"]
-        LEV["Level safe, suspicious or<br/>malicious, or info when<br/>the vendor has no data"]
-        PUT["cache_put(): keeps only<br/>reports without error"]
-        RETRY{"Report retryable and<br/>fewer than 3 retries?"}
-        WAIT["Requeue the job, sleep 60 s,<br/>run a new pool round"]
-        REP["Report row: observable_id,<br/>analyzer_id, analyzer_result,<br/>analyzer_detail, analyzer_error"]
-        RJ --> FILEP
-        FILEP -->|"no"| CK
-        FILEP -->|"yes: info"| RETRY
-        CK -->|"miss"| KIND
-        CK -->|"hit: cached copy"| RETRY
-        KIND -->|"native"| NAT
-        KIND -->|"custom"| CUS
-        NAT --> FAIL
-        CUS --> FAIL
-        FAIL -->|"yes"| INFOE
-        FAIL -->|"no"| LEV
-        INFOE --> PUT
-        LEV --> PUT
-        PUT --> RETRY
-        RETRY -->|"no"| REP
-        RETRY -->|"yes: never today"| WAIT --> RJ
-    end
-    CLEAN["Delete the temp dir, return<br/>reports_observables to main(),<br/>verdict in diagram 9"]
+[![Diagram 8: Choosing and running analyzers](docs/diagramas/08-choosing-and-running-analyzers.svg)](docs/diagramas/08-choosing-and-running-analyzers.svg)
 
-    START --> CFG --> S_UNSHORT
-    S_UNSHORT -->|"no more URLs"| S_PLAN
-    S_PLAN --> EMPTY
-    EMPTY -->|"yes"| WARN --> FILES
-    EMPTY -->|"no"| FILES
-    FILES --> S_RUN
-    S_RUN -->|"all jobs reported"| CLEAN
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/08-choosing-and-running-analyzers.mmd`](docs/diagramas/08-choosing-and-running-analyzers.mmd)</sub>
 
 - **Each step is a box.** Step 1 is left when its first question finds no url observable left ("no more URLs"). Step 2 checks every observable against every analyzer. Step 3 is left once every job has a report row ("all jobs reported").
 - **Step 1 only adds observables, and it runs before planning.** There is no shortener list. Every `url` observable gets a HEAD request from the container, which also tells the sender that someone looked. unshorten.resolve() sends a GET only if HEAD is refused and never reads the body. It follows up to 10 hops on a pinned connection, and validate_destination() checks the first URL and every hop ([diagram 15](#15-ssrf-guard-chain)). A URL that does not redirect ends its chain with `found = False`. The loop walks a copy of the list taken before it starts (`list(observables)`), so a resolved destination is planned like any other URL but is not followed again. The original URL stays in the list and is analyzed too. A destination that matches the whitelist is not added (the rule match is recorded), because allowing the shortener does not allow where it points. If a hop is refused or times out, the chain stops at the last approved URL, and that URL is still added when it differs from the original. unshorten.py is one of the seven consumers of the SSRF guard, and it never allows the internal network ([diagram 15](#15-ssrf-guard-chain)).
@@ -792,82 +272,9 @@ The ordered rules run_analysis.terminate_analysis() applies to turn analyzer res
 
 The order is fixed by design. The escalations (LLM, prompt-injection floor, AI council floor, coverage floor) run before scoring.compute() because the score takes the current verdict as its floor. If one ran afterwards, the screen could show 'Suspicious · 12'. The whitelist and the verdict memory run last because a demotion that happens after the full analysis leaves something to count. A bypass at the start of the pipeline would leave nothing to count, so a compromised account with valid DKIM would never show up. After the chain, whitelist_state.record_analysis() stores the analyzer verdict and the final verdict, and the reporter is notified unless the verdict is Suspicious, the run is a reanalysis or notification for that verdict is off. How the verdict then reaches the reporter and the destinations is [diagram 7](#7-running-the-analysis-and-closing-it). The LLM and council internals are [diagram 10](#10-llm-analysis). Analyst reclassification, which creates verdict memories, is [diagram 12](#12-after-the-verdict).
 
-```mermaid
-flowchart TD
-  START["run_analysis.terminate_analysis()<br/>inputs: analyzer, LLM, auth,<br/>bulk, injection, content key"]
-  BASE["1. Analyzer baseline<br/>malicious result: Malicious<br/>suspicious: Suspicious, else Safe"]
-  LLM0{"2. LLM detected social engineering<br/>and verdict Safe or Suspicious?"}
-  LLM1{"2a. risk ≥ malicious_escalation?"}
-  LLM1G{"council trusts autonomous action<br/>AND sender domain<br/>not authenticated?"}
-  MAL1("Malicious (autonomous)")
-  LLM2{"2b. verdict Suspicious<br/>and risk ≥ High?"}
-  MAL2("Malicious (combined signal)")
-  LLM3{"2c. verdict Safe and risk ≥<br/>escalation_threshold?<br/>(RFC 8058 gate: at least High)"}
-  SUS1("Suspicious")
-  INJ{"3. Prompt-injection floor<br/>prompt_guard.inspect() found<br/>markers and verdict Safe?"}
-  SUS2("Suspicious")
-  CNC{"4. AI council floor<br/>llm_council.main() set<br/>holdForHuman and verdict Safe?"}
-  SUS3("Suspicious")
-  COV{"5. Coverage floor: verdict Safe,<br/>no LLM answer, no analyzer<br/>result other than info?"}
-  SUS4("Suspicious")
-  MODE{"6. scoring mode?"}
-  SCO["scoring.compute()<br/>current verdict as floor<br/>gives score, tier, spam label"]
-  T1{"tier phishing and verdict<br/>Safe or Suspicious?"}
-  AUTHG{"sender domain<br/>authenticated?"}
-  MAL3("Malicious")
-  SUS5("Safe becomes Suspicious<br/>Suspicious stays")
-  T2{"tier suspicious, verdict Safe<br/>and label not spam?"}
-  SUS6("Suspicious")
-  WL{"7. Whitelist: active sender rule,<br/>domain authenticated, Reply-To<br/>aligned, verdict not Safe?"}
-  ATT{"malicious attachment? (hash or<br/>file observable marked IoC)"}
-  REG{"register_downgrade()<br/>within limits and recorded?"}
-  SAFE1("Safe (demotion counted)")
-  VM{"8. Verdict memory: not Safe,<br/>identical message reclassified<br/>legitimate, checks pass?"}
-  SAFE2("Safe (demotion counted)")
-  FINAL["Final verdict<br/>whitelist_state.record_analysis()<br/>reporter notice if eligible (diagram 7)"]
+[![Diagram 9: Verdict decision chain](docs/diagramas/09-verdict-decision-chain.svg)](docs/diagramas/09-verdict-decision-chain.svg)
 
-  START --> BASE --> LLM0
-  LLM0 -->|"no"| INJ
-  LLM0 -->|"yes"| LLM1
-  LLM1 -->|"yes"| LLM1G
-  LLM1 -->|"no"| LLM2
-  LLM1G -->|"yes"| MAL1
-  LLM1G -->|"no: withheld"| LLM2
-  LLM2 -->|"yes"| MAL2
-  LLM2 -->|"no"| LLM3
-  LLM3 -->|"yes"| SUS1
-  LLM3 -->|"no"| INJ
-  MAL1 --> INJ
-  MAL2 --> INJ
-  SUS1 --> INJ
-  INJ -->|"yes"| SUS2 --> CNC
-  INJ -->|"no"| CNC
-  CNC -->|"yes"| SUS3 --> COV
-  CNC -->|"no"| COV
-  COV -->|"yes"| SUS4 --> MODE
-  COV -->|"no"| MODE
-  MODE -->|"off"| WL
-  MODE -->|"advisory / escalate"| SCO
-  SCO -->|"advisory"| WL
-  SCO -->|"escalate"| T1
-  T1 -->|"yes"| AUTHG
-  AUTHG -->|"no"| MAL3
-  AUTHG -->|"yes"| SUS5
-  T1 -->|"no"| T2
-  T2 -->|"yes"| SUS6
-  T2 -->|"no"| WL
-  MAL3 --> WL
-  SUS5 --> WL
-  SUS6 --> WL
-  WL -->|"no"| VM
-  WL -->|"yes"| ATT
-  ATT -->|"yes: kept"| VM
-  ATT -->|"no"| REG
-  REG -->|"yes"| SAFE1 --> FINAL
-  REG -->|"no: kept"| VM
-  VM -->|"yes"| SAFE2 --> FINAL
-  VM -->|"no"| FINAL
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/09-verdict-decision-chain.mmd`](docs/diagramas/09-verdict-decision-chain.mmd)</sub>
 
 - **Read it top to bottom as one pass.** Rule labels differ from §1.2. Here 2a, 2b and 2c are §1.2's rules 1, 2 and 3, so §1.2.3's 'rule 3 gate' is 2c. Step 6's two tier escalations are §1.2's rules 4 and 5. Every step sees the verdict the previous step left. Step 1 starts from the analyzers: any observable with a malicious result gives Malicious, any observable with a suspicious result gives Suspicious, otherwise Safe. The analyzer and LLM stages always write a line to the verdict trail (stage, verdict after it, reason), including 'below the threshold, unchanged'. The floors, the score, the whitelist and the memory write one only when they act or have something to report. That trail is what the case screen shows the analyst ([§4.8.1](BLUEPHISH_ARCHITECTURE.md#481-why-a-verdict--and-an-analyst-disagreeing-with-it)).
 - **Steps 1 to 6 only raise.** The LLM never lowers a verdict. All three floors (injection, council, coverage) stop at Suspicious, which is the state where 'a human decides': the case stays open and the reporter gets no automatic answer. The score's floor is the current verdict, so a tier can only raise it. The context cap (phishing tier minus one when no analyzer and no LLM actually found anything) keeps bulk headers and failed authentication from convicting a message on their own ([§1.2.1](BLUEPHISH_ARCHITECTURE.md#121-the-weighted-score-scoringpy)).
@@ -888,89 +295,9 @@ This diagram shows how Bluephish app asks the LLM provider for a social engineer
 
 The result goes to run_analysis.terminate_analysis(), whose rules are drawn in [diagram 9](#9-verdict-decision-chain). The design is fail-open for the analysis and fail-safe for the action. If no usable assessment is left, because the answer was missing, slow, invalid or hijacked, the result is None and the analyzers decide alone. A council that disagrees, or a reviewer that did not approve (including one that never answered), can only hold the case for a human. It can never lower a verdict.
 
-```mermaid
-flowchart TD
-  CFE["case_from_email.py<br/>subject, body, auth,<br/>up to 3 images"]
-  INJ["prompt_guard.inspect()<br/>subject and body"]
-  SUM["analyzer findings<br/>and link hosts"]
-  COUNCIL["llm_council.main()<br/>reads pipeline_mode"]
-  MODE{"pipeline_mode?"}
-  SINGLE["single (default)<br/>llm_analysis.main()"]
-  REV1["review: one<br/>analyst assessment"]
-  DEB["debate: two analysts,<br/>then one rebuttal each"]
-  PRE{"enabled, endpoint, model,<br/>body or image?"}
-  IMG{"catalog says<br/>no images?"}
-  BUILD["build_analysis_prompt()<br/>fresh nonce and canary"]
-  GUARD["prompt_guard.inspect()<br/>sanitize, then scan"]
-  USERMSG["user message: notes,<br/>fenced email and findings,<br/>date, legitimate-mail rules"]
-  SYSMSG["system message: core<br/>+ output contract<br/>+ spotlight"]
-  CHAT["llm_analysis.chat()<br/>temperature 0"]
-  CHECK{"canary leaked, invalid,<br/>error or timeout?"}
-  PARSE["parse_llm_response()<br/>risk, justification,<br/>tactics, evidence"]
-  LLMP["LLM provider"]
-  DROP{"any assessment<br/>left?"}
-  RES["single: assessment<br/>and guard findings"]
-  REVIEW["_review(): own call,<br/>never the email"]
-  CONS["_consensus(), _merge()<br/>highest risk wins"]
-  GATE["council block:<br/>holdForHuman,<br/>trustAutonomousAction"]
-  FAILOPEN["None: the analyzers<br/>decide alone"]
-  TERM["terminate_analysis()<br/>see diagram 9"]
-  CLOAD["GET /api/chat/load<br/>TheHive or disk record"]
-  CMSG["POST /api/chat/message<br/>question and history"]
-  CSYS["build_chat_system_prompt()<br/>core, chat framing, fences"]
-  CASK["ask_chat_llm()<br/>temperature 0.2"]
-  COUT{"canary<br/>leaked?"}
-  BROWSER["Browser (BluePhish UI)"]
-  CAT["llm_catalog.list_models()<br/>cached"]
+[![Diagram 10: LLM analysis](docs/diagramas/10-llm-analysis.svg)](docs/diagramas/10-llm-analysis.svg)
 
-  CFE --> COUNCIL
-  SUM -->|"findings"| COUNCIL
-  INJ -->|"for the reviewer"| COUNCIL
-  INJ -->|"injection floor"| TERM
-  COUNCIL --> MODE
-  MODE -->|"single"| SINGLE
-  MODE -->|"review"| REV1
-  MODE -->|"debate"| DEB
-  SINGLE --> PRE
-  REV1 --> PRE
-  DEB --> PRE
-  PRE -->|"no"| FAILOPEN
-  PRE -->|"yes"| IMG
-  IMG -->|"yes: images withheld"| BUILD
-  IMG -->|"no body left: skipped"| FAILOPEN
-  IMG -->|"no or unknown"| BUILD
-  BUILD --> GUARD
-  GUARD --> USERMSG
-  BUILD --> SYSMSG
-  USERMSG --> CHAT
-  SYSMSG --> CHAT
-  CHAT -->|"messages, images"| LLMP
-  LLMP -->|"answer"| CHECK
-  CHECK -->|"yes: dropped"| DROP
-  CHECK -->|"no"| PARSE
-  DROP -->|"no"| FAILOPEN
-  DROP -->|"yes"| REVIEW
-  PARSE -->|"single"| RES
-  PARSE -->|"review, debate"| REVIEW
-  REVIEW -->|"proceed or hold"| CONS
-  CONS --> GATE
-  RES --> TERM
-  GATE --> TERM
-  FAILOPEN --> TERM
-
-  BROWSER -->|"open a case"| CLOAD
-  CLOAD -->|"context cached"| CMSG
-  BROWSER -->|"question"| CMSG
-  CMSG --> CSYS
-  CSYS --> CASK
-  CASK -.->|"same endpoint, model"| LLMP
-  CASK --> COUT
-  COUT -->|"yes: withheld"| BROWSER
-  COUT -->|"no: answer"| BROWSER
-  BROWSER -->|"admin: model picker"| CAT
-  IMG -.->|"same cache"| CAT
-  CAT -.->|"models, capabilities"| LLMP
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/10-llm-analysis.mmd`](docs/diagramas/10-llm-analysis.mmd)</sub>
 
 - **Read the analysis from llm_council.main() down to terminate_analysis().** Solid arrows are the analysis; the case chat (GET /api/chat/load onwards) is a separate path. Dotted arrows reach the same LLM provider or catalog, but they are not steps of the analysis. The mode is chosen before anything else: single never enters council code and has its own 240 s budget per request. Review and debate share one 420 s budget for the whole council, and have no budget per call. The steps from the image check to parse_llm_response() are one assessment call (query_llm(), or _rebuttal() in a debate round); it runs once in single and review. In debate it runs four times: analyst_a and analyst_b in parallel, then one rebuttal each. A rebuttal is _rebuttal(): it builds the same prompt, appends the other agent's answer sanitized and fenced as UNTRUSTED-PEER-ASSESSMENT, and calls chat() directly; _clamp_revision() lets a revision raise only. The precondition (enabled, endpoint and model set, a body or a readable image present) is checked in llm_analysis.main() or llm_council.main().
 - **What the model sees.** The system message is llm_analysis.system_prompt (or DEFAULT_SYSTEM_PROMPT), then ANALYSIS_OUTPUT_CONTRACT, then spotlight_instruction(). The user message carries the guard notes, the sender authentication (safe_token), the brand consistency check, today's date and the legitimate-mail rules, the fenced findings and link hosts, a fenced gateway banner, the fenced email and an image note. In detail, the model sees:
@@ -999,71 +326,9 @@ The history screens have no table of their own behind them. The recording destin
 
 Both halves follow one contract. Every destination filters by verdict with the same accepts_verdict() rule. No failure may undo a finished analysis, so create() and deliver() never raise. On the read side, no source can become the only one. select_cases() reads every enabled destination and names the ones it could not read in `notice` and `partial`, so a short list is never shown as the whole history. A source that cannot answer for something (Jira observables) answers None, never zero ([§4.8](BLUEPHISH_ARCHITECTURE.md#48-case-history-and-insights)). Generic connectors are write-only: nothing reads them back.
 
-```mermaid
-flowchart TD
-  W1["tickets.build_report()<br/>plain-data report"]
-  W2["tickets.dispatch()"]
-  W3["enabled_for(verdict)<br/>enabled, minVerdict met"]
-  W4["TheHive first,<br/>then the others"]
-  W5["tickets.create()<br/>per destination,<br/>never raises"]
-  W6["create_thehive()<br/>case, observables,<br/>task logs"]
-  W7["create_jira()<br/>issue, markdown report"]
-  W8["create_disk()<br/>dated folder, then prune"]
-  W9["report.caseRef =<br/>TheHive case ref"]
-  W10["record_reference(), then<br/>remember_analysis() (diagram 7)"]
-  W11["connectors.dispatch()<br/>enabled, minVerdict met"]
-  W12["connectors.deliver()<br/>SSRF guard, pinned (diagram 15)"]
-  W13["ok=false: warning<br/>in the log, no retry"]
-  TH["TheHive"]
-  JI["Jira"]
-  DK["Disk archive"]
-  GC["Generic connectors<br/>write-only"]
-  MI["MISP"]
-  R1["thehive_history()<br/>thehive_cases()"]
-  R2["disk_cases()<br/>history.disk_records()"]
-  R3["jira_cases()<br/>tickets.read_jira()"]
-  R4["select_cases(range)<br/>enabled destinations only"]
-  R5["history.merge()<br/>dedupe on caseRef"]
-  R6["reclassification.overlay()<br/>(diagram 12)"]
-  R7["GET /api/cases<br/>observables_for(page)"]
-  R8["case_insights.case_row()<br/>null when None"]
-  R9{"window empty<br/>before filters?"}
-  R10["empty_reason()"]
-  R11["notice, partial<br/>when a source failed"]
-  R12["GET /api/insights<br/>aggregate(), cached"]
-  BR["Browser (BluePhish UI)"]
+[![Diagram 11: Recording destinations and history](docs/diagramas/11-recording-destinations-and-history.svg)](docs/diagramas/11-recording-destinations-and-history.svg)
 
-  W1 --> W2 --> W3
-  W3 -->|"matching ids"| W4 --> W5
-  W5 --> W6
-  W5 --> W7
-  W5 --> W8
-  W6 --> TH
-  TH -.->|"Malicious, mispId set"| MI
-  W7 --> JI
-  W8 --> DK
-  W6 -->|"ok with ref"| W9
-  W9 -.->|"caseRef"| W7
-  W9 -.->|"caseRef"| W8
-  W9 -.->|"caseRef"| W12
-  W5 -->|"results"| W10
-  W10 --> W11 --> W12 --> GC
-  W5 -->|"ok=false"| W13
-  W12 -->|"ok=false"| W13
-
-  TH --> R1
-  DK --> R2
-  JI --> R3
-  R1 --> R4
-  R2 --> R4
-  R3 --> R4
-  R4 --> R5 --> R6
-  R6 --> R7 --> R8 --> R9
-  R9 -->|"yes"| R10 --> R11
-  R9 -->|"no"| R11
-  R11 -->|"cases, notice, partial"| BR
-  R6 --> R12 -->|"dashboard payload"| BR
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/11-recording-destinations-and-history.mmd`](docs/diagramas/11-recording-destinations-and-history.mmd)</sub>
 
 - **What each step does.** build_report() flattens verdict, observables, findings, llm, verdictTrail and body into plain data; run_analysis.main() then adds the score, the bulk signals and the notifications sent. create() turns a TicketError, a timeout or a connection error into ok=false. create_thehive() uses the ThePhish template, tags the case with the card's tags plus analysis_tags(), adds the observables including files, puts the report in the analysis task log and the notifications in the notification task, resolves Malicious and Safe and leaves Suspicious open. create_jira() opens an issue titled '[verdict] subject' with the report as markdown and attaches the .eml when attachEml is 'sim'. create_disk() writes a timestamp-subject folder with report.json, report.md, email.eml (writeEml) and body.txt (writeBody), then runs prune_old_analyses(retentionDays). connectors.deliver() renders the placeholders, calls validate_destination() at fire time, caps the body at 512 KB and connects through pinned_http with no redirects. A failure logs 'did not record the analysis'.
 - **The order in dispatch is about references, not precedence.** tickets.dispatch() sorts TheHive first because it is the destination that returns a case number. It writes that number into `report.caseRef` in place, so the Jira description, the disk `report.json` and any connector that uses the caseRef placeholder all carry it. The disk copy of `caseRef` is what lets history.dedupe() show one row for an email that TheHive and disk both recorded.
@@ -1083,105 +348,9 @@ This diagram covers what happens after the pipeline has decided. An analyst open
 
 The order matters. The decision is committed to the local database first. Every later step (destination write, SMTP, memory) can only add an outcome row that the screen shows, and none of them can undo the decision ([§4.8.1](BLUEPHISH_ARCHITECTURE.md#481-why-a-verdict--and-an-analyst-disagreeing-with-it)). The case scope count and the fingerprint keys that the errata and the memory depend on come from analysis_fingerprint. run_analysis.remember_analysis() writes one row per destination record at the end of each recorded analysis ([diagram 7](#7-running-the-analysis-and-closing-it)). A record analyzed before that table existed answers None, never zero.
 
-```mermaid
-flowchart TD
-  Queues["Filas de Trabalho<br/>Suspeitos / Phishing"]
-  Detail["Case detail"]
-  Scope["Case scope<br/>case_scope.scope_for()"]
-  FP[("analysis_fingerprint<br/>written by diagram 7")]
+[![Diagram 12: After the verdict](docs/diagramas/12-after-the-verdict.svg)](docs/diagramas/12-after-the-verdict.svg)
 
-  Decide["Reclassify<br/>Safe or Malicious + reason"]
-  Revert["Revert (admin)"]
-  Reason{"reason at least<br/>15 chars?"}
-  Target["verdict re-read<br/>from the destination"]
-  Allowed{"transition<br/>allowed?"}
-  InForce{"reclassification<br/>in force?"}
-  Record[("reclassification.record()<br/>append-only row")]
-  Refused["error, nothing<br/>recorded"]
-
-  Write{"record source?"}
-  Hive["TheHive<br/>reclassify_thehive()"]
-  Jira["Jira<br/>reclassify_jira()"]
-  Disk["Disk archive<br/>reclassify_disk()"]
-
-  Kind{"what did the<br/>decision do?"}
-
-  Tick{"notify reporter<br/>ticked?"}
-  Switch{"errata switch on?<br/>(starts off)"}
-  Reporter{"reporter<br/>recorded?"}
-  Errata["errata.send()<br/>SMTP server to Reporter"]
-  MemScope{"memoryScope?"}
-  IsAdmin{"caller admin<br/>or above?"}
-  HasKey{"content_key<br/>recorded?"}
-  Learn["verdict_memory.learn()<br/>180 days"]
-
-  Revoke["verdict_memory<br/>.revoke_for_decision()"]
-  Future["Later analyses:<br/>verdict_memory.apply() (diagram 9)"]
-  Proposal["Whitelist › Aprendido<br/>admin turns it into a rule"]
-  Close["outcomes saved, audited<br/>decision never undone"]
-
-  Block["Bloquear indicadores<br/>POST /api/block (admin)"]
-  BlockCheck{"indicators, destinations<br/>valid and enabled?"}
-  Run["block_indicators()<br/>responders.run() per pair"]
-  BlockRefused["HTTP 400,<br/>nothing blocked"]
-  BlockDest["Blocking destinations<br/>(EOP / firewalls)"]
-  BlockOut["status per pair,<br/>audited"]
-
-  Queues --> Detail
-  Detail -->|"loaded alongside"| Scope
-  Scope -->|"reads"| FP
-  Detail -->|"decide"| Decide
-  Detail -->|"undo"| Revert
-  Decide --> Reason
-  Revert --> Reason
-  Reason -->|"no"| Refused
-  Reason -->|"yes"| Target
-  Target -->|"not readable"| Refused
-  Target -->|"reclassify"| Allowed
-  Target -->|"revert"| InForce
-  Allowed -->|"no"| Refused
-  InForce -->|"no"| Refused
-  Allowed -->|"yes"| Record
-  InForce -->|"yes"| Record
-  Record -->|"write failed"| Refused
-  Record --> Write
-  Write -->|"thehive"| Hive
-  Write -->|"jira"| Jira
-  Write -->|"disk"| Disk
-  Hive --> Kind
-  Jira --> Kind
-  Disk --> Kind
-  Kind -->|"false positive"| Tick
-  Kind -->|"revert"| Revoke
-  Kind -->|"confirmation, or<br/>Suspicious to Malicious"| Close
-  Tick -->|"yes"| Switch
-  Tick -->|"no"| MemScope
-  Switch -->|"no: not sent"| MemScope
-  Switch -->|"yes"| Reporter
-  Reporter -->|"no: not sent"| MemScope
-  Reporter -->|"yes"| Errata
-  Errata -->|"ok or failed"| MemScope
-  FP -.->|"keys_for()"| Reporter
-  FP -.->|"keys_for()"| HasKey
-  MemScope -->|"case (default)"| Close
-  MemScope -->|"content, sender"| IsAdmin
-  IsAdmin -->|"no: refused"| Close
-  IsAdmin -->|"yes"| HasKey
-  HasKey -->|"no"| Close
-  HasKey -->|"yes"| Learn
-  Learn --> Close
-  Learn -.->|"content memory"| Future
-  Learn -.->|"sender proposal"| Proposal
-  Revoke --> Close
-  Close -.->|"next read"| Queues
-  Detail -->|"admin"| Block
-  Block --> BlockCheck
-  BlockCheck -->|"no"| BlockRefused
-  BlockCheck -->|"yes"| Run
-  Run -->|"no pair applies"| BlockRefused
-  Run -->|"firewalls via diagram 15"| BlockDest
-  BlockDest --> BlockOut
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/12-after-the-verdict.mmd`](docs/diagramas/12-after-the-verdict.mmd)</sub>
 
 - **A solid arrow is part of one request. A dotted arrow is data that a later request reads.** The diagram runs from the work desk and case detail ([§7.16](BLUEPHISH_ARCHITECTURE.md#716-the-work-desk-queues-scope-and-the-errata)) through the reclassification ([§4.8.1](BLUEPHISH_ARCHITECTURE.md#481-why-a-verdict--and-an-analyst-disagreeing-with-it)) and the destination holding the record ([diagram 11](#11-recording-destinations-and-history)) to the false-positive follow-up; blocking ([§4.5.2](BLUEPHISH_ARCHITECTURE.md#452-blocking-destinations-responderspy)) is the separate branch at the side. The desk queues change only on the next GET /api/cases. select_cases() then lays the decisions over the records (reclassification.overlay() through case_insights.apply_decision()), and the pending=1 filter in api_cases drops every row that carries a reclassification. A revert sets reclassification back to None, so the case returns to its queue with the old verdict.
 - **Routes, fields and rules.** The queues are GET /api/cases?pending=1 and the case detail is GET /api/cases/<case_ref>, both requires_analyst; the detail carries decisionTargets, errataEnabled, reporterKnown and canTeach. The scope is GET /api/cases/<case_ref>/scope (requires_analyst): case_scope.scope_for() counts distinct reporters with first and last seen. analysis_fingerprint holds content_key, body_key, sender_key and reporter, written by run_analysis.remember_analysis() ([diagram 7](#7-running-the-analysis-and-closing-it)). Deciding is POST /api/cases/<case_ref>/reclassify (requires_analyst) with target Safe or Malicious and a reason ('Marcar como legítimo' / 'Confirmar malicioso'); undoing is POST /api/cases/<case_ref>/reclassify/revert (requires_admin), back to previousVerdict. reclassification_target() and current_decision() re-read the verdict from the destination, never from the browser; a record not found, Jira off or decisions that cannot be read refuse the request. The row goes to case_reclassification. TheHive is set to Resolved FalsePositive or TruePositive, or reopened when Suspicious, with the reason in the task log; Jira gets the verdict prefix in the title plus a comment; the Disk archive replaces report.json atomically and adds a note to report.md. At the end, save_outcomes() and insights_cache.clear() run and auth.audit records case_reclassify or case_reclassify_revert.
@@ -1202,79 +371,9 @@ The schema declares no ForeignKey and no relationship(). Every line in the diagr
 
 Each table shows its key and its main columns. The reading notes list the other columns and what each column holds.
 
-```mermaid
-erDiagram
-    users {
-        int id PK
-        string username UK
-        string password_hash
-        string role
-        datetime password_changed_at
-        string auth_source
-        string mfa_secret
-        datetime mfa_confirmed_at
-        int mfa_last_counter
-    }
-    case_reclassification {
-        int id PK
-        string record_ref
-        string case_ref
-        string action "reclassify or revert"
-        string verdict
-        string created_by
-        text outcomes
-    }
-    analysis_fingerprint {
-        int id PK
-        string record_ref
-        string content_key
-        string sender_key
-        string reporter
-        string verdict
-    }
-    verdict_memory {
-        int id PK
-        string scope "content or sender"
-        string key
-        string verdict "always Safe"
-        string created_by
-        int decision_id
-        string record_ref
-        datetime revoked_at
-        string revoked_by
-        string proposal_status
-        string whitelist_rule_id
-    }
-    analysis_history {
-        int id PK
-        datetime analyzed_at
-        string from_address
-        string verdict
-        string final_verdict
-        string downgraded_by
-        text observables
-    }
-    whitelist_rule_state {
-        string rule_id PK "wl_ rule or vm_ memory"
-        int match_count
-        int suppression_count
-        datetime suspended_at
-    }
-    whitelist_suppression {
-        int id PK
-        string rule_id
-        datetime occurred_at
-        string original_verdict
-    }
-    users |o..o{ case_reclassification : "created_by"
-    users |o..o{ verdict_memory : "created_by, revoked_by"
-    case_reclassification |o..o{ verdict_memory : "decision_id + record_ref"
-    whitelist_rule_state ||..o{ whitelist_suppression : "rule_id"
-    verdict_memory |o..o| whitelist_rule_state : "vm_ + id"
-    analysis_history }o..o| whitelist_rule_state : "downgraded_by"
-    analysis_fingerprint }o..o{ case_reclassification : "record_ref"
-    analysis_fingerprint }o..o{ verdict_memory : "key"
-```
+[![Diagram 13: Data model](docs/diagramas/13-data-model.svg)](docs/diagramas/13-data-model.svg)
+
+<sub>Click the image to open it full size. Source: [`docs/diagramas/13-data-model.mmd`](docs/diagramas/13-data-model.mmd)</sub>
 
 - **No foreign keys.** models.py declares none, and SQLite enforces nothing between these tables. Every link is matched in Python by value, and each line's label names that value. created_by and revoked_by are copied usernames. analysis_fingerprint and case_reclassification share a record_ref. verdict_memory.key is a fingerprint's content_key or sender_key. analysis_history.downgraded_by is a whitelist_rule_state rule_id, and vm_ + id is the rule_id of a verdict memory. Because the usernames are copies, when auth.py deletes a users row, the name stays on every decision and memory that account signed.
 - **Decision and memory are matched on two fields.** verdict_memory.revoke_for_decision() filters on decision_id and record_ref together. The id alone is not enough: a decision embedded in a report.json from another installation or a restored backup carries an id that may belong to a different decision here.
@@ -1299,85 +398,9 @@ This diagram shows how a person gets into Bluephish app and what every request h
 
 The bottom block is the per-request enforcement described in [§3.2](BLUEPHISH_ARCHITECTURE.md#32-enforcement) and [§4.3](BLUEPHISH_ARCHITECTURE.md#43-session-lifecycle-authenforce_session_policy-runs-before_request): before_request hooks, run in registration order. The sign-in calls pass through it too. CSRF runs first, then the session policy (absolute and idle timeouts, revocation on password change, tab liveness), then the MFA safety net. After those, the route's own requires_role decorator decides on the server. Hiding a button in the UI is never the control.
 
-```mermaid
-flowchart TD
-  A0("Analyst in Browser (BluePhish UI)")
-  L1["First factor: local password<br/>POST /api/auth/login"]
-  L2{"auth_source<br/>is sso?"}
-  L3{"account<br/>locked?"}
-  L4{"user exists and<br/>password ok?"}
-  F1["User.register_failed_login()<br/>5th failure: locked 15 min"]
-  DENY["401 generic error<br/>same for every refusal"]
-  S1["First factor: SSO (OIDC + PKCE)<br/>GET /auth/sso/start<br/>sso.begin(): flow kept in session"]
-  IDP["Identity provider<br/>(Entra ID / OIDC)"]
-  S2{"GET /auth/sso/callback<br/>checks pass?"}
-  S3{"sso.role_for_claims()<br/>finds a mapped group<br/>or App Role?"}
-  S4["models.sso_sign_in()<br/>create sso account or update role<br/>clears failed_logins and lock"]
-  SE["redirect<br/>/login?sso_error=code<br/>fixed code list"]
-  subgraph MFAG["Second factor: mandatory TOTP"]
-    CH["auth._start_mfa_challenge()<br/>session cleared, mfa_pending set<br/>no login_user yet"]
-    C1{"_challenge_user():<br/>under 10 min and<br/>not locked?"}
-    CR["restart: 401<br/>login.js back to password form"]
-    M0{"User.mfa_is_enrolled()?"}
-    M1["POST /api/auth/mfa/setup<br/>new secret and QR, then<br/>POST /api/auth/mfa/activate"]
-    M2["POST /api/auth/mfa/verify<br/>step must be newer than<br/>mfa_last_counter"]
-    M3{"mfa.verify():<br/>code matches?"}
-    F2["User.register_failed_login()<br/>same counter as the password, 401"]
-    OK["auth._complete_login()<br/>reset failures, login_user,<br/>start_session(), stamp mfa_ok"]
-  end
-  subgraph REQ["Every request, sign-in included"]
-    R1["CSRFProtect: token check on<br/>POST / PUT / PATCH / DELETE"]
-    R8["400 CSRF error (Flask-WTF)<br/>token or Referer missing or wrong"]
-    R2{"endpoint in<br/>PRE_SESSION_ENDPOINTS?"}
-    R3{"enforce_session_policy():<br/>anonymous, or<br/>session valid?"}
-    R4{"enforce_mfa_policy():<br/>anonymous, or<br/>mfa_ok stamp?"}
-    R5["audit, forget sid, logout_user<br/>session cleared<br/>401 or redirect /login"]
-    R6{"requires_role(minimum):<br/>authenticated and<br/>has_role_at_least?"}
-    R7["anonymous: 401 or redirect /login<br/>role too low: 403 and audit<br/>authorization_denied"]
-    R9["view runs<br/>after_request: security headers<br/>and csrf_token cookie"]
-  end
-  A0 -->|"password"| L1
-  A0 -->|"SSO button"| S1
-  L1 --> L2
-  L2 -->|"yes"| DENY
-  L2 -->|"no"| L3
-  L3 -->|"yes"| DENY
-  L3 -->|"no"| L4
-  L4 -->|"no, known user"| F1
-  L4 -->|"no, unknown user"| DENY
-  F1 --> DENY
-  L4 --->|"yes"| CH
-  S1 -->|"refused"| SE
-  S1 --> IDP
-  IDP -->|"authorization code"| S2
-  S2 -->|"no"| SE
-  S2 -->|"yes"| S3
-  S3 -->|"no"| SE
-  S3 -->|"yes"| S4
-  S4 -->|"ValueError"| SE
-  S4 ---> CH
-  CH -->|"/login or login.js"| C1
-  C1 -->|"no"| CR
-  C1 -->|"yes"| M0
-  M0 -->|"no: enroll"| M1
-  M0 -->|"yes: verify"| M2
-  M1 --> M3
-  M2 --> M3
-  M3 -->|"no"| F2
-  M3 -->|"yes"| OK
-  F2 -->|"next code"| C1
-  OK -->|"signed session cookie"| R1
-  R1 -->|"token invalid"| R8
-  R1 -->|"ok, or GET"| R2
-  R2 -->|"yes"| R9
-  R2 -->|"no"| R3
-  R3 -->|"no"| R5
-  R3 -->|"yes"| R4
-  R4 -->|"no"| R5
-  R4 -->|"yes"| R6
-  R6 -->|"no"| R7
-  R6 -->|"yes"| R9
-```
+[![Diagram 14: Authentication and session](docs/diagramas/14-authentication-and-session.svg)](docs/diagramas/14-authentication-and-session.svg)
+
+<sub>Click the image to open it full size. Source: [`docs/diagramas/14-authentication-and-session.mmd`](docs/diagramas/14-authentication-and-session.mmd)</sub>
 
 - **A correct password is only half a login.** api_login deliberately does not reset failed_logins, so the 'yes' edge out of the password check leaves the counter as it is. Wrong TOTP codes (activate and verify) and a wrong current password on POST /api/users/change_password all call the same User.register_failed_login(). Five mistakes spread across both factors therefore still lock the account for 15 minutes, with locked_until = now + 15 min ([§4.1](BLUEPHISH_ARCHITECTURE.md#41-password-and-lockout-policy-modelspy), [§3.3](BLUEPHISH_ARCHITECTURE.md#33-password-change-rules)). When the threshold is reached, the lock is set and the count starts again from zero. On the password path the counter is cleared only in _complete_login, after both factors, or by a global_admin unlock. The SSO path is the exception: models.sso_sign_in() calls register_successful_login() while it provisions the account, before the second factor, and sso_callback never checks is_locked(). A locked account that comes back through the identity provider gets a fresh challenge, and the TOTP is still required.
 - **Every refusal gives the same message.** POST /api/auth/login is rate limited to 5 per minute per IP. It checks auth_source first, then the lock (locked_until in the future), then that the user exists and bcrypt check_password accepts the password. It refuses an SSO-only account, a locked account, an unknown user and a wrong password with the same GENERIC_LOGIN_ERROR ('Invalid username or password') and a 401. Nobody can use it to enumerate users or to find out which accounts they locked. SSO refusals travel as a code from the closed SSO_ERRORS list, and the login page picks the sentence, so text from the provider or from the URL never lands on a page that asks for a password.
@@ -1398,54 +421,9 @@ Seven modules pass an address that is not in the source code through the SSRF gu
 
 Consumers are grouped by how they set allow_internal, because that argument is where they differ. unshorten.py and email_render.py never pass it. custom_analyzers.py and connectors.py read it from the saved definition. tickets.py, responders.py and audit_store.py pass True by construction (allow_internal = True). What each consumer does before and after the guard is covered in the neighbouring diagrams: [diagram 8](#8-choosing-and-running-analyzers) (unshorten, custom analyzers), [diagram 11](#11-recording-destinations-and-history) (tickets, connectors), [diagram 12](#12-after-the-verdict) (responders) and [diagram 16](#16-audit-trail) (audit_store syslog).
 
-```mermaid
-flowchart TD
-  subgraph CONS["Consumers, by allow_internal"]
-    direction LR
-    subgraph NEVER["Internal network: never"]
-      direction LR
-      UN["unshorten.resolve()<br/>first URL and every redirect hop"]
-      ER["email_render.py<br/>RemoteImageFetcher._fetch_once()<br/>reported email's remote images"]
-    end
-    subgraph SAVED["Internal: only with saved allowInternal"]
-      direction TB
-      CA["custom_analyzers.query()<br/>analyst-defined analyzer URL"]
-      VA["volume_alerts.deliver()<br/>volume-alert webhooks"]
-      CO["connectors.deliver()<br/>Generic connectors"]
-      VA --> CO
-    end
-    subgraph OPEN["Internal: allowed by construction"]
-      direction LR
-      TJ["tickets._jira_call()<br/>Jira URL"]
-      TH["tickets.validate_entry()<br/>TheHive URL, on save only"]
-      RS["responders._guard()<br/>PAN-OS, FortiGate, Check Point<br/>management URL"]
-      AUD["audit_store.resolve_syslog()<br/>Syslog / SIEM host and port<br/>when the setting is applied"]
-    end
-  end
-  CONS --> V
-  V["custom_analyzers.py<br/>validate_destination()<br/>on save and before each call"]
-  V --> SH{"scheme accepted<br/>and URL<br/>has a host?"}
-  SH -->|"yes"| LD["IP literal: no DNS lookup<br/>name: socket.getaddrinfo(host)"]
-  LD -->|"every address"| JU{"any address<br/>forbidden?<br/>_is_forbidden_address()"}
-  JU -->|"no"| QH{"consumer is<br/>TheHive?"}
-  QH -->|"no"| QS{"consumer is<br/>audit_store.py?"}
-  QS -->|"no, HTTP"| PIN["pinned_http.py<br/>request / get / post / session<br/>same allow_internal as the guard"]
-  PIN --> NC["pinned connection _new_conn()<br/>asks DNS once, judges every<br/>address: _is_forbidden_address()"]
-  NC -->|"all allowed"| SOCK["socket opened on the judged IP<br/>Host header, SNI, certificate<br/>keep the name"]
-  SOCK --> RD{"301/302/303/307/308?<br/>allow_redirects<br/>= False"}
-  RD -->|"yes"| QU{"consumer is<br/>unshorten.py?"}
-  SH -->|"no"| RF["refused: (False, reason)<br/>save forms show the reason<br/>calls: 'Destino recusado: reason'"]
-  LD -->|"does not resolve"| RF
-  JU -->|"yes"| RF
-  QH -->|"yes, later"| THC["thehive4py and thehive_query()<br/>call requests: not pinned, not<br/>revalidated, redirects followed"]
-  QS -->|"yes, syslog"| SYS["second getaddrinfo, first address<br/>AuditSyslogHandler gets an IP,<br/>never the name"]
-  NC -->|"any forbidden"| DR["DestinationRefused<br/>before any packet,<br/>TLS handshake included"]
-  RD -->|"no"| RESP["response returned<br/>to the consumer"]
-  QU -->|"no"| NF["redirect never followed<br/>custom_analyzers, connectors,<br/>email_render: named as failure"]
-  QU -->|"yes"| HOP["Location becomes the next hop<br/>back through the guard<br/>at most 10 hops"]
-  HOP --> V
-  TST["test_ssrf_rebinding.py<br/>DNS that changes its answer<br/>after first query, six consumers"] -.->|"guards"| NC
-```
+[![Diagram 15: SSRF guard chain](docs/diagramas/15-ssrf-guard-chain.svg)](docs/diagramas/15-ssrf-guard-chain.svg)
+
+<sub>Click the image to open it full size. Source: [`docs/diagramas/15-ssrf-guard-chain.mmd`](docs/diagramas/15-ssrf-guard-chain.mmd)</sub>
 
 - **Two checks, and they protect different things.** validate_destination(url, allow_internal, require_https) checks the scheme first. It accepts https:// only, unless allow_internal is passed or require_https = False, in which case http:// is accepted too. A URL with no host is refused. An IP literal skips the DNS lookup but is still judged. The scheme check protects what goes out in the request: credentials and the observable. The address check protects where the request goes, and it is never waived. That is why unshorten.py and email_render.py can pass require_https = False, since they send nothing secret, and still never pass allow_internal. The TheHive check in tickets.validate_entry() and audit_store.resolve_syslog() also pass require_https = False. Passing allow_internal also accepts http://, because internal services rarely have TLS ([§4.5.1](BLUEPHISH_ARCHITECTURE.md#451-analyzers-the-analyst-defines) point 3). So for tickets.py, responders.py and audit_store.py the scheme rule is effectively http or https.
 - **The rule in _is_forbidden_address().** It always refuses unparsable addresses and the cloud metadata addresses 169.254.169.254, fd00:ec2::254 and 100.100.100.200, which are matched in canonical form. With allow_internal it also refuses multicast and unspecified addresses. Without allow_internal it refuses any address that is not is_global, plus multicast and IPv6 site-local. IPv4 carried inside IPv6 is judged as that IPv4. The unspecified rule is what lets test_ssrf_rebinding.py cover tickets.py and responders.py, which open the internal network by construction: the second DNS answer in those tests is 0.0.0.0.
@@ -1464,75 +442,9 @@ The audit trail has three parts and each has one owner. auth.audit() writes the 
 
 The split matters because the two ways of erasing your own tracks, shortening retention and redirecting the syslog copy, sit behind the higher role. Both are checked on the server, not just in the UI. The reading side treats every line as hostile data. The username of a failed login, a blocked indicator and a whitelisted sender were all typed by people who are not operators. The assistant uses the same LLM transport as the case chat ([diagram 10](#10-llm-analysis)), with its own fixed prompt.
 
-```mermaid
-flowchart TD
-  GA["global_admin<br/>Configurações → Auditoria"]
-  POSTC["POST /audit-log-config<br/>audit_store.validate()"]
-  RES["audit_store.resolve_syslog()<br/>validate_destination()"]
-  CFG["configuration.json<br/>auditLog"]
-  BOOT["auth.init_audit_log()<br/>at startup"]
-  APPLY["audit_store.apply()<br/>swap handlers, move, prune"]
-  TEST["POST /audit-log-config/test"]
+[![Diagram 16: Audit trail](docs/diagramas/16-audit-trail.svg)](docs/diagramas/16-audit-trail.svg)
 
-  W1["auth.py: login, MFA, SSO,<br/>users, policy refusals"]
-  W3["thephish_app.py: own events,<br/>after_request config_change"]
-  AUD["auth.audit()<br/>actor, IP, never raises"]
-  LOG["logger thephish.audit<br/>propagate off"]
-
-  FH["AuditFileHandler<br/>auth.log in data/"]
-  ROT{"New day, or<br/>segment full?"}
-  REN["rename to a<br/>dated copy"]
-  PRUNE["audit_store.prune()<br/>retention, then ceiling"]
-  SYSH["AuditSyslogHandler<br/>UDP or TCP, pinned IP"]
-
-  ADM["admin or global_admin<br/>Administração → Auditoria"]
-  FILES["audit_store.trail_files()<br/>current and old copies"]
-  QRY["GET /api/audit<br/>audit_trail.query()"]
-  EXP["GET /api/audit/export<br/>CSV, formulas neutralized"]
-  ASK["POST /api/audit/assistant<br/>question and history"]
-  CTX["assistant_context()<br/>last 7 days"]
-  PRM["build_assistant_prompt()<br/>prompt_guard layers"]
-  CAN{"canary in<br/>the answer?"}
-  ANS["answer shown<br/>with warnings"]
-  REF["answer withheld"]
-
-  LLM["LLM provider"]
-  SIEM["Syslog / SIEM"]
-
-  GA --> POSTC
-  POSTC -->|"syslog on: check"| RES
-  POSTC -->|"valid"| CFG
-  CFG --> APPLY
-  BOOT --> APPLY
-  APPLY -->|"syslog on"| RES
-  APPLY -->|"file handler"| FH
-  RES -->|"IP of a second lookup,<br/>not re-checked"| SYSH
-  GA --> TEST
-
-  W1 --> AUD
-  W3 --> AUD
-  AUD --> LOG
-  LOG --> FH
-  LOG -->|"when applied"| SYSH
-  SYSH --> SIEM
-  FH -->|"before each write"| ROT
-  ROT -->|"yes"| REN
-  REN --> PRUNE
-
-  FH -->|"files"| FILES
-  ADM --> QRY
-  ADM --> EXP
-  ADM --> ASK
-  FILES --> QRY
-  FILES --> EXP
-  FILES --> CTX
-  ASK --> CTX
-  CTX --> PRM
-  PRM -->|"ask_chat_llm()"| LLM
-  LLM --> CAN
-  CAN -->|"no"| ANS
-  CAN -->|"yes"| REF
-```
+<sub>Click the image to open it full size. Source: [`docs/diagramas/16-audit-trail.mmd`](docs/diagramas/16-audit-trail.mmd)</sub>
 
 - **Arrows show where a record or a setting flows.** The configuration steps belong to global_admin, the reading steps to admin and above; the writers are web requests. **The trail also records actions on itself**, which the diagram leaves out to stay readable: changing its configuration (audit_log_config_update with before and after, refused, or warning when the ceiling cut or the syslog failed), the syslog test (audit_syslog_test), a CSV export and a withheld assistant answer (audit_assistant refused). Every POST to the assistant also passes the after_request hook, so each question leaves a config_change line with the form field names (history, question) and never their values.
 - **Who writes.** auth.py writes login, logout, MFA, SSO, user and password events, and auth.requires_role() plus the session and MFA policy write authorization_denied, session_expired, session_revoked and mfa_gate. thephish_app.py routes write their own events (whitelist, connectors, responders, indicator_block, reclassification, verdict memory, settings), and its after_request hook _security_headers() writes config_change for every POST, PUT, PATCH and DELETE outside /api/auth/ and /api/users, with field names only. auth.audit(event, username, status, detail) records the actor as user(role) and the IP from client_ip(), makes control characters visible and never raises.
@@ -1553,6 +465,12 @@ flowchart TD
 
 - A change to a module listed under a diagram's *Drawn from* line is a change to that diagram: update both in
   the same pull request.
-- Keep to the Mermaid syntax GitHub renders (flowchart, sequence, ER); no styling directives, so every
-  diagram reads in light and dark mode.
+- The `.mmd` file is the source and the `.svg` next to it is generated; edit the first and regenerate the second
+  in the same pull request. Settings are in `docs/diagramas/mermaid.config.json` (labels as plain SVG text, white
+  background), for example with the Mermaid CLI:
+  `npx -p @mermaid-js/mermaid-cli mmdc -i docs/diagramas/NN-name.mmd -o docs/diagramas/NN-name.svg -b white -c docs/diagramas/mermaid.config.json`.
+- Keep to the Mermaid syntax (flowchart, sequence, ER); no styling directives.
+- Why images and not Mermaid blocks in this page: GitHub renders every block in its own iframe, one after the other,
+  and these sixteen took tens of seconds to settle, with the larger ones leaving blank or tiny frames. An SVG
+  loads at once and opens full size on click.
 - Never draw a component the code does not have. A step that depends on a setting says which one.

@@ -1,0 +1,97 @@
+flowchart TD
+  Queues["Filas de Trabalho<br/>Suspeitos / Phishing"]
+  Detail["Case detail"]
+  Scope["Case scope<br/>case_scope.scope_for()"]
+  FP[("analysis_fingerprint<br/>written by diagram 7")]
+
+  Decide["Reclassify<br/>Safe or Malicious + reason"]
+  Revert["Revert (admin)"]
+  Reason{"reason at least<br/>15 chars?"}
+  Target["verdict re-read<br/>from the destination"]
+  Allowed{"transition<br/>allowed?"}
+  InForce{"reclassification<br/>in force?"}
+  Record[("reclassification.record()<br/>append-only row")]
+  Refused["error, nothing<br/>recorded"]
+
+  Write{"record source?"}
+  Hive["TheHive<br/>reclassify_thehive()"]
+  Jira["Jira<br/>reclassify_jira()"]
+  Disk["Disk archive<br/>reclassify_disk()"]
+
+  Kind{"what did the<br/>decision do?"}
+
+  Tick{"notify reporter<br/>ticked?"}
+  Switch{"errata switch on?<br/>(starts off)"}
+  Reporter{"reporter<br/>recorded?"}
+  Errata["errata.send()<br/>SMTP server to Reporter"]
+  MemScope{"memoryScope?"}
+  IsAdmin{"caller admin<br/>or above?"}
+  HasKey{"content_key<br/>recorded?"}
+  Learn["verdict_memory.learn()<br/>180 days"]
+
+  Revoke["verdict_memory<br/>.revoke_for_decision()"]
+  Future["Later analyses:<br/>verdict_memory.apply() (diagram 9)"]
+  Proposal["Whitelist › Aprendido<br/>admin turns it into a rule"]
+  Close["outcomes saved, audited<br/>decision never undone"]
+
+  Block["Bloquear indicadores<br/>POST /api/block (admin)"]
+  BlockCheck{"indicators, destinations<br/>valid and enabled?"}
+  Run["block_indicators()<br/>responders.run() per pair"]
+  BlockRefused["HTTP 400,<br/>nothing blocked"]
+  BlockDest["Blocking destinations<br/>(EOP / firewalls)"]
+  BlockOut["status per pair,<br/>audited"]
+
+  Queues --> Detail
+  Detail -->|"loaded alongside"| Scope
+  Scope -->|"reads"| FP
+  Detail -->|"decide"| Decide
+  Detail -->|"undo"| Revert
+  Decide --> Reason
+  Revert --> Reason
+  Reason -->|"no"| Refused
+  Reason -->|"yes"| Target
+  Target -->|"not readable"| Refused
+  Target -->|"reclassify"| Allowed
+  Target -->|"revert"| InForce
+  Allowed -->|"no"| Refused
+  InForce -->|"no"| Refused
+  Allowed -->|"yes"| Record
+  InForce -->|"yes"| Record
+  Record -->|"write failed"| Refused
+  Record --> Write
+  Write -->|"thehive"| Hive
+  Write -->|"jira"| Jira
+  Write -->|"disk"| Disk
+  Hive --> Kind
+  Jira --> Kind
+  Disk --> Kind
+  Kind -->|"false positive"| Tick
+  Kind -->|"revert"| Revoke
+  Kind -->|"confirmation, or<br/>Suspicious to Malicious"| Close
+  Tick -->|"yes"| Switch
+  Tick -->|"no"| MemScope
+  Switch -->|"no: not sent"| MemScope
+  Switch -->|"yes"| Reporter
+  Reporter -->|"no: not sent"| MemScope
+  Reporter -->|"yes"| Errata
+  Errata -->|"ok or failed"| MemScope
+  FP -.->|"keys_for()"| Reporter
+  FP -.->|"keys_for()"| HasKey
+  MemScope -->|"case (default)"| Close
+  MemScope -->|"content, sender"| IsAdmin
+  IsAdmin -->|"no: refused"| Close
+  IsAdmin -->|"yes"| HasKey
+  HasKey -->|"no"| Close
+  HasKey -->|"yes"| Learn
+  Learn --> Close
+  Learn -.->|"content memory"| Future
+  Learn -.->|"sender proposal"| Proposal
+  Revoke --> Close
+  Close -.->|"next read"| Queues
+  Detail -->|"admin"| Block
+  Block --> BlockCheck
+  BlockCheck -->|"no"| BlockRefused
+  BlockCheck -->|"yes"| Run
+  Run -->|"no pair applies"| BlockRefused
+  Run -->|"firewalls via diagram 15"| BlockDest
+  BlockDest --> BlockOut

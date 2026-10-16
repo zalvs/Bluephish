@@ -1,0 +1,82 @@
+flowchart TD
+  BR["Browser (BluePhish UI)"]
+  MB["Monitored mailbox"]
+  HYD[("inbox_hydrated<br/>bodies held in memory")]
+  RS[("render_store.py<br/>stored layouts")]
+
+  P1{"Polling on and<br/>mailbox configured?"}
+  LST["GET /list<br/>the refresh button"]
+  P2["list_emails.main()<br/>under analysis_semaphore,<br/>have = UIDs already held"]
+  PROV{"email_sync.provider?"}
+  GP["GraphProvider<br/>Graph API, MSAL token"]
+  IP["ImapProvider<br/>Gmail or legacy imap"]
+  LU["list_unread():<br/>every unread message"]
+  HAVE{"Page 1 at each end:<br/>UID already held?"}
+  ENV["Stub from the envelope<br/>bodyLoaded false"]
+  BODY["Download the body<br/>message stays unread"]
+  MODE{"Carries an<br/>attached .eml?"}
+  ATT["'Attached .eml' row"]
+  RAW["'Raw Email' row"]
+  ASM["assemble_queue()<br/>in the provider's order"]
+  REC["record_listing()<br/>held bodies over stubs"]
+  PUSH["push_inbox_state()<br/>'inbox' event"]
+
+  L2["Background loader:<br/>inbox_pages.next_batch()<br/>at most 10 UIDs"]
+  L4["list_emails.peek_many()<br/>under analysis_semaphore"]
+  L5["entry_and_layout()<br/>remote images off"]
+  L6{"receivedAt still<br/>matches the listing?"}
+  L8["remember_loaded_email()<br/>body and layout kept"]
+  L9["'inboxProgress' event<br/>rows just ready"]
+
+  C3["GET /email/uid<br/>peek, stays unread"]
+  C4["GET /email-rendered/uid<br/>'Como entregue'"]
+  AN["Analyze (diagram 4, diagram 6)<br/>provider.fetch() marks read"]
+  VA["volume_alerts.evaluate()<br/>then fire(): mail, webhook"]
+  SCH["Scheduler (diagram 4)<br/>newest end only, no have,<br/>never feeds the queue"]
+
+  P1 -->|"no: sleep"| P1
+  P1 -->|"yes"| P2
+  BR -->|"refresh"| LST
+  LST --> P2
+  P2 --> PROV
+  PROV -->|"m365"| GP
+  PROV -->|"gmail or legacy imap"| IP
+  GP --> MB
+  IP --> MB
+  MB --> LU
+  LU -->|"middle pages"| ENV
+  LU -->|"page 1"| HAVE
+  HAVE -->|"yes"| ENV
+  HAVE -->|"no"| BODY
+  BODY --> MODE
+  MODE -->|"yes"| ATT
+  MODE -->|"no"| RAW
+  ATT --> ASM
+  RAW --> ASM
+  ENV --> ASM
+  ASM --> REC
+  REC --> HYD
+  REC --> PUSH
+  PUSH --> BR
+  REC -.->|"polling cycle only"| VA
+  SCH -.->|"same provider"| MB
+
+  L2 --> L4
+  L4 -.->|"peek"| MB
+  L4 --> L5
+  L5 --> L6
+  L6 -->|"yes"| L8
+  L6 -->|"no: skip UID"| L9
+  L8 --> HYD
+  L8 --> RS
+  L8 --> L9
+  L9 --> BR
+  L9 -.->|"rows ready"| VA
+
+  BR -->|"open a row"| C3
+  BR -->|"Como entregue"| C4
+  C3 -.->|"peek"| MB
+  C4 -.->|"peek"| MB
+  C3 --> HYD
+  C4 <--> RS
+  BR -.->|"analyze"| AN

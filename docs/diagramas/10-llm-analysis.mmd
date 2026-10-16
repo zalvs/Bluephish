@@ -1,0 +1,81 @@
+flowchart TD
+  CFE["case_from_email.py<br/>subject, body, auth,<br/>up to 3 images"]
+  INJ["prompt_guard.inspect()<br/>subject and body"]
+  SUM["analyzer findings<br/>and link hosts"]
+  COUNCIL["llm_council.main()<br/>reads pipeline_mode"]
+  MODE{"pipeline_mode?"}
+  SINGLE["single (default)<br/>llm_analysis.main()"]
+  REV1["review: one<br/>analyst assessment"]
+  DEB["debate: two analysts,<br/>then one rebuttal each"]
+  PRE{"enabled, endpoint, model,<br/>body or image?"}
+  IMG{"catalog says<br/>no images?"}
+  BUILD["build_analysis_prompt()<br/>fresh nonce and canary"]
+  GUARD["prompt_guard.inspect()<br/>sanitize, then scan"]
+  USERMSG["user message: notes,<br/>fenced email and findings,<br/>date, legitimate-mail rules"]
+  SYSMSG["system message: core<br/>+ output contract<br/>+ spotlight"]
+  CHAT["llm_analysis.chat()<br/>temperature 0"]
+  CHECK{"canary leaked, invalid,<br/>error or timeout?"}
+  PARSE["parse_llm_response()<br/>risk, justification,<br/>tactics, evidence"]
+  LLMP["LLM provider"]
+  DROP{"any assessment<br/>left?"}
+  RES["single: assessment<br/>and guard findings"]
+  REVIEW["_review(): own call,<br/>never the email"]
+  CONS["_consensus(), _merge()<br/>highest risk wins"]
+  GATE["council block:<br/>holdForHuman,<br/>trustAutonomousAction"]
+  FAILOPEN["None: the analyzers<br/>decide alone"]
+  TERM["terminate_analysis()<br/>see diagram 9"]
+  CLOAD["GET /api/chat/load<br/>TheHive or disk record"]
+  CMSG["POST /api/chat/message<br/>question and history"]
+  CSYS["build_chat_system_prompt()<br/>core, chat framing, fences"]
+  CASK["ask_chat_llm()<br/>temperature 0.2"]
+  COUT{"canary<br/>leaked?"}
+  BROWSER["Browser (BluePhish UI)"]
+  CAT["llm_catalog.list_models()<br/>cached"]
+
+  CFE --> COUNCIL
+  SUM -->|"findings"| COUNCIL
+  INJ -->|"for the reviewer"| COUNCIL
+  INJ -->|"injection floor"| TERM
+  COUNCIL --> MODE
+  MODE -->|"single"| SINGLE
+  MODE -->|"review"| REV1
+  MODE -->|"debate"| DEB
+  SINGLE --> PRE
+  REV1 --> PRE
+  DEB --> PRE
+  PRE -->|"no"| FAILOPEN
+  PRE -->|"yes"| IMG
+  IMG -->|"yes: images withheld"| BUILD
+  IMG -->|"no body left: skipped"| FAILOPEN
+  IMG -->|"no or unknown"| BUILD
+  BUILD --> GUARD
+  GUARD --> USERMSG
+  BUILD --> SYSMSG
+  USERMSG --> CHAT
+  SYSMSG --> CHAT
+  CHAT -->|"messages, images"| LLMP
+  LLMP -->|"answer"| CHECK
+  CHECK -->|"yes: dropped"| DROP
+  CHECK -->|"no"| PARSE
+  DROP -->|"no"| FAILOPEN
+  DROP -->|"yes"| REVIEW
+  PARSE -->|"single"| RES
+  PARSE -->|"review, debate"| REVIEW
+  REVIEW -->|"proceed or hold"| CONS
+  CONS --> GATE
+  RES --> TERM
+  GATE --> TERM
+  FAILOPEN --> TERM
+
+  BROWSER -->|"open a case"| CLOAD
+  CLOAD -->|"context cached"| CMSG
+  BROWSER -->|"question"| CMSG
+  CMSG --> CSYS
+  CSYS --> CASK
+  CASK -.->|"same endpoint, model"| LLMP
+  CASK --> COUT
+  COUT -->|"yes: withheld"| BROWSER
+  COUT -->|"no: answer"| BROWSER
+  BROWSER -->|"admin: model picker"| CAT
+  IMG -.->|"same cache"| CAT
+  CAT -.->|"models, capabilities"| LLMP

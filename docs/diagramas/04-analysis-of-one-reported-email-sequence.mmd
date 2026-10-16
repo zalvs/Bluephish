@@ -1,0 +1,70 @@
+sequenceDiagram
+    participant Browser as Browser (BluePhish UI)
+    participant App as Bluephish app
+    participant Mailbox as Monitored mailbox
+    participant CFE as case_from_email.py
+    participant RA as run_analysis.py
+    participant SMTP as SMTP server
+    participant Ext as Vendors and LLM
+    participant Dest as Destinations
+
+    alt Analyst analyzes one email
+        Browser->>App: POST /analysis (mailUID, sid)
+        Note over App: requires_analyst<br/>400 empty mailUID, 404 not queued
+    else Analyst analyzes a selection
+        Browser->>App: POST /analysis-selected
+        Note over App: 1 to 50 UIDs, analyze_one_email()<br/>per queued UID, in order
+    else Scheduler cycle
+        Note over App: scheduler_loop(): enabled,<br/>nextRunAt due, no cycle running
+        App->>App: run_automatic_analysis()
+        App--)Browser: autoAnalysis cycle_start
+        App->>Mailbox: list_emails.main() (diagram 5)
+        Mailbox-->>App: pending emails
+        Note over App: oldest maxPerCycle first,<br/>analyze_one_email() for each
+    end
+    Note over Browser,RA: WebSocketLogger: logs go to the<br/>requester or inbox room only
+    App->>CFE: case_from_email.main(), under analysis_semaphore
+    CFE->>Mailbox: provider.fetch(mail_uid)
+    Mailbox-->>CFE: raw message, marked read
+    CFE->>CFE: obtain_eml(): attachment or raw email, reporter
+    CFE->>CFE: analyze_message(): observables (diagram 6)
+    CFE-->>App: observables, reporter, subject, body, ...
+    Note over App,CFE: None, already read or failed:<br/>run_analysis.main() not called
+    App->>RA: run_analysis.main(wsl, observables, reporter, ...)
+    opt notificationFlags.start and SMTP server on
+        RA->>SMTP: start notice
+        Note over RA,SMTP: mailer.send(): a failed or disabled<br/>send is only a logWarning
+    end
+    alt spamSkipAnalysis on, bulk, authenticated,<br/>no attachment
+        RA->>RA: reputation analyzers skipped
+    else otherwise
+        RA->>Ext: analyze_observables(): Analyzer vendors (diagram 8)
+        Ext-->>RA: level per job: info, safe, suspicious, malicious
+    end
+    RA->>RA: prompt_guard.inspect(subject and body)
+    RA->>Ext: llm_council.main(): LLM provider (diagram 10)
+    Ext-->>RA: risk level and justification, or None
+    RA->>RA: terminate_analysis(): verdict, score (diagram 9)
+    alt Safe or Malicious, its flag and SMTP server on
+        RA->>SMTP: verdict notice
+    else Suspicious, or the flag off
+        Note over RA: the reporter is not mailed
+    end
+    RA->>RA: departments.resolve_from_file(reporter)
+    RA->>Dest: tickets.dispatch(): TheHive, Jira, Disk archive
+    Note over RA,Dest: TheHive first, enabled only,<br/>minVerdict must accept
+    Dest-->>RA: outcome per destination, record reference
+    opt a record reference came back
+        RA->>RA: remember_analysis() (diagram 12)
+    end
+    RA->>Dest: connectors.dispatch(): Generic connectors (diagram 15)
+    RA-->>App: verdict, llm_result, score_result
+    alt Analyst analyzes one email
+        App-->>Browser: JSON verdict, llmAnalysis, score
+    else Analyst analyzes a selection
+        App--)Browser: release_analyzed_email() push
+        App-->>Browser: JSON analyzed, failed, results
+    else Scheduler cycle
+        App--)Browser: release_analyzed_email() push
+        App--)Browser: autoAnalysis cycle_end
+    end

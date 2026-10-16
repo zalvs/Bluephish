@@ -1,0 +1,46 @@
+flowchart TD
+  subgraph CONS["Consumers, by allow_internal"]
+    direction LR
+    subgraph NEVER["Internal network: never"]
+      direction LR
+      UN["unshorten.resolve()<br/>first URL and every redirect hop"]
+      ER["email_render.py<br/>RemoteImageFetcher._fetch_once()<br/>reported email's remote images"]
+    end
+    subgraph SAVED["Internal: only with saved allowInternal"]
+      direction TB
+      CA["custom_analyzers.query()<br/>analyst-defined analyzer URL"]
+      VA["volume_alerts.deliver()<br/>volume-alert webhooks"]
+      CO["connectors.deliver()<br/>Generic connectors"]
+      VA --> CO
+    end
+    subgraph OPEN["Internal: allowed by construction"]
+      direction LR
+      TJ["tickets._jira_call()<br/>Jira URL"]
+      TH["tickets.validate_entry()<br/>TheHive URL, on save only"]
+      RS["responders._guard()<br/>PAN-OS, FortiGate, Check Point<br/>management URL"]
+      AUD["audit_store.resolve_syslog()<br/>Syslog / SIEM host and port<br/>when the setting is applied"]
+    end
+  end
+  CONS --> V
+  V["custom_analyzers.py<br/>validate_destination()<br/>on save and before each call"]
+  V --> SH{"scheme accepted<br/>and URL<br/>has a host?"}
+  SH -->|"yes"| LD["IP literal: no DNS lookup<br/>name: socket.getaddrinfo(host)"]
+  LD -->|"every address"| JU{"any address<br/>forbidden?<br/>_is_forbidden_address()"}
+  JU -->|"no"| QH{"consumer is<br/>TheHive?"}
+  QH -->|"no"| QS{"consumer is<br/>audit_store.py?"}
+  QS -->|"no, HTTP"| PIN["pinned_http.py<br/>request / get / post / session<br/>same allow_internal as the guard"]
+  PIN --> NC["pinned connection _new_conn()<br/>asks DNS once, judges every<br/>address: _is_forbidden_address()"]
+  NC -->|"all allowed"| SOCK["socket opened on the judged IP<br/>Host header, SNI, certificate<br/>keep the name"]
+  SOCK --> RD{"301/302/303/307/308?<br/>allow_redirects<br/>= False"}
+  RD -->|"yes"| QU{"consumer is<br/>unshorten.py?"}
+  SH -->|"no"| RF["refused: (False, reason)<br/>save forms show the reason<br/>calls: 'Destino recusado: reason'"]
+  LD -->|"does not resolve"| RF
+  JU -->|"yes"| RF
+  QH -->|"yes, later"| THC["thehive4py and thehive_query()<br/>call requests: not pinned, not<br/>revalidated, redirects followed"]
+  QS -->|"yes, syslog"| SYS["second getaddrinfo, first address<br/>AuditSyslogHandler gets an IP,<br/>never the name"]
+  NC -->|"any forbidden"| DR["DestinationRefused<br/>before any packet,<br/>TLS handshake included"]
+  RD -->|"no"| RESP["response returned<br/>to the consumer"]
+  QU -->|"no"| NF["redirect never followed<br/>custom_analyzers, connectors,<br/>email_render: named as failure"]
+  QU -->|"yes"| HOP["Location becomes the next hop<br/>back through the guard<br/>at most 10 hops"]
+  HOP --> V
+  TST["test_ssrf_rebinding.py<br/>DNS that changes its answer<br/>after first query, six consumers"] -.->|"guards"| NC

@@ -1,15 +1,18 @@
-# Social engineering analysis with an LLM
+# Análise de engenharia social com um LLM
 
-Bluephish can send the reported email (subject, clean body text, attached or inline images)
-together with the sender authentication results and the analyzers' findings and link
-destinations to an LLM, either local (Ollama, llama.cpp, vLLM) or a hosted OpenAI-compatible
-provider such as OpenRouter, to detect **Business Email Compromise (BEC)** and other
-social engineering patterns that produce no IoCs — no malicious links, no attachments —
-and would therefore be classified as *Safe* by the reputation analyzers alone.
+**Português (Brasil)** · [English](en/llm-analysis.md)
 
-## Configuration
+O Bluephish pode enviar o e-mail denunciado (assunto, texto limpo do corpo, imagens anexas ou
+embutidas), junto com o resultado da autenticação do remetente e os achados e destinos de
+links dos analisadores, a um LLM, local (Ollama, llama.cpp, vLLM) ou um provedor hospedado
+compatível com a API da OpenAI, como o OpenRouter. O objetivo é detectar **Business Email
+Compromise (BEC)** e outros padrões de engenharia social que não geram IoCs (nem links
+maliciosos, nem anexos) e que, por isso, seriam classificados como *Seguro* só pelos
+analisadores de reputação.
 
-`app/configuration.json` (also editable from the web interface):
+## Configuração
+
+`app/configuration.json` (também editável pela interface web, em **Configurações → IA**):
 
 ```json
 "llm_analysis" : {
@@ -19,94 +22,97 @@ and would therefore be classified as *Safe* by the reputation analyzers alone.
 }
 ```
 
-- **Ollama native API**: any endpoint containing `/api/chat` uses the Ollama chat format
-  with `"format": "json"` (forces valid JSON output). Setup: `ollama pull llama3`.
-- **OpenAI-compatible API**: any other endpoint (e.g. `http://localhost:8000/v1/chat/completions`)
-  uses the OpenAI chat completions format — works with llama.cpp server, vLLM, LM Studio, LocalAI.
-- **Docker**: the Bluephish container must reach the LLM on the host — the default in
-  `docker/thephish_conf_files/configuration.json` is `http://host.docker.internal:11434/api/chat`.
-  On Linux add to the Bluephish service in `docker-compose.yml`:
-  `extra_hosts: ["host.docker.internal:host-gateway"]`.
+- **API nativa do Ollama**: qualquer endpoint que contenha `/api/chat` usa o formato de chat
+  do Ollama com `"format": "json"` (força uma saída JSON válida). Preparação: `ollama pull llama3`.
+- **API compatível com a OpenAI**: qualquer outro endpoint (por exemplo
+  `http://localhost:8000/v1/chat/completions`) usa o formato de *chat completions* da OpenAI,
+  que funciona com o servidor do llama.cpp, vLLM, LM Studio e LocalAI.
+- **Docker**: o contêiner do Bluephish precisa alcançar o LLM que roda na máquina hospedeira.
+  O padrão em `docker/thephish_conf_files/configuration.json` é
+  `http://host.docker.internal:11434/api/chat`. No Linux, esse nome não existe por padrão:
+  veja [como usar um Ollama da sua máquina no Linux](duvidas-gerais.md#como-uso-um-ollama-que-roda-na-minha-máquina-no-linux).
 
-## How it works
+## Como funciona
 
-1. `case_from_email.py` extracts the clean body text of the attached email (text/plain
-   parts preferred, HTML-to-text via BeautifulSoup as fallback).
-2. `llm_analysis.py` sends subject + body (truncated to 6000 chars), the sender
-   authentication results, the analyzers' findings and any images to the model with a
-   system prompt made of an editable core (`llm_analysis.system_prompt`; default:
-   `DEFAULT_SYSTEM_PROMPT`), the fixed `ANALYSIS_OUTPUT_CONTRACT` and the spotlighting
-   instruction. The expected answer is:
+1. `case_from_email.py` extrai o texto limpo do corpo do e-mail anexado (prefere as partes
+   `text/plain`; usa HTML convertido em texto pelo BeautifulSoup como alternativa).
+2. `llm_analysis.py` envia assunto e corpo (truncado em 6000 caracteres), o resultado da
+   autenticação do remetente, os achados dos analisadores e as imagens ao modelo, com um
+   prompt de sistema formado por um núcleo editável (`llm_analysis.system_prompt`; padrão:
+   `DEFAULT_SYSTEM_PROMPT`), o `ANALYSIS_OUTPUT_CONTRACT` fixo e a instrução de
+   *spotlighting*. A resposta esperada é:
 
    ```json
    {"risk_level": "Low|Medium|High|Critical", "justification": "...", "social_engineering_detected": true, "tactics": [...], "evidence": [...]}
    ```
 
-   `tactics` is chosen from a closed vocabulary; values outside it are dropped.
+   `tactics` vem de um vocabulário fechado; valores fora dele são descartados.
 
-3. `run_analysis.py` hands the result to every enabled recording destination
-   (`tickets.py`): the TheHive destination writes it as a **task log on the "ThePhish
-   analysis" task**, and the disk destination keeps it in the `llm` field of `report.json`.
-   The web interface shows it next to the final verdict.
-4. **Verdict escalation**: if the analyzers say *Safe* but the LLM reports
-   `social_engineering_detected: true` at or above `escalation_threshold` (default
-   `Medium`; `High` for authenticated bulk mail with a DKIM-signed one-click unsubscribe,
-   RFC 8058), the verdict is escalated to **Suspicious** — the case stays open for the
-   analyst instead of being auto-closed with a "safe" reply to the (potential) BEC victim.
-   A suspicious observable plus a `High` or `Critical` assessment becomes **Malicious**.
-   The LLM escalates to *Malicious* on its own only when `malicious_escalation` is set
-   (default `off`), the sender is not authenticated and, in `review` and `debate`, the
-   reviewer answered without withholding trust and the agents agreed. The LLM can never
-   downgrade a verdict (`BLUEPHISH_ARCHITECTURE.md` §1.2).
+3. `run_analysis.py` entrega o resultado a todos os destinos de registro habilitados
+   (`tickets.py`): o destino TheHive o grava como um **registro na tarefa "ThePhish
+   analysis"**, e o destino em disco o guarda no campo `llm` do `report.json`. A interface web
+   o mostra ao lado do veredito final.
+4. **Escalonamento do veredito**: se os analisadores dizem *Seguro*, mas o LLM informa
+   `social_engineering_detected: true` no nível `escalation_threshold` ou acima (padrão
+   `Medium`; `High` para e-mail em massa autenticado, com cancelamento de inscrição em um
+   clique assinado por DKIM, RFC 8058), o veredito sobe para **Suspeito**: o caso fica
+   aberto para o analista, em vez de ser encerrado sozinho com uma resposta de "seguro" à
+   (potencial) vítima de BEC. Um observável suspeito somado a uma avaliação `High` ou
+   `Critical` vira **Malicioso**. O LLM só escala para *Malicioso* por conta própria quando
+   `malicious_escalation` está ligado (padrão `off`), o remetente não está autenticado e,
+   nos modos `review` e `debate`, o revisor respondeu sem retirar a confiança e os agentes
+   concordaram. O LLM nunca pode rebaixar um veredito (`BLUEPHISH_ARCHITECTURE.md` §1.2).
 
-## Multiple agents (optional)
+## Vários agentes (opcional)
 
-*Settings → IA → Agentes e revisão* chooses how many models look at each email:
+*Configurações → IA → Agentes e revisão* escolhe quantos modelos olham cada e-mail:
 
-| Mode | Calls | What it adds |
+| Modo | Chamadas | O que acrescenta |
 |---|---|---|
-| `single` | 1 | Nothing — the default pipeline. |
-| `review` | 2 | A reviewer that reads the assessment (never the email) and can withhold trust. |
-| `debate` | up to 5 | Two analysts in parallel, one rebuttal each, then the reviewer. |
+| `single` | 1 | Nada: é o fluxo padrão. |
+| `review` | 2 | Um revisor que lê a avaliação (nunca o e-mail) e pode retirar a confiança. |
+| `debate` | até 5 | Dois analistas em paralelo, uma réplica de cada um e, por fim, o revisor. |
 
-Two things worth knowing before turning `debate` on:
+Duas coisas que valem saber antes de ligar o `debate`:
 
-- **Consensus does not protect against prompt injection.** Both analysts read the same
-  hostile email, so an injection that works lands on both and their agreement is the
-  same failure twice. What debate buys is a *divergence* signal — an injection tuned
-  for one model family often fails on another — which is why setting a **different**
-  model for the second analyst is what makes the mode worth its cost. The rebuttal
-  round can only raise a risk level, never lower one, so an attacker cannot use it to
-  argue an agent down.
-- **The reviewer is the part that adds security**, because it never sees the email:
-  it gets the structured conclusions, the guardrail findings and the analyzers' output,
-  and it can only *withhold* trust. `proceed` changes nothing; `hold_for_human` sends
-  the case to a person and blocks autonomous escalation to Malicious. A reviewer that
-  is unreachable counts as "did not look", never as "approved".
+- **Consenso não protege contra prompt injection.** Os dois analistas leem o mesmo e-mail
+  hostil, então uma injeção que funciona cai nos dois e a concordância deles é a mesma falha
+  duas vezes. O que o debate entrega é um sinal de *divergência*: uma injeção feita para uma
+  família de modelos costuma falhar em outra, e por isso usar um modelo **diferente** no
+  segundo analista é o que faz o modo valer o custo. A rodada de réplica só pode subir um
+  nível de risco, nunca baixar, então um atacante não consegue usá-la para convencer um
+  agente a recuar.
+- **O revisor é a parte que acrescenta segurança**, porque nunca vê o e-mail: ele recebe as
+  conclusões estruturadas, os achados da proteção e a saída dos analisadores, e só pode
+  *retirar* a confiança. `proceed` não muda nada; `hold_for_human` manda o caso a uma pessoa
+  e bloqueia a escalada autônoma para Malicioso. Um revisor inalcançável conta como "não
+  olhou", nunca como "aprovou".
 
-Full rationale in [`BLUEPHISH_ARCHITECTURE.md` §8.5](../BLUEPHISH_ARCHITECTURE.md).
+Justificativa completa em [`BLUEPHISH_ARCHITECTURE.md` §8.5](../BLUEPHISH_ARCHITECTURE.md).
 
-## Fail-open behavior
+## Comportamento em caso de falha
 
-The LLM step never blocks the pipeline: if the endpoint is offline, times out
-(10 s connect / 120 s read per socket; 240 s for the whole request in single mode, 420 s for
-the whole council in review and debate), returns unparseable output, or leaks the request
-canary, a warning is logged and the link/attachment analysis continues normally.
+A etapa do LLM nunca bloqueia o fluxo: se o endpoint estiver fora do ar, estourar o tempo
+(10 s de conexão e 120 s de leitura por socket; 240 s para a requisição inteira no modo
+single, 420 s para todo o conselho em review e debate), devolver uma saída que não dá para
+interpretar ou vazar o canário da requisição, um aviso vai para o log e a análise de links e
+anexos segue normalmente.
 
-## Security notes
+## Notas de segurança
 
-- The email content is attacker-controlled and is treated as such by `prompt_guard.py`, not
-  only by asking the model nicely. Before the model sees it, the text is stripped of hidden
-  Unicode carriers, scanned for injection markers and fenced with a per-request random
-  delimiter; afterwards the answer is checked for a canary that only ever existed in the
-  system prompt. A leaked canary means the injection worked, so the assessment is discarded
-  and the analysis continues on the analyzers alone. The response is schema-validated
-  (`risk_level` whitelist, justification truncated to 500 chars, closed tactics vocabulary).
-  Full rationale in [`BLUEPHISH_ARCHITECTURE.md` §8.3](../BLUEPHISH_ARCHITECTURE.md).
-- An email that carries injection markers cannot be closed as *Safe*: the verdict floor
-  raises it to **Suspicious** so a human reads it. It stops there — never *Malicious* — and
-  it applies even when the LLM is disabled, because the payload is a fact about the email
-  rather than about the model.
-- The LLM justification is HTML-escaped before being rendered in the web interface.
-- Keep the endpoint on localhost or an internal segment: email bodies may contain
-  sensitive data and must not leave your environment (that is the point of a *local* LLM).
+- O conteúdo do e-mail é controlado pelo atacante e é tratado assim pelo `prompt_guard.py`,
+  não apenas pedindo com educação ao modelo. Antes de o modelo ver o texto, ele é limpo de
+  portadores Unicode ocultos, varrido atrás de marcadores de injeção e cercado por um
+  delimitador aleatório por requisição; depois, a resposta é conferida contra um canário que
+  só existiu no prompt de sistema. Canário vazado significa que a injeção funcionou: a
+  avaliação é descartada e a análise segue só com os analisadores. A resposta é validada
+  contra um esquema (lista de `risk_level` permitidos, justificativa truncada em 500
+  caracteres, vocabulário fechado de táticas). Justificativa completa em
+  [`BLUEPHISH_ARCHITECTURE.md` §8.3](../BLUEPHISH_ARCHITECTURE.md).
+- Um e-mail com marcadores de injeção não pode ser encerrado como *Seguro*: o piso do
+  veredito o eleva a **Suspeito** para que uma pessoa o leia. Ele para aí, nunca em
+  *Malicioso*, e vale mesmo com o LLM desligado, porque a carga é um fato sobre o e-mail, e
+  não sobre o modelo.
+- A justificativa do LLM tem o HTML escapado antes de aparecer na interface web.
+- Mantenha o endpoint em `localhost` ou num segmento interno: o corpo dos e-mails pode
+  conter dados sensíveis e não deve sair do seu ambiente (é esse o sentido de um LLM *local*).

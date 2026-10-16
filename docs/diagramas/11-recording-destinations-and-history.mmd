@@ -1,0 +1,63 @@
+flowchart TD
+  W1["tickets.build_report()<br/>plain-data report"]
+  W2["tickets.dispatch()"]
+  W3["enabled_for(verdict)<br/>enabled, minVerdict met"]
+  W4["TheHive first,<br/>then the others"]
+  W5["tickets.create()<br/>per destination,<br/>never raises"]
+  W6["create_thehive()<br/>case, observables,<br/>task logs"]
+  W7["create_jira()<br/>issue, markdown report"]
+  W8["create_disk()<br/>dated folder, then prune"]
+  W9["report.caseRef =<br/>TheHive case ref"]
+  W10["record_reference(), then<br/>remember_analysis() (diagram 7)"]
+  W11["connectors.dispatch()<br/>enabled, minVerdict met"]
+  W12["connectors.deliver()<br/>SSRF guard, pinned (diagram 15)"]
+  W13["ok=false: warning<br/>in the log, no retry"]
+  TH["TheHive"]
+  JI["Jira"]
+  DK["Disk archive"]
+  GC["Generic connectors<br/>write-only"]
+  MI["MISP"]
+  R1["thehive_history()<br/>thehive_cases()"]
+  R2["disk_cases()<br/>history.disk_records()"]
+  R3["jira_cases()<br/>tickets.read_jira()"]
+  R4["select_cases(range)<br/>enabled destinations only"]
+  R5["history.merge()<br/>dedupe on caseRef"]
+  R6["reclassification.overlay()<br/>(diagram 12)"]
+  R7["GET /api/cases<br/>observables_for(page)"]
+  R8["case_insights.case_row()<br/>null when None"]
+  R9{"window empty<br/>before filters?"}
+  R10["empty_reason()"]
+  R11["notice, partial<br/>when a source failed"]
+  R12["GET /api/insights<br/>aggregate(), cached"]
+  BR["Browser (BluePhish UI)"]
+
+  W1 --> W2 --> W3
+  W3 -->|"matching ids"| W4 --> W5
+  W5 --> W6
+  W5 --> W7
+  W5 --> W8
+  W6 --> TH
+  TH -.->|"Malicious, mispId set"| MI
+  W7 --> JI
+  W8 --> DK
+  W6 -->|"ok with ref"| W9
+  W9 -.->|"caseRef"| W7
+  W9 -.->|"caseRef"| W8
+  W9 -.->|"caseRef"| W12
+  W5 -->|"results"| W10
+  W10 --> W11 --> W12 --> GC
+  W5 -->|"ok=false"| W13
+  W12 -->|"ok=false"| W13
+
+  TH --> R1
+  DK --> R2
+  JI --> R3
+  R1 --> R4
+  R2 --> R4
+  R3 --> R4
+  R4 --> R5 --> R6
+  R6 --> R7 --> R8 --> R9
+  R9 -->|"yes"| R10 --> R11
+  R9 -->|"no"| R11
+  R11 -->|"cases, notice, partial"| BR
+  R6 --> R12 -->|"dashboard payload"| BR

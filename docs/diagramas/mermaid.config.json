@@ -1,0 +1,8 @@
+{
+  "theme": "default",
+  "htmlLabels": false,
+  "fontFamily": "Arial, Helvetica, sans-serif",
+  "flowchart": { "htmlLabels": false, "useMaxWidth": false },
+  "sequence": { "useMaxWidth": false },
+  "er": { "useMaxWidth": false }
+}

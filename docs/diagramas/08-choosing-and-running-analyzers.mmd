@@ -1,0 +1,74 @@
+flowchart TD
+    START("run_analysis.main() calls<br/>analyze_observables() - diagram 7")
+    CFG["Read settings once per analysis:<br/>analyzers.load_config(),<br/>custom_analyzers.load_all()"]
+    subgraph S_UNSHORT["Step 1 - redirects of every URL"]
+        direction TB
+        U1{"Another url observable<br/>in the list as it was<br/>before Step 1?"}
+        U2["unshorten.resolve(): HEAD first,<br/>up to 10 hops, pinned connection,<br/>each via validate_destination()"]
+        U3{"Chain ended on a URL<br/>other than the original?"}
+        U4{"Final URL matches<br/>the whitelist?"}
+        U5{"Already a url<br/>observable?"}
+        U6["Append a new url observable,<br/>tag unshortened_url"]
+        U1 -->|"yes"| U2 --> U3
+        U3 -->|"no"| U1
+        U3 -->|"yes"| U4
+        U4 -->|"yes: match recorded"| U1
+        U4 -->|"no"| U5
+        U5 -->|"yes"| U1
+        U5 -->|"no"| U6 --> U1
+    end
+    subgraph S_PLAN["Step 2 - plan_jobs(), every pair"]
+        direction TB
+        N1{"Native: enabled, and<br/>analyzers.sends()<br/>the base type?"}
+        C1{"Custom: enabled, and<br/>the saved definition<br/>lists the base type?"}
+        JOB["Planned job: observable,<br/>kind, id, name"]
+        DROP["Pair not planned:<br/>no report, no error"]
+        N1 -->|"yes"| JOB
+        N1 -->|"no"| DROP
+        C1 -->|"yes"| JOB
+        C1 -->|"no"| DROP
+    end
+    EMPTY{"Plan empty?"}
+    WARN["Warn: no analyzer applies,<br/>the verdict rests on the LLM<br/>assessment and the diagram 9 floors"]
+    FILES["write_file_observable(): only<br/>the attachments a planned job<br/>needs, to a per-analysis temp dir"]
+    subgraph S_RUN["Step 3 - run_jobs(): pool of 8"]
+        direction TB
+        RJ["run_job() in a greenlet"]
+        FILEP{"File observable whose<br/>attachment was not written?"}
+        CK{"Fresh cache entry for<br/>kind, id, type, value?"}
+        KIND{"Job kind?"}
+        NAT["analyzers.run(): the vendor<br/>client returns a signal, then<br/>level_for() applies thresholds"]
+        CUS["custom_analyzers.run(): URL<br/>revalidated, pinned, no redirects<br/>(diagram 15), value map gives the level"]
+        FAIL{"Client raised?"}
+        INFOE["Level info plus the reason:<br/>it did not look, never safe"]
+        LEV["Level safe, suspicious or<br/>malicious, or info when<br/>the vendor has no data"]
+        PUT["cache_put(): keeps only<br/>reports without error"]
+        RETRY{"Report retryable and<br/>fewer than 3 retries?"}
+        WAIT["Requeue the job, sleep 60 s,<br/>run a new pool round"]
+        REP["Report row: observable_id,<br/>analyzer_id, analyzer_result,<br/>analyzer_detail, analyzer_error"]
+        RJ --> FILEP
+        FILEP -->|"no"| CK
+        FILEP -->|"yes: info"| RETRY
+        CK -->|"miss"| KIND
+        CK -->|"hit: cached copy"| RETRY
+        KIND -->|"native"| NAT
+        KIND -->|"custom"| CUS
+        NAT --> FAIL
+        CUS --> FAIL
+        FAIL -->|"yes"| INFOE
+        FAIL -->|"no"| LEV
+        INFOE --> PUT
+        LEV --> PUT
+        PUT --> RETRY
+        RETRY -->|"no"| REP
+        RETRY -->|"yes: never today"| WAIT --> RJ
+    end
+    CLEAN["Delete the temp dir, return<br/>reports_observables to main(),<br/>verdict in diagram 9"]
+
+    START --> CFG --> S_UNSHORT
+    S_UNSHORT -->|"no more URLs"| S_PLAN
+    S_PLAN --> EMPTY
+    EMPTY -->|"yes"| WARN --> FILES
+    EMPTY -->|"no"| FILES
+    FILES --> S_RUN
+    S_RUN -->|"all jobs reported"| CLEAN

@@ -1,0 +1,67 @@
+flowchart TD
+  GA["global_admin<br/>Configurações → Auditoria"]
+  POSTC["POST /audit-log-config<br/>audit_store.validate()"]
+  RES["audit_store.resolve_syslog()<br/>validate_destination()"]
+  CFG["configuration.json<br/>auditLog"]
+  BOOT["auth.init_audit_log()<br/>at startup"]
+  APPLY["audit_store.apply()<br/>swap handlers, move, prune"]
+  TEST["POST /audit-log-config/test"]
+
+  W1["auth.py: login, MFA, SSO,<br/>users, policy refusals"]
+  W3["thephish_app.py: own events,<br/>after_request config_change"]
+  AUD["auth.audit()<br/>actor, IP, never raises"]
+  LOG["logger thephish.audit<br/>propagate off"]
+
+  FH["AuditFileHandler<br/>auth.log in data/"]
+  ROT{"New day, or<br/>segment full?"}
+  REN["rename to a<br/>dated copy"]
+  PRUNE["audit_store.prune()<br/>retention, then ceiling"]
+  SYSH["AuditSyslogHandler<br/>UDP or TCP, pinned IP"]
+
+  ADM["admin or global_admin<br/>Administração → Auditoria"]
+  FILES["audit_store.trail_files()<br/>current and old copies"]
+  QRY["GET /api/audit<br/>audit_trail.query()"]
+  EXP["GET /api/audit/export<br/>CSV, formulas neutralized"]
+  ASK["POST /api/audit/assistant<br/>question and history"]
+  CTX["assistant_context()<br/>last 7 days"]
+  PRM["build_assistant_prompt()<br/>prompt_guard layers"]
+  CAN{"canary in<br/>the answer?"}
+  ANS["answer shown<br/>with warnings"]
+  REF["answer withheld"]
+
+  LLM["LLM provider"]
+  SIEM["Syslog / SIEM"]
+
+  GA --> POSTC
+  POSTC -->|"syslog on: check"| RES
+  POSTC -->|"valid"| CFG
+  CFG --> APPLY
+  BOOT --> APPLY
+  APPLY -->|"syslog on"| RES
+  APPLY -->|"file handler"| FH
+  RES -->|"IP of a second lookup,<br/>not re-checked"| SYSH
+  GA --> TEST
+
+  W1 --> AUD
+  W3 --> AUD
+  AUD --> LOG
+  LOG --> FH
+  LOG -->|"when applied"| SYSH
+  SYSH --> SIEM
+  FH -->|"before each write"| ROT
+  ROT -->|"yes"| REN
+  REN --> PRUNE
+
+  FH -->|"files"| FILES
+  ADM --> QRY
+  ADM --> EXP
+  ADM --> ASK
+  FILES --> QRY
+  FILES --> EXP
+  FILES --> CTX
+  ASK --> CTX
+  CTX --> PRM
+  PRM -->|"ask_chat_llm()"| LLM
+  LLM --> CAN
+  CAN -->|"no"| ANS
+  CAN -->|"yes"| REF

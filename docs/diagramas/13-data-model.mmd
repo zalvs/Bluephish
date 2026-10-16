@@ -1,0 +1,71 @@
+erDiagram
+    users {
+        int id PK
+        string username UK
+        string password_hash
+        string role
+        datetime password_changed_at
+        string auth_source
+        string mfa_secret
+        datetime mfa_confirmed_at
+        int mfa_last_counter
+    }
+    case_reclassification {
+        int id PK
+        string record_ref
+        string case_ref
+        string action "reclassify or revert"
+        string verdict
+        string created_by
+        text outcomes
+    }
+    analysis_fingerprint {
+        int id PK
+        string record_ref
+        string content_key
+        string sender_key
+        string reporter
+        string verdict
+    }
+    verdict_memory {
+        int id PK
+        string scope "content or sender"
+        string key
+        string verdict "always Safe"
+        string created_by
+        int decision_id
+        string record_ref
+        datetime revoked_at
+        string revoked_by
+        string proposal_status
+        string whitelist_rule_id
+    }
+    analysis_history {
+        int id PK
+        datetime analyzed_at
+        string from_address
+        string verdict
+        string final_verdict
+        string downgraded_by
+        text observables
+    }
+    whitelist_rule_state {
+        string rule_id PK "wl_ rule or vm_ memory"
+        int match_count
+        int suppression_count
+        datetime suspended_at
+    }
+    whitelist_suppression {
+        int id PK
+        string rule_id
+        datetime occurred_at
+        string original_verdict
+    }
+    users |o..o{ case_reclassification : "created_by"
+    users |o..o{ verdict_memory : "created_by, revoked_by"
+    case_reclassification |o..o{ verdict_memory : "decision_id + record_ref"
+    whitelist_rule_state ||..o{ whitelist_suppression : "rule_id"
+    verdict_memory |o..o| whitelist_rule_state : "vm_ + id"
+    analysis_history }o..o| whitelist_rule_state : "downgraded_by"
+    analysis_fingerprint }o..o{ case_reclassification : "record_ref"
+    analysis_fingerprint }o..o{ verdict_memory : "key"

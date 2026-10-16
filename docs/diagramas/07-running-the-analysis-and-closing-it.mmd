@@ -1,0 +1,87 @@
+flowchart TD
+  S("Scheduler, Analyst,<br/>or reanalysis (notify off)")
+  subgraph SETUP["Setup"]
+    CFG{"Config files<br/>readable?"}
+    WL["whitelist.load()<br/>error: empty ruleset"]
+  end
+  subgraph NOTIFY["Notify start of analysis"]
+    N1{"notify and<br/>start flag on?"}
+    N2["send_notification()<br/>mailer.py, SMTP server"]
+  end
+  subgraph ANALYZE["Analyze observables"]
+    SK{"spamSkipAnalysis<br/>conditions hold?"}
+    AO["analyze_observables()<br/>in-process, see diagram 8"]
+    SKIP["reputation lookups<br/>skipped"]
+  end
+  subgraph LLMSTEP["LLM analysis"]
+    PG["prompt_guard.inspect()<br/>subject and body"]
+    LC["llm_council.main(), diagram 10<br/>None when off or down"]
+    FP["case_scope.fingerprint()<br/>message keys, once"]
+  end
+  subgraph TERM["Terminate analysis"]
+    TA["terminate_analysis()<br/>ordered rules, see diagram 9"]
+    V{"verdict?"}
+    NF{"notify and that<br/>verdict's flag on?"}
+    NM["verdict email to<br/>the Reporter via SMTP"]
+    NN["no email to<br/>the Reporter"]
+  end
+  subgraph RECORD["Record the result, see diagram 11"]
+    DEP["departments.resolve_from_file()<br/>empty on failure"]
+    BR["tickets.build_report()"]
+    DI["tickets.dispatch()<br/>enabled, minVerdict met,<br/>TheHive first"]
+    TH["TheHive case<br/>Safe, Malicious resolved<br/>Suspicious left open"]
+    JD["Jira issue /<br/>Disk archive folder"]
+    DF["failed or refused:<br/>warning, others run"]
+    RR["record_reference()"]
+  end
+  subgraph REMEMBER["Remember the analysis, see diagram 12"]
+    RA{"any record<br/>reference?"}
+    CS["case_scope.record()"]
+    CE["case_evidence.keep()<br/>original .eml"]
+    CW["nothing kept:<br/>warning"]
+  end
+  GC["connectors.dispatch()<br/>Generic connectors"]
+  RET("return verdict,<br/>llm_result, score_result")
+  ABORT("return None, None, None<br/>no verdict")
+
+  S --> CFG
+  CFG -->|"no"| ABORT
+  CFG -->|"yes"| WL
+  WL --> N1
+  N1 -->|"yes"| N2
+  N1 -->|"no"| SK
+  N2 -->|"sent or warning"| SK
+  N2 -.->|"exception"| ABORT
+  SK -->|"yes"| SKIP
+  SK -->|"no"| AO
+  AO -.->|"exception"| ABORT
+  AO --> PG
+  SKIP --> PG
+  PG --> LC
+  LC --> FP
+  FP --> TA
+  TA -.->|"exception"| ABORT
+  TA --> V
+  V -->|"Suspicious"| NN
+  V -->|"Safe or Malicious"| NF
+  NF -->|"yes"| NM
+  NF -->|"no"| NN
+  NM -->|"sent or warning"| DEP
+  NN --> DEP
+  DEP --> BR
+  BR --> DI
+  DI --> TH
+  DI --> JD
+  DI --> DF
+  TH --> RR
+  JD --> RR
+  RR --> RA
+  DF --> RA
+  RA -->|"yes"| CS
+  RA -->|"no"| GC
+  CS --> CE
+  CE -->|"kept, or not needed"| GC
+  CE -->|"eml present,<br/>nothing kept"| CW
+  CW --> GC
+  DI -.->|"unexpected exception"| RET
+  GC --> RET

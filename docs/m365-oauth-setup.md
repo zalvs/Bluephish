@@ -1,109 +1,116 @@
-# Microsoft 365 (OAuth 2.0) setup for Bluephish
+# Configurar o Microsoft 365 (OAuth 2.0) no Bluephish
 
-Since Microsoft disabled basic authentication on Exchange Online, Bluephish supports
-Modern Authentication (OAuth 2.0) using the **client credentials flow**
-(app-only access, no interactive login required — suitable for a headless service).
+**Português (Brasil)** · [English](en/m365-oauth-setup.md)
 
-When Microsoft 365 is selected in the **Email synchronization** panel of the web
-interface, Bluephish reads the mailbox through the **Microsoft Graph API**; the IMAP
-XOAUTH2 path described below is still supported through the legacy configuration.
+Desde que a Microsoft desativou a autenticação básica no Exchange Online, o Bluephish usa a
+autenticação moderna (OAuth 2.0) pelo **fluxo de credenciais do cliente** (acesso só do
+aplicativo, sem login interativo, o que serve a um serviço sem tela).
 
-## 1. Register an application in Microsoft Entra ID (Azure AD)
+Quando o Microsoft 365 é escolhido na aba **E-mail** de **Configurações**, o Bluephish lê a
+caixa pela **Microsoft Graph API**. O caminho IMAP XOAUTH2 descrito mais abaixo continua
+aceito pela configuração legada.
 
-1. Go to **Microsoft Entra admin center → Identity → Applications → App registrations → New registration**.
-2. Name it (e.g. `Bluephish-IMAP`), single tenant, no redirect URI needed.
-3. Note down the **Application (client) ID** and the **Directory (tenant) ID**.
-4. Under **Certificates & secrets → New client secret**, create a secret and note down its **value**
-   (it is shown only once).
+## 1. Registrar um aplicativo no Microsoft Entra ID (Azure AD)
 
-## 2a. Grant the Microsoft Graph application permission (Email synchronization panel)
+1. Acesse o **Centro de administração do Microsoft Entra → Identidade → Aplicativos →
+   Registros de aplicativo → Novo registro**.
+2. Dê um nome (por exemplo `Bluephish-IMAP`), locatário único, sem URI de redirecionamento.
+3. Anote o **ID do aplicativo (cliente)** e o **ID do diretório (locatário)**.
+4. Em **Certificados e segredos → Novo segredo do cliente**, crie um segredo e anote o
+   **valor** dele (o portal o mostra uma única vez).
 
-Required when the mailbox is read through the Graph API (the default for the
-Microsoft 365 provider configured from the web interface):
+## 2a. Conceder a permissão de aplicativo do Microsoft Graph (aba E-mail)
 
-1. In the app registration, go to **API permissions → Add a permission → Microsoft Graph**.
-2. Select **Application permissions → Mail.ReadWrite** (read/write is needed so that the
-   processed emails can be marked as read).
-3. Click **Grant admin consent** for the tenant.
-4. Optionally restrict the app to the Bluephish mailbox only with an
-   [application access policy](https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access):
-   `New-ApplicationAccessPolicy -AppId <CLIENT_ID> -PolicyScopeGroupId <MailEnabledSecurityGroup> -AccessRight RestrictAccess`.
+Necessária quando a caixa é lida pela Graph API (o padrão do provedor Microsoft 365
+configurado pela interface web):
 
-Then fill in **Tenant ID**, **Client ID**, **Client Secret** and **Mailbox** in the
-Email synchronization panel and click Save. Steps 2b and 3 are not needed for Graph.
+1. No registro do aplicativo, vá em **Permissões de API → Adicionar uma permissão →
+   Microsoft Graph**.
+2. Selecione **Permissões de aplicativo → Mail.ReadWrite** (leitura e escrita, para que os
+   e-mails processados possam ser marcados como lidos).
+3. Clique em **Conceder consentimento do administrador** para o locatário.
+4. Se quiser, restrinja o aplicativo só à caixa do Bluephish com uma
+   [política de acesso de aplicativo](https://learn.microsoft.com/pt-br/graph/auth-limit-mailbox-access):
+   `New-ApplicationAccessPolicy -AppId <CLIENT_ID> -PolicyScopeGroupId <GrupoDeSegurancaComEmail> -AccessRight RestrictAccess`.
 
-## 2b. Grant the IMAP application permission (legacy IMAP XOAUTH2 path)
+Depois, preencha **Tenant ID**, **Client ID**, **Client Secret** e **Caixa** na aba **E-mail**
+e clique em Salvar. Os passos 2b e 3 não são necessários para a Graph.
 
-1. In the app registration, go to **API permissions → Add a permission → APIs my organization uses**.
-2. Search for **Office 365 Exchange Online** (`00000002-0000-0ff1-ce00-000000000000`).
-3. Select **Application permissions → IMAP.AccessAsApp**.
-4. Click **Grant admin consent** for the tenant.
+## 2b. Conceder a permissão de aplicativo IMAP (caminho legado IMAP XOAUTH2)
 
-## 3. Authorize the service principal on the mailbox (Exchange Online PowerShell)
+1. No registro do aplicativo, vá em **Permissões de API → Adicionar uma permissão → APIs que
+   minha organização usa**.
+2. Procure **Office 365 Exchange Online** (`00000002-0000-0ff1-ce00-000000000000`).
+3. Selecione **Permissões de aplicativo → IMAP.AccessAsApp**.
+4. Clique em **Conceder consentimento do administrador** para o locatário.
 
-App-only IMAP access additionally requires registering the app's service principal in
-Exchange Online and giving it access to the specific mailbox:
+## 3. Autorizar a entidade de serviço na caixa (PowerShell do Exchange Online)
+
+O acesso IMAP só do aplicativo exige, além disso, registrar a entidade de serviço do
+aplicativo no Exchange Online e dar a ela acesso à caixa específica:
 
 ```powershell
 Install-Module -Name ExchangeOnlineManagement
-Connect-ExchangeOnline -Organization <tenant>.onmicrosoft.com
+Connect-ExchangeOnline -Organization <locatario>.onmicrosoft.com
 
-# ObjectId = the "Object ID" of the ENTERPRISE APPLICATION (service principal),
-# not the object id of the app registration
-New-ServicePrincipal -AppId <APPLICATION_CLIENT_ID> -ObjectId <SERVICE_PRINCIPAL_OBJECT_ID> -DisplayName "Bluephish IMAP"
+# ObjectId = o "ID do objeto" do APLICATIVO EMPRESARIAL (entidade de serviço),
+# e não o ID do objeto do registro de aplicativo
+New-ServicePrincipal -AppId <CLIENT_ID_DO_APLICATIVO> -ObjectId <OBJECT_ID_DA_ENTIDADE_DE_SERVICO> -DisplayName "Bluephish IMAP"
 
-# Give the app full access to the ThePhish mailbox only
-Add-MailboxPermission -Identity "thephish@yourdomain.com" -User <SERVICE_PRINCIPAL_OBJECT_ID> -AccessRights FullAccess
+# Dê ao aplicativo acesso total somente à caixa do Bluephish
+Add-MailboxPermission -Identity "thephish@seudominio.com" -User <OBJECT_ID_DA_ENTIDADE_DE_SERVICO> -AccessRights FullAccess
 ```
 
-If IMAP is disabled for the mailbox, enable it:
+Se o IMAP estiver desativado na caixa, ative-o:
 
 ```powershell
-Set-CASMailbox -Identity "thephish@yourdomain.com" -ImapEnabled $true
+Set-CASMailbox -Identity "thephish@seudominio.com" -ImapEnabled $true
 ```
 
-## 4. Configure Bluephish
+## 4. Configurar o Bluephish
 
-Edit `app/configuration.json` (or `docker/thephish_conf_files/configuration.json` when using Docker):
+Edite `app/configuration.json` (ou `docker/thephish_conf_files/configuration.json` quando usar
+Docker):
 
 ```json
 {
 	"imap" : {
 		"host" : "outlook.office365.com",
 		"port" : "993",
-		"user" : "thephish@yourdomain.com",
+		"user" : "thephish@seudominio.com",
 		"password" : "",
 		"authType" : "oauth2",
 		"folder" : "inbox"
 	},
 	"oauth2" : {
-		"tenantId" : "<DIRECTORY_TENANT_ID>",
-		"clientId" : "<APPLICATION_CLIENT_ID>",
-		"clientSecret" : "<CLIENT_SECRET_VALUE>"
+		"tenantId" : "<ID_DO_DIRETORIO_LOCATARIO>",
+		"clientId" : "<ID_DO_APLICATIVO_CLIENTE>",
+		"clientSecret" : "<VALOR_DO_SEGREDO>"
 	}
 }
 ```
 
-Setting `"authType"` to `"basic"` (or omitting it) keeps the original username/password
-behavior for providers that still support it (e.g. Gmail with app passwords).
+Definir `"authType"` como `"basic"` (ou omiti-lo) mantém o comportamento original de usuário e
+senha, para provedores que ainda o aceitam (por exemplo, o Gmail com senha de aplicativo).
 
-## Token management
+## Gerenciamento do token
 
-Token acquisition and caching are handled by `app/m365_auth.py` using MSAL:
+A obtenção e o cache do token ficam em `app/m365_auth.py`, que usa o MSAL:
 
-- The `ConfidentialClientApplication` is a process-wide singleton, so its in-memory
-  token cache is shared by `list_emails.py` and `case_from_email.py`.
-- `acquire_token_for_client()` returns the cached access token while it is still valid
-  and transparently requests a new one from Azure AD when it is missing or close to
-  expiry (client-credentials tokens last ~60–90 minutes; there is no refresh token in
-  this flow — a new token is simply requested).
-- The token is passed to Exchange Online through the SASL `XOAUTH2` mechanism on the
-  existing `imaplib` connection, so the email parsing logic is the same for every provider.
+- O `ConfidentialClientApplication` é um singleton do processo, então o cache de tokens em
+  memória é compartilhado entre `list_emails.py` e `case_from_email.py`.
+- `acquire_token_for_client()` devolve o token de acesso em cache enquanto ele é válido e pede
+  um novo ao Azure AD, de forma transparente, quando ele falta ou está perto de expirar (os
+  tokens do fluxo de credenciais do cliente duram cerca de 60 a 90 minutos; esse fluxo não tem
+  token de atualização, então simplesmente se pede outro).
+- O token segue para o Exchange Online pelo mecanismo SASL `XOAUTH2` na conexão `imaplib`
+  existente, então a lógica de leitura dos e-mails é a mesma para todos os provedores.
 
-## Troubleshooting
+## Solução de problemas
 
-- `AUTHENTICATE failed` right after setup: admin consent or the `New-ServicePrincipal` /
-  `Add-MailboxPermission` step is missing, or you used the app registration object id
-  instead of the enterprise application (service principal) object id.
-- `invalid_client`: wrong client secret (remember to copy the secret **value**, not its id).
-- Works, then stops after months: the client secret expired — create a new one.
+- `AUTHENTICATE failed` logo depois de configurar: falta o consentimento do administrador ou
+  o passo `New-ServicePrincipal` / `Add-MailboxPermission`, ou você usou o ID do objeto do
+  registro de aplicativo em vez do ID do objeto do aplicativo empresarial (entidade de
+  serviço).
+- `invalid_client`: segredo do cliente errado (copie o **valor** do segredo, não o ID).
+- Funcionava e parou depois de meses: o segredo do cliente venceu. Crie um novo.

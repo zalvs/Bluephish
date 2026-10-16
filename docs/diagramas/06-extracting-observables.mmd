@@ -1,0 +1,51 @@
+flowchart TD
+    subgraph ENTRY["Entry points in thephish_app.py"]
+        direction TB
+        E1("Analyst: POST /analysis<br/>or /analysis-selected")
+        E1S("Scheduler:<br/>run_automatic_analysis()")
+        E2("Analyst: POST /api/cases/<br/>case_ref/reanalyze, bytes<br/>via case_evidence.fetch()")
+    end
+    E1 --> M["case_from_email.main()"]
+    E1S --> M
+    E2 --> MF["case_from_email.main_from_eml()"]
+    M --> P["prepare(): configs,<br/>email provider, whitelist"]
+    MF --> P
+    P -->|"setup fails"| FAIL("error logged and emitted,<br/>return None: caller stops,<br/>nothing is analyzed")
+    P -->|"main()"| FETCH["provider.fetch(mail_uid)<br/>IMAP or M365 Graph,<br/>marks the message read"]
+    P -->|"main_from_eml()"| PARSEB["email.message_from_bytes()<br/>kept reported message,<br/>no attached .eml search"]
+    FETCH -->|"exception"| FAIL
+    FETCH -->|"None"| FAIL
+    FETCH --> OBT["obtain_eml()<br/>reporter = From header<br/>of the forwarding email"]
+    OBT -->|"exception"| FAIL
+    OBT --> HAS{"message/rfc822 or<br/>octet-stream part?"}
+    HAS -->|"no"| RAW["obtain_raw_eml(): fetched<br/>email itself, reporter =<br/>Monitored mailbox address"]
+    HAS -->|"yes"| AM
+    RAW --> AM
+    PARSEB -->|"unparseable"| FAIL
+    PARSEB --> AM["analyze_message()"]
+    AM --> AUTH["extract_authentication_results()<br/>first Authentication-Results,<br/>else Received-SPF"]
+    AUTH --> BULK["spam_headers.scan()<br/>+ one_click_signed()<br/>bulk_signals: no verdict"]
+    BULK --> PE["parse_eml()<br/>decode Subject, read<br/>selected header fields"]
+    PE -->|"header values"| IOC
+    PE --> WALK{"each MIME part"}
+    WALK -->|"image"| IMG["collect_image_part()<br/>kept for the LLM<br/>vision step"]
+    WALK -->|"text part"| BODY["text/plain, text/html body<br/>(HTML URL-decoded), also<br/>clean text sent to the LLM"]
+    WALK -->|"attachment"| ATT{"sha256 matched by<br/>ruleset.match_hash?"}
+    BODY --> IOC
+    IOC["search_observables():<br/>ioc_finder finds mail,<br/>ipv4, domain, url"]
+    PRE{"non-public IP, or only an<br/>app store package id?"}
+    WL{"whitelist rule matches?"}
+    DROP["dropped, logged only"]
+    IOC -->|"ip, domain"| PRE
+    IOC -->|"url"| WL
+    PRE -->|"yes"| DROP
+    PRE -->|"no"| WL
+    WL -->|"yes"| SUP["_suppressed_by(): skipped,<br/>whitelist_state.record_match()"]
+    ATT -->|"yes"| SUP
+    IOC -->|"mail: never suppressed"| COL["collect_observables(): flat<br/>in-memory list, ids obs-N,<br/>plus file_message/rfc822"]
+    WL -->|"no"| COL
+    ATT -->|"no"| COL
+    IMG -->|"images"| RET
+    COL --> RET["return observables,<br/>images, eml_bytes ...<br/>no case, no TheHive call"]
+    RET --> RA["run_analysis.main() (diagram 7)"]
+    RA -.->|"after tickets.dispatch()"| CE["run_analysis.remember_analysis()<br/>case_evidence.keep() into<br/>eml_store.py (data/originals)"]

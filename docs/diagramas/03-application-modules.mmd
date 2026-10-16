@@ -1,0 +1,44 @@
+flowchart TD
+  APP["thephish_app.py<br/>the hub: routes, loops"]
+  RUN["run_analysis.py<br/>one analysis, end to end"]
+  WEB["Web, auth and CLI<br/>auth.py, mfa.py, sso.py<br/>models.py, manage.py<br/>generate_cert.py<br/>analyzer_guides.py<br/>responder_guides.py"]
+  MAIL["Mailbox, reported email<br/>list_emails.py<br/>inbox_pages.py<br/>email_provider.py<br/>graph_mail.py, m365_auth.py<br/>email_render.py<br/>render_store.py<br/>volume_alerts.py"]
+  PIPE["Extraction and analyzers<br/>case_from_email.py<br/>ioc_noise.py, spam_headers.py<br/>analyzers.py<br/>custom_analyzers.py<br/>unshorten.py, scoring.py<br/>whitelist.py<br/>whitelist_state.py<br/>whitelist_migration.py<br/>departments.py<br/>graph_directory.py"]
+  LLM["LLM<br/>llm_council.py<br/>llm_analysis.py<br/>llm_catalog.py<br/>prompt_guard.py"]
+  DEST["Destinations, notices, history<br/>tickets.py, connectors.py<br/>mailer.py, history.py<br/>case_insights.py"]
+  POST["After the verdict<br/>reclassification.py<br/>errata.py, case_scope.py<br/>verdict_memory.py<br/>case_evidence.py<br/>eml_store.py, responders.py"]
+  AUDIT["Audit trail<br/>audit_store.py<br/>audit_trail.py"]
+  INFRA["Infrastructure<br/>pinned_http.py<br/>socket_guard.py<br/>ws_logger.py"]
+
+  APP -->|"case_from_email.main()"| PIPE
+  APP -->|"run_analysis.main()"| RUN
+  APP -->|"RBAC, session"| WEB
+  APP -->|"polling, queue"| MAIL
+  APP -->|"history screens"| DEST
+  APP -->|"settings, chat"| LLM
+  APP -->|"desk routes"| POST
+  APP -->|"Auditoria routes"| AUDIT
+  APP -->|"live log"| INFRA
+
+  RUN -->|"analyzers, score"| PIPE
+  RUN -->|"council, guard"| LLM
+  RUN -->|"dispatch, notices"| DEST
+  RUN -->|"memory, scope"| POST
+
+  WEB -->|"audit_store.apply()"| AUDIT
+  INFRA -->|"session policy"| WEB
+  MAIL -->|"volume alerts"| DEST
+  PIPE -->|"provider, token"| MAIL
+  POST -->|"decision, errata"| DEST
+  POST -->|"register_downgrade()"| PIPE
+  AUDIT -->|"validate_destination()"| PIPE
+  MAIL -->|"validate_destination()"| PIPE
+  DEST -->|"guard, registry"| PIPE
+  WEB -->|"manage.py commands"| PIPE
+  AUDIT -->|"prompt_guard"| LLM
+
+  PIPE -->|"pinned_http"| INFRA
+  MAIL -->|"pinned_http"| INFRA
+  DEST -->|"pinned_http"| INFRA
+  POST -->|"pinned_http"| INFRA
+  INFRA -->|"address check"| PIPE

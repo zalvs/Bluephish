@@ -1,0 +1,40 @@
+flowchart TD
+    U["Browser (BluePhish UI)<br/>socket.io client and fonts<br/>from cdnjs, Google Fonts"]
+    IDP["Identity provider<br/>(Entra ID / OIDC)"]
+    subgraph HOST["Docker host: every published port on 127.0.0.1"]
+        TP["Bluephish app, :8080<br/>thephish_app.py<br/>Flask-SocketIO, eventlet"]
+        SCH["Scheduler: off by default<br/>inbox poll: on by default<br/>queue loader, as greenlets"]
+        subgraph MOUNTS["Bind mounts of thephish"]
+            direction LR
+            CONF["thephish_conf_files/<br/>configuration.json,<br/>whitelist.json"]
+            DATA["vol/thephish_data<br/>thephish.db, auth.log,<br/>originals/, rendered/"]
+        end
+        DISK["Disk archive: report folders<br/>configurable path,<br/>default data/analises"]
+        THEHIVE["TheHive, 127.0.0.1:9000<br/>thehive4:4.1.9-1<br/>+ cassandra:3.11 over CQL"]
+        MISP["MISP, 127.0.0.1:80, 443<br/>misp-docker:core-v2.4.148a<br/>+ mysql:8.0.26, redis:6.2.5"]
+    end
+    MBX["Monitored mailbox<br/>Gmail or legacy IMAP,<br/>or Microsoft Graph"]
+    LLM["LLM provider<br/>Ollama /api/chat or<br/>OpenAI-compatible API"]
+    subgraph OUTG["External services called by the app"]
+        direction LR
+        VEND["Analyzer vendors<br/>analyzers.py,<br/>custom_analyzers.py"]
+        WEB["Hosts named in the email<br/>redirect hops: unshorten.py<br/>images: email_render.py"]
+        SMTP["SMTP server<br/>mailer.py"]
+        JIRA["Jira<br/>tickets.py"]
+        BLOCK["Blocking destinations<br/>(EOP / firewalls)<br/>responders.py"]
+        SYS["Syslog / SIEM<br/>audit_store.py"]
+        CONN["Generic connectors<br/>connectors.py, incl.<br/>volume alert webhooks"]
+    end
+
+    U -->|"HTTPS + Socket.IO"| TP
+    U -.->|"sign-in redirect"| IDP
+    TP -->|"tokens"| IDP
+    TP -->|"read / write"| MOUNTS
+    MOUNTS -.->|"default path"| DISK
+    TP --> DISK
+    SCH ---->|"poll"| MBX
+    TP ---->|"fetch"| MBX
+    TP ----->|"thehive4py + REST"| THEHIVE
+    THEHIVE -..->|"export on Malicious"| MISP
+    TP -->|"chat API"| LLM
+    TP -----------> OUTG
