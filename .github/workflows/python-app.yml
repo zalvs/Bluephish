@@ -55,26 +55,3 @@ jobs:
         # por nada, e e o tipo de regressao que nao levanta excecao nenhuma.
         working-directory: app
         run: python -m unittest discover -p "test_*.py" --verbose
-
-  hive-ai-agent:
-    name: hive_ai_agent (Python 3.11)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: hive_ai_agent/requirements.txt
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r hive_ai_agent/requirements.txt
-          pip install flake8
-      - name: Lint with flake8
-        run: |
-          flake8 hive_ai_agent --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 hive_ai_agent --count --exit-zero --max-complexity=12 --max-line-length=200 --statistics
-      - name: Byte-compile the agent
-        run: python -m compileall hive_ai_agent

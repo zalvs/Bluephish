@@ -55,7 +55,7 @@ LLM escalation (raises only, never lowers; requires social_engineering_detected)
 Prompt-injection floor (raises only, stops at Suspicious):
   Safe + prompt_guard.inspect() found markers    → Suspicious
 
-AI council floor (multi-agent modes only; withholds, never grants — §8.6):
+AI council floor (multi-agent modes only; withholds, never grants — §8.5):
   reviewer says hold_for_human or is           → Safe becomes Suspicious
   unavailable (its default), or agents never
   reached consensus (a debate with one agent is none)
@@ -367,16 +367,9 @@ Bluephish/
 │                                    #   volume_alerts.json · rendered/ (§7.11) · originals/ (§7.15)
 │                                    #   analises/ (Disk destination default) · yara/ (operator's YARA rules)
 │
-├── hive_ai_agent/                   # Optional companion service (Python 3.11, FastAPI)
-│   ├── hive_ai_agent.py             # Correlates IOCs on TheHive webhooks
-│   ├── prompt_guard.py              # Byte-identical copy of app/prompt_guard.py (§8.5)
-│   ├── configuration.json
-│   ├── requirements.txt
-│   └── Dockerfile
-│
 ├── docker/
 │   ├── docker-compose.yml           # Bluephish; port bound to 127.0.0.1
-│   ├── docker-compose.integrations.yml  # Optional: TheHive, MISP, AI agent (docs/integrations.md)
+│   ├── docker-compose.integrations.yml  # Optional: TheHive and MISP (docs/integracoes.md)
 │   ├── README.md
 │   ├── .env.example                 # Template for .env (setup.sh generates the real one)
 │   ├── .env                         # SECRETS — gitignored, see §5.4
@@ -384,8 +377,6 @@ Bluephish/
 │   ├── thephish_conf_files/         # LIVE config, bind-mounted into the container:
 │   │   ├── configuration.json       #   ← contains real secrets at runtime; skip-worktree (§7.8)
 │   │   └── whitelist.json           #   ← the analysts' rules
-│   ├── hive_ai_agent_conf/
-│   │   └── configuration.json       # LIVE agent config, bind-mounted into hive-ai-agent
 │   └── vol/                         # Persistent data — gitignored, BACK THIS UP (§6)
 │       ├── thephish_data/           #   app/data above: users DB, audit log, TLS keys, archives
 │       ├── cassandra-data/ · data/ · index/     # TheHive
@@ -398,7 +389,7 @@ Bluephish/
 ├── .impeccable/config.json          # Shared exceptions of the design detector
 ├── .gitattributes                   # LF endings for scripts and files read inside the containers
 ├── setup.sh                         # First run: docker/.env, protect the live configs, compose up
-├── docs/                            # llm-analysis, hive-ai-agent, m365-oauth-setup, sso-entra-setup,
+├── docs/                            # llm-analysis, m365-oauth-setup, sso-entra-setup,
 │                                    # conectores-genericos, conectores-manual
 ├── README.md · ROADMAP.md · diagrams.md · CLAUDE.md · AGENTS.md
 └── BLUEPHISH_ARCHITECTURE.md         # This document
@@ -1421,7 +1412,6 @@ Environment secrets live in `docker/.env` (gitignored):
 
 ```bash
 THEPHISH_SECRET_KEY=<openssl rand -base64 48>   # session signing key; without it, restarts log everyone out
-THEHIVE_APIKEY=<key>                            # used by hive-ai-agent
 BLUEPHISH_BASE_URL=<https://host>               # public origin; only needed behind a TLS proxy, for the SSO redirect URI
 BLUEPHISH_TAB_GRACE_SECONDS=<seconds>           # default 300, minimum 60 — see §4.3
 ```
@@ -1452,7 +1442,6 @@ service name.
 | **thephish** | **8080 (HTTPS)** | `thephish-custom` (built from `app/`) |
 | thehive | 9000 | `thehiveproject/thehive4:4.1.9-1` |
 | misp | 80 / 443 | `coolacid/misp-docker:core-v2.4.148a` |
-| hive-ai-agent | 8008 | built from `hive_ai_agent/` |
 | cassandra · redis · mysql | (internal) | backing stores |
 
 ---
@@ -2343,23 +2332,7 @@ Two smaller decisions:
 When the loaded case carries injection markers, the chat says so once per conversation, next to
 the answers. Once, not per turn: a banner on every turn stops being read.
 
-### 8.5 The third surface — `hive_ai_agent`
-
-The agent container feeds IOC values (URLs, domains, mail addresses lifted out of phishing
-cases) to a model and writes the answer back as a comment on the case. Same exposure, same four
-layers: the values are sanitized, the whole IOC block is fenced with a per-request nonce, and a
-leaked canary raises — landing on the agent's existing fail-open handler, which logs and posts
-**no** comment. An agent talked into writing the attacker's text into a TheHive case is worse
-than an agent that stayed quiet.
-
-`prompt_guard.py` exists in **two byte-identical copies**, one per container. `docker-compose`
-builds the agent from `hive_ai_agent/`, so it cannot import from `app/`, and moving that build
-context to the repository root would ship the whole repository to the Docker daemon on every
-build. The copy is the cheaper trade; the cost of a copy is drift, so
-`app/test_prompt_guard.py::CopiesInSync` compares the two files byte for byte and fails when
-they differ. **Edit `app/prompt_guard.py` and copy it over the other.**
-
-### 8.6 Multi-agent pipelines — `llm_council.py`
+### 8.5 Multi-agent pipelines — `llm_council.py`
 
 Configurable under *Settings → IA → Agentes e revisão* (`llm_analysis.pipeline_mode`):
 

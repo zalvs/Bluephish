@@ -1,12 +1,12 @@
-# Notas de segurança
+# Segurança
 
-[English](security.md) · **Português (Brasil)**
+**Português (Brasil)** · [English](en/security.md)
 
 - A porta é publicada somente em **`127.0.0.1`**. Se você roda as
-  [integrações opcionais](integrations.pt-BR.md), o mesmo vale para as portas delas, e o
-  Cassandra e o MySQL do MISP, em particular, rodam com credenciais de desenvolvimento e
-  jamais devem ser expostos. Para alcançar a interface de outra máquina, coloque-a atrás de
-  um proxy reverso com TLS em vez de mudar as ligações de porta.
+  [integrações opcionais](integracoes.md), o mesmo vale para as portas delas, e o Cassandra e
+  o MySQL do MISP, em particular, rodam com credenciais de desenvolvimento e jamais devem ser
+  expostos. Para alcançar a interface de outra máquina, use um túnel SSH ou um proxy reverso
+  com TLS em vez de mudar as ligações de porta ([como fazer](duvidas-gerais.md#como-acesso-de-outra-máquina)).
 - Os segredos nunca são devolvidos ao navegador: a API de configurações responde com
   booleanos (`hasApiKey`) e um campo vazio ao salvar significa "manter o valor guardado".
 - **O contêiner faz requisições de saída para infraestrutura que o phisher escolheu.** Duas
@@ -30,7 +30,9 @@
   tempo total limitados.
 - As senhas são guardadas com **bcrypt**; as sessões expiram após **30 min de inatividade /
   12 h no total**, são revogadas na troca de senha e terminam quando a aba do navegador que
-  as abriu é fechada. Todos os eventos de autenticação são auditados em `auth.log`.
+  as abriu é fechada. Todos os eventos de autenticação são auditados em `auth.log`. Depois de
+  **5 falhas de login** a conta é bloqueada por **15 minutos**, e a rota de login aceita no
+  máximo **5 tentativas por minuto por IP**.
 - **Um segundo fator é obrigatório para toda conta**, sem isenção por usuário ou por papel e
   sem nenhuma configuração que o desligue. Uma senha correta abre um desafio de 10 minutos,
   e não uma sessão: ninguém entra até apresentar um código TOTP válido, então uma senha
@@ -45,7 +47,7 @@
 - **Contas de SSO não são isentas.** O provedor de identidade comprova um fator; a plataforma
   exige dois, então o retorno do Entra ID cai no mesmo desafio TOTP.
 - **Contas de SSO não têm senha nenhuma.** O hash guardado é de um valor aleatório que ninguém
-  jamais viu, o login por senha as recusa de saída e o *Reset password* não é oferecido para
+  jamais viu, o login por senha as recusa de saída e o *Resetar senha* não é oferecido para
   elas: a revogação cabe ao provedor de identidade.
-- Antes de abrir isto para uma rede mais ampla, leia a seção *Known constraints and traps* do
-  [`BLUEPHISH_ARCHITECTURE.md`](../BLUEPHISH_ARCHITECTURE.md).
+- Antes de abrir isto para uma rede mais ampla, leia a seção *Known constraints and traps* da
+  [arquitetura](../BLUEPHISH_ARCHITECTURE.md) (em inglês).

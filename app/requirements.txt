@@ -10,8 +10,7 @@
 #     docker run --rm --entrypoint python3 <image> -m pip freeze
 #
 # Dependabot is switched off for this directory (see .github/dependabot.yml): most
-# of what it proposes requires Python >= 3.9. It stays on for hive_ai_agent, whose
-# requirements are real.
+# of what it proposes requires Python >= 3.9.
 #
 # Upgrades that Python 3.8 does allow but the image does not yet carry — adopt
 # them by changing the pin below and rebuilding the image:

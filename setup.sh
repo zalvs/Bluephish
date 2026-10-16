@@ -9,8 +9,8 @@
 #   4. waits for the web interface and points you at the admin bootstrap
 #
 # Option:
-#   --with-integrations   also prepares and starts TheHive, MISP and the AI
-#                         companion agent (docs/integrations.md). They are heavy
+#   --with-integrations   also prepares and starts TheHive and MISP
+#                         (docs/integracoes.md). They are heavy
 #                         (about 6 GB of RAM) and Bluephish does not need them.
 #
 # Safe to re-run: nothing already configured is overwritten.
@@ -129,7 +129,7 @@ until curl -sk -m 3 -o /dev/null https://localhost:8080/login 2>/dev/null; do
 	fi
 	sleep 5
 done
-ok "ThePhish is responding"
+ok "Bluephish is responding"
 
 # --- 5. next step -----------------------------------------------------------
 # The container name is resolved from compose rather than hardcoded: a local
@@ -138,7 +138,7 @@ CONTAINER="$( cd docker && docker compose ${COMPOSE_FILES[@]+"${COMPOSE_FILES[@]
 CONTAINER_NAME="$( docker inspect --format '{{.Name}}' "$CONTAINER" 2>/dev/null | sed 's|^/||' )"
 CONTAINER_NAME="${CONTAINER_NAME:-thephish}"
 
-if [ "$( docker exec "$CONTAINER_NAME" python3 manage.py list-users 2>/dev/null | grep -cE '^[0-9]+' || echo 0 )" -gt 0 ]; then
+if [ "$( docker exec "$CONTAINER_NAME" python3 manage.py list-users 2>/dev/null | grep -cE '^[0-9]+' || true )" -gt 0 ]; then
 	say "Setup complete"
 	printf '    Users already exist. Sign in at https://localhost:8080\n\n'
 else

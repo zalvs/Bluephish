@@ -1,6 +1,6 @@
 # Integrações opcionais
 
-[English](integrations.md) · **Português (Brasil)**
+**Português (Brasil)** · [English](en/integrations.md)
 
 O Bluephish roda sozinho: o `./setup.sh` sobe a aplicação e mais nada. Os serviços abaixo são
 **opcionais**. Nenhum deles é necessário para ler uma caixa de e-mail, analisar mensagens ou
@@ -11,7 +11,6 @@ contêiner extra). Acrescente-os só se você já os usa, ou quer usá-los.
 |---|---|---|
 | **TheHive** (+ Cassandra) | Um lugar onde a análise pronta pode ser registrada como caso | 9000 |
 | **MISP** (+ MySQL, Redis) | Plataforma de inteligência de ameaças para a qual o TheHive pode exportar casos maliciosos | 80, 443 |
-| **Agente de IA** | Um serviço à parte que lê casos do TheHive e comenta cada um com um LLM | 8008 |
 
 ## Como subi-los
 
@@ -29,9 +28,9 @@ sessão do TheHive:
 ./setup.sh --with-integrations
 ```
 
-Você precisa de cerca de **6 GB de RAM livres** e **25 GB de disco** para o conjunto
-inteiro, e das portas acima livres no host. As portas 80 e 443 são do MISP e colidem com
-qualquer servidor web local.
+Você precisa de cerca de **6 GB de RAM livres** e **25 GB de disco** só para essas
+integrações, além do que o Bluephish usa, e das portas acima livres no host. As portas 80 e
+443 são do MISP e colidem com qualquer servidor web local.
 
 Para voltar ao Bluephish sozinho, rode `docker compose up -d` em `docker/` sem o segundo
 arquivo, e pare os extras com
@@ -42,7 +41,7 @@ arquivo, e pare os extras com
 O Bluephish pode registrar cada análise pronta como um caso no TheHive. É um destino entre
 outros: a análise em si nunca depende dele.
 
-**Do lado do Bluephish**, abra *Configurações → Integrações → Tickets* e preencha o cartão
+**Do lado do Bluephish**, abra **ADMINISTRAÇÃO → Integrações → Tickets** e preencha o cartão
 **TheHive**:
 
 | Campo | Valor |
@@ -76,16 +75,9 @@ log da análise com *"a exportação para o MISP falhou"* e é tratado normalmen
 Se você não usa o MISP, apague o nome de exportação no cartão do TheHive e a requisição
 deixa de ser feita.
 
-## Agente de IA
-
-`hive_ai_agent/` é um serviço à parte que escuta os webhooks do TheHive e comenta um caso com
-um LLM. Ele precisa do TheHive. Documentação própria: [`hive-ai-agent.md`](hive-ai-agent.md).
-As variáveis dele (`THEHIVE_APIKEY`, `LLM_API_ENDPOINT`, `LLM_MODEL_NAME`, `WEBHOOK_SECRET`)
-ficam no `docker/.env`; veja o `docker/.env.example`.
-
 ## Jira, disco e conectores genéricos
 
 Também são destinos, mas **não precisam de contêiner**: o Jira se configura com o endereço e
 um token, o destino em disco grava numa pasta e os conectores genéricos chamam qualquer API
-REST. Veja a [configuração](configuration.pt-BR.md#3-destinos-e-analisadores) e o
+REST. Veja a [configuração](configuracao.md#3-destinos-e-analisadores) e o
 [manual dos conectores](conectores-manual.md).

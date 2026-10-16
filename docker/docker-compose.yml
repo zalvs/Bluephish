@@ -2,8 +2,8 @@ version: "3.8"
 
 # Bluephish. `docker compose up -d` starts the application and nothing else.
 #
-# TheHive, MISP and the AI companion agent are optional integrations and live in
-# docker-compose.integrations.yml; see ../docs/integrations.md to run them.
+# TheHive and MISP are optional integrations and live in
+# docker-compose.integrations.yml; see ../docs/integracoes.md to run them.
 
 services:
 

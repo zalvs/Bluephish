@@ -415,31 +415,5 @@ class CaseRecord(unittest.TestCase):
 		self.assertIn('instruction_override', markdown)
 
 
-class CopiesInSync(unittest.TestCase):
-	"""The agent container carries its own copy of prompt_guard.py.
-
-	It has to: docker-compose builds hive_ai_agent/ from its own context, so it
-	cannot import from app/, and moving that context to the repository root would
-	ship the whole repository to the Docker daemon on every build. The copy is the
-	cheap half of the trade; this test is the expensive half made loud, because a
-	guardrail that silently stopped matching its twin is the failure mode nobody
-	would notice until an injection landed on the side that drifted.
-	"""
-
-	def test_the_agent_copy_is_byte_identical(self):
-		here = os.path.dirname(os.path.abspath(__file__))
-		mine = os.path.join(here, 'prompt_guard.py')
-		theirs = os.path.join(here, os.pardir, 'hive_ai_agent', 'prompt_guard.py')
-		if not os.path.exists(theirs):
-			self.skipTest('hive_ai_agent/prompt_guard.py is not present in this checkout')
-		with open(mine, 'rb') as handle:
-			mine_bytes = handle.read()
-		with open(theirs, 'rb') as handle:
-			theirs_bytes = handle.read()
-		self.assertEqual(mine_bytes, theirs_bytes,
-			'app/prompt_guard.py and hive_ai_agent/prompt_guard.py have drifted. '
-			'Copy one over the other.')
-
-
 if __name__ == '__main__':
 	unittest.main()

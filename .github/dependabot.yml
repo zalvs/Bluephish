@@ -17,17 +17,6 @@ updates:
   #
   # To manage it again, delete this comment and restore a `pip` entry for /app.
 
-  # hive_ai_agent middleware — runs on Python 3.11, so it has no such ceiling
-  # and its updates are expected to merge normally
-  - package-ecosystem: "pip"
-    directory: "/hive_ai_agent"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-
   # The GitHub Actions used by the CI workflow
   - package-ecosystem: "github-actions"
     directory: "/"

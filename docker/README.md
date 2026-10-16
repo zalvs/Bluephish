@@ -11,8 +11,8 @@ specific to the containers.
 |---|---|---|---|
 | **thephish** | **8080 (HTTPS)** | built from `../app` | the application itself |
 
-TheHive, MISP and the AI companion agent are optional and live in
-`docker-compose.integrations.yml`; see [integrations](../docs/integrations.md) to run them.
+TheHive and MISP are optional and live in
+`docker-compose.integrations.yml`; see [integrations](../docs/integracoes.md) to run them.
 
 Every port is published on `127.0.0.1` only. The analyzers run inside the Bluephish container
 (`app/analyzers.py`), configured from the **Integrações → Analisadores** screen, and the

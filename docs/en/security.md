@@ -1,12 +1,12 @@
 # Security notes
 
-**English** · [Português (Brasil)](security.pt-BR.md)
+[Português (Brasil)](../seguranca.md) · **English**
 
 - The port is published on **`127.0.0.1`** only. If you run the
   [optional integrations](integrations.md), the same holds for theirs, and Cassandra and
   MISP's MySQL in particular run with development-grade credentials and must never be
-  exposed. To reach the interface from another machine, put it behind a reverse proxy with
-  TLS instead of changing the bindings.
+  exposed. To reach the interface from another machine, use an SSH tunnel or a reverse proxy
+  with TLS instead of changing the port bindings ([how](faq.md#how-do-i-access-it-from-another-machine)).
 - Secrets are never returned to the browser: the settings API answers with booleans
   (`hasApiKey`) and an empty field on save means "keep the stored value".
 - **The container makes outbound requests to infrastructure the phisher chose.** Two features
@@ -29,7 +29,9 @@
   `Content-Type`, SVG rejected, and count, size and wall-clock all capped.
 - Passwords are hashed with **bcrypt**; sessions expire after **30 min idle / 12 h absolute**,
   are revoked on password change, and end when the browser tab that opened them is closed.
-  All authentication events are audited to `auth.log`.
+  All authentication events are audited to `auth.log`. After **5 failed logins** the account
+  is locked for **15 minutes**, and the login route accepts at most **5 attempts per minute
+  per IP**.
 - **A second factor is mandatory for every account**, with no per-user or per-role exemption
   and no setting that turns it off. A correct password opens a 10-minute challenge, not a
   session: nothing is signed in until a valid TOTP code is presented, so a stolen password
@@ -43,7 +45,7 @@
 - **SSO accounts are not exempt.** The identity provider proves one factor; the platform
   requires two, so the return from Entra ID lands on the same TOTP challenge.
 - **SSO accounts have no password at all.** The stored hash is of a random value nobody has
-  ever seen, password login refuses them outright, and *Reset password* is not offered for
+  ever seen, password login refuses them outright, and *Resetar senha* is not offered for
   them: revocation belongs to the identity provider.
 - Before opening this to a wider network, read the *Known constraints and traps* section of
-  [`BLUEPHISH_ARCHITECTURE.md`](../BLUEPHISH_ARCHITECTURE.md).
+  the [architecture](../../BLUEPHISH_ARCHITECTURE.md).

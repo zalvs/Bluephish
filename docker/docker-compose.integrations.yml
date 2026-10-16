@@ -6,7 +6,7 @@ version: "3.8"
 #
 #     docker compose -f docker-compose.yml -f docker-compose.integrations.yml up -d
 #
-# What is in here, and how to point Bluephish at it: ../docs/integrations.md
+# What is in here, and how to point Bluephish at it: ../docs/integracoes.md
 
 # Every service comes back by itself after a crash or a reboot of the machine
 x-restarts: &restarts
@@ -47,25 +47,6 @@ services:
       - CASSANDRA_CLUSTER_NAME=thp
     volumes:
       - ./vol/cassandra-data:/var/lib/cassandra/data
-
-  hive-ai-agent:
-    <<: *restarts
-    build: ../hive_ai_agent
-    container_name: hive-ai-agent
-    depends_on:
-      - thehive
-    ports:
-      - '127.0.0.1:8008:8008'
-    environment:
-      - THEHIVE_URL=http://thehive:9000
-      - THEHIVE_APIKEY=${THEHIVE_APIKEY:-}
-      - LLM_API_ENDPOINT=${LLM_API_ENDPOINT:-http://host.docker.internal:11434/api/chat}
-      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-llama3}
-      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./hive_ai_agent_conf/configuration.json:/opt/hive_ai_agent/configuration.json
 
   # --- MISP (threat-intelligence platform TheHive can export to) --------------
 

@@ -6,13 +6,6 @@ ANALYSIS_OUTPUT_CONTRACT does — is a request, not a control: the model complie
 most of the time, and "most of the time" is not a security boundary. This module
 is the part that does not depend on the model choosing to cooperate.
 
-This module exists in two byte-identical copies, app/prompt_guard.py and
-hive_ai_agent/prompt_guard.py, because the two containers are built from
-different Docker contexts and neither can import across them. Collapsing them
-would mean moving the agent's build context to the repository root, which ships
-the whole repository to the Docker daemon on every build; a copy is the cheaper
-trade. The cost of a copy is drift, so app/test_prompt_guard.py compares the two
-files and fails when they differ. Edit one, copy it over the other.
 
 Four layers, in the order the text meets them:
 

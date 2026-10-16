@@ -84,7 +84,7 @@ Two things worth knowing before turning `debate` on:
   the case to a person and blocks autonomous escalation to Malicious. A reviewer that
   is unreachable counts as "did not look", never as "approved".
 
-Full rationale in [`BLUEPHISH_ARCHITECTURE.md` §8.6](../BLUEPHISH_ARCHITECTURE.md).
+Full rationale in [`BLUEPHISH_ARCHITECTURE.md` §8.5](../BLUEPHISH_ARCHITECTURE.md).
 
 ## Fail-open behavior
 
