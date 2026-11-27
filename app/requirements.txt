@@ -99,7 +99,7 @@ sortedcontainers==2.4.0
 soupsieve==4.0.0
 SQLAlchemy==1.4.54
 sympy==1.14.0
-thehive4py==1.8.1
+thehive4py==2.1.0
 typeguard==4.6.0
 typing_extensions==4.16.0
 urllib3==2.8.0
