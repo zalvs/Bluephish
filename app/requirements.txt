@@ -97,7 +97,7 @@ requests==2.34.2
 simple-websocket==1.1.0
 sortedcontainers==2.4.0
 soupsieve==4.0.0
-SQLAlchemy==1.4.54
+SQLAlchemy==2.1.6
 sympy==1.14.0
 thehive4py==1.8.1
 typeguard==4.6.0
