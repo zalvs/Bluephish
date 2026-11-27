@@ -40,7 +40,7 @@
 # stays. Dependabot (pip, with a cooldown) proposes the bumps, and the workflow
 # builds the image and runs the suite in it for each one.
 
-bcrypt==4.3.0
+bcrypt==5.0.0
 beautifulsoup4==4.15.0
 bidict==0.24.1
 blinker==1.9.0
