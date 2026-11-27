@@ -2,3 +2,5 @@
 # Falso positivo: exemplo de curl com o placeholder SEU_TOKEN no manual (commit inicial;
 # na 2.0 o exemplo passou a usar ${JIRA_TOKEN}, que o gitleaks não confunde com credencial)
 fbe8a50fe2a9ef5bc48317d6b0f242dfda039a4a:docs/conectores-manual.md:curl-auth-user:217
+# Falso positivo: tag de teste "auth:dmarc..." numa fixture (commit inicial)
+fbe8a50fe2a9ef5bc48317d6b0f242dfda039a4a:app/test_case_insights.py:generic-api-key:436
