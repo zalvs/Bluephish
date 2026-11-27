@@ -1,0 +1,15 @@
+# Toda mudança passa por @zalvs. As linhas abaixo deixam explícito o que é sensível:
+# com a proteção de branch exigindo revisão do dono do código, nada disso entra sem ele.
+*                         @zalvs
+/.github/                 @zalvs
+/docker/                  @zalvs
+/app/auth.py              @zalvs
+/app/access_profiles.py   @zalvs
+/app/secret_vault.py      @zalvs
+/app/config_file.py       @zalvs
+/app/jwt_session.py       @zalvs
+/app/client_addr.py       @zalvs
+/app/abuse_guard.py       @zalvs
+/app/pinned_http.py       @zalvs
+/app/requirements.txt     @zalvs
+/app/Dockerfile           @zalvs

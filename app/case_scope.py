@@ -39,6 +39,7 @@ Sem Flask e sem eventlet: puro exceto `record` e as consultas, testado em
 
 import datetime
 import hashlib
+import json
 import re
 
 import case_insights
@@ -136,7 +137,7 @@ def fingerprint(subject, sender, body, observables = None):
 # --- gravação ---------------------------------------------------------------
 
 def record(record_refs, case_ref, subject, sender, reporter, body, observables,
-		verdict, now = None, keys = None):
+		verdict, now = None, keys = None, flagged = None):
 	"""Grava a impressão digital desta análise sob cada referência produzida.
 
 	Devolve as chaves gravadas. Uma análise gravada no TheHive e no disco produz
@@ -165,7 +166,7 @@ def record(record_refs, case_ref, subject, sender, reporter, body, observables,
 				content_key = keys['contentKey'], body_key = keys['bodyKey'],
 				sender_key = keys['senderKey'][:320], subject = str(subject or '')[:255],
 				reporter = str(reporter or '')[:320], verdict = str(verdict or '')[:16],
-				analyzed_at = now))
+				analyzed_at = now, flagged = json.dumps(flagged or [])))
 		session.commit()
 	except Exception:
 		try:
@@ -272,6 +273,17 @@ def scope_for(record_ref):
 			pass
 
 
+def _flagged_of(row):
+	"""A lista de indicadores acusados, ou None numa impressão anterior à coluna."""
+	if row.flagged is None:
+		return None
+	try:
+		flagged = json.loads(row.flagged)
+	except (TypeError, ValueError):
+		return None
+	return flagged if isinstance(flagged, list) else None
+
+
 def keys_for(record_ref):
 	"""As chaves gravadas para um registro, ou None. É o que a memória consulta."""
 	try:
@@ -290,7 +302,8 @@ def keys_for(record_ref):
 			# uma reanálise grava como `case_ref` para não virar denúncia nova —
 			# e precisa ser esta, e não a referência que a tela abriu: um caso
 			# gravado no TheHive e no disco é aberto por qualquer das duas
-			'reportKey': row.case_ref or row.record_ref}
+			'reportKey': row.case_ref or row.record_ref,
+			'flagged': _flagged_of(row)}
 	except Exception:
 		return None
 	finally:

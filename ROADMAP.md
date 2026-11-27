@@ -220,7 +220,9 @@ Cada item abaixo diz onde está a casca, o que falta e por onde começar.
     com uma troca de chip; e-mail cai junto com a caixa postal que esta
     plataforma existe para vigiar. `test_mfa_gate.MetodosProibidos` falha no dia
     em que alguém acrescentar um desses canais.
-  - **A senha certa não abre sessão.** Ela abre um desafio de dez minutos; quem
+  - **A senha certa não abre sessão.** Ela abre um desafio — 45 segundos para
+    digitar o código (2 minutos para quem ainda vai parear o aplicativo) e 3
+    códigos errados antes de voltar para a senha, contados no servidor; quem
     chama `flask_login.login_user` é a conferência do código, e nada antes dela.
     Assim toda rota já protegida continua fechada sem precisar saber que MFA
     existe. O `before_request` (`auth.enforce_mfa_policy`) é rede de proteção,
@@ -336,6 +338,55 @@ proposta de whitelist. Ver `BLUEPHISH_ARCHITECTURE.md` §7.15–7.17.
 - **A casca do painel em celular.** A lista e o detalhe continuam lado a lado numa tela estreita,
   como em "E-mails analisados" — a interface nunca foi adaptada para telefone.
 
+## 15. Panorama externo (Visão Executiva) — **implementado (fases 0 a 4)**
+
+Os insights da Visão Executiva dizem o que acontece *aqui*: contam as tags que cada análise
+gravou no caso, sem chamar IA na hora (item 1). Falta o que acontece *lá fora*: o que a
+comunidade de segurança está publicando sobre phishing no mesmo período, e se isso já chegou à
+caixa de denúncias. Ver `BLUEPHISH_ARCHITECTURE.md` §4.8.2.
+
+**Decisões da fase 0** (30/10/2026):
+
+- **Fonte é RSS/Atom de quem publica pesquisa, com endereço fixo no código.** O catálogo
+  (`threat_intel.SOURCES`) tem fornecedores de pesquisa (KnowBe4, Cofense, Talos, Unit 42,
+  Microsoft, Huntress, Check Point, SentinelOne, Securelist), imprensa especializada
+  (BleepingComputer, The Hacker News, Dark Reading, The Record), centros de resposta (SANS ISC,
+  CERT Polska, CERT.br) e fontes brasileiras (WeLiveSecurity em português, Kaspersky Brasil, CISO
+  Advisor, Minuto da Segurança, Convergência Digital). Cada endereço foi testado em 30/10/2026:
+  responde 200 sem redirecionamento. Não há campo para digitar endereço, então a coleta não é um
+  novo consumidor da cadeia de SSRF, a mesma decisão de `feeds.py`.
+- **Ficaram de fora, com motivo:** o feed da CISA (5,9 MB de alertas de vulnerabilidade, quase
+  nada de phishing), o The Hack (último item de 2022), o Proofpoint (não respondeu) e o OTX (exige
+  chave; entra quando alguém pedir).
+- **O que se guarda de cada publicação:** título, link, data e um trecho de até 400 caracteres sem
+  HTML, como faz um leitor de RSS. O texto completo continua na fonte, e o link leva a ela.
+- **Tendência exige acúmulo.** Um feed de notícia traz os últimos 10 a 50 itens, ou seja, dois
+  dias da BleepingComputer. O mês só existe se a coleta guardar o que viu: os itens ficam 365 dias
+  em `data/threat_intel/`, e a tela diz desde quando a coleta roda. Um mês coletado pela metade
+  aparece como pela metade, nunca como um mês tranquilo.
+- **Classificação sem IA, por vocabulário fechado.** Temas (convite de calendário `.ics`, QR
+  code, código de dispositivo/OAuth, AitM e kits, BEC e fatura, vishing e help desk, ClickFix,
+  abuso de RMM, abuso de infraestrutura legítima, isca com IA, anexo HTML/SVG, sequestro de
+  conversa, smishing), setores, menção ao Brasil/América Latina e grupos citados, tanto por
+  padrão de nome (`UNC1151`, `TA577`, `Storm-1234`, `UAT-11985`, `APT29`) quanto por uma lista
+  curta de nomes próprios. A mesma regra roda nos testes; nada é inferido.
+- **O cruzamento com o ambiente só existe onde há o que medir.** Convite de calendário → anexo
+  `.ics` nos casos de ameaça; anexo HTML/SVG → anexo `.html`/`.svg`; abuso de infraestrutura
+  legítima → URL ou domínio em plataforma compartilhada (`feeds.SHARED_HOSTS`). Tema sem sinal
+  local aparece só do lado "mundo", com "sem como medir aqui", nunca com zero. Não há detector de
+  QR code na análise, então quishing é um desses.
+- **O resumo por LLM é opcional e fica em Configurações › IA**, desligado por padrão, com modelo
+  próprio: resumir manchete é tarefa de modelo barato. O texto das fontes entra como conteúdo não
+  confiável (cercado pelo `prompt_guard`), cada frase do resumo cita os itens de onde saiu, e um
+  número só aparece se vier da contagem, nunca do modelo.
+- **A tela:** um card na Visão Executiva com os temas em alta e o cruzamento; clicar abre a tela
+  própria do Panorama externo (`/intel`), com o resumo do mês, as alegações das fontes agrupadas
+  por tema, os grupos e setores citados, cada uma com o link da fonte, e o estado de cada fonte.
+
+**O que continua fora:** feeds de IOC (URLhaus, ThreatFox, OpenPhish) cruzados com os
+indicadores do período, que é a fase 5 do plano, e a escolha fina de modelo para o resumo, que
+fica para outra conversa.
+
 ## Fora do escopo por decisão, não por esquecimento
 
 - **Interruptor de "buscar imagem remota" em Configurações.** A visualização
@@ -357,8 +408,9 @@ proposta de whitelist. Ver `BLUEPHISH_ARCHITECTURE.md` §7.15–7.17.
 
 - **Rodapé do login com "ISO 27001" e "SOC-BR".** O mock traz esses selos. São
   afirmações de conformidade: publicá-las sem a certificação seria declaração
-  falsa numa tela de acesso. O rodapé manteve o que é verdade sobre a stack:
-  `ThePhish 2.0 · TheHive · MISP`.
+  falsa numa tela de acesso. O rodapé diz só o que é verdade em toda instalação:
+  `bluephish 2.0 · Detecção · Resposta · Registro`. Ele já nomeou TheHive e MISP,
+  que hoje são integrações opcionais, instaladas à parte.
 - **Abas de Configurações do mock (auto, IA, whitelist, e-mail, alertas).** A
   aplicação tem um conjunto maior e funcional (acrescenta Notificações e Caso).
   Trocar pelo do mock removeria configuração que funciona. Os limiares de risco

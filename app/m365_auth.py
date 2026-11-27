@@ -13,6 +13,11 @@ _msal_app_config = None
 # permission (Office 365 Exchange Online) with admin consent granted
 SCOPES = ['https://outlook.office365.com/.default']
 
+# Prazo, em segundos, de cada chamada da MSAL ao Entra ID. A MSAL repassa o valor
+# ao requests, e o padrão dela é nenhum: um Entra ID que aceita a conexão e não
+# responde penduraria o ciclo de polling (e o login por SSO) sem erro nem log
+MSAL_TIMEOUT = 20
+
 
 def _get_msal_app(tenant_id, client_id, client_secret):
 	global _msal_app
@@ -22,7 +27,8 @@ def _get_msal_app(tenant_id, client_id, client_secret):
 		_msal_app = msal.ConfidentialClientApplication(
 			client_id,
 			client_credential = client_secret,
-			authority = 'https://login.microsoftonline.com/{0}'.format(tenant_id)
+			authority = 'https://login.microsoftonline.com/{0}'.format(tenant_id),
+			timeout = MSAL_TIMEOUT
 		)
 		_msal_app_config = current_config
 	return _msal_app

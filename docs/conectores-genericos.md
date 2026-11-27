@@ -665,7 +665,7 @@ alerta de volume.
 
 ```
 Integrações
-[ Plataforma ] [ Analisadores ] [ Priorização ] [ Bloqueio ] [ Tickets ]  ← aba Tickets
+[ Analisadores ] [ Priorização ] [ Bloqueio ] [ Tickets ]  ← aba Tickets
   … cards dos destinos nativos: TheHive, Jira, disco …
 ────────────────────────────────────────────────────────────────────────────────────
   Integre com qualquer ferramenta que aceite uma API REST (i)

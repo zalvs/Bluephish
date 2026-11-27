@@ -20,7 +20,7 @@
 
 		<div class="auth-brand">
 			<img src="{{ url_for('static', filename='assets/img/bluephish-logo.png', v=asset_version) }}" alt="bluephish">
-			<div style="display:flex;flex-direction:column;gap:1px">
+			<div class="u-d-flex u-dir-column u-gap-1">
 				<span class="auth-brand-name">BluePhish</span>
 				<span class="auth-brand-sub mono">THREAT ANALYSIS PLATFORM</span>
 			</div>
@@ -42,12 +42,14 @@
 		</div>
 	</div>
 
-	<div class="auth-main" data-mfa-stage="{{ mfa_stage }}">
+	<div class="auth-main" data-mfa-stage="{{ mfa_stage }}" data-mfa-expires-in="{{ mfa_expires_in }}" data-mfa-attempts-left="{{ mfa_attempts_left }}">
+		<!-- Idioma da tela de entrada. O i18n.js trata o clique; a escolha vale também para o painel -->
+		<button class="auth-lang" type="button" data-lang-toggle data-i18n-skip title="Switch to English" aria-label="Switch to English">EN</button>
 		<!-- method="post" is a deliberate fallback: the submit is normally
 		     intercepted by login.js, but if the script ever fails to load the
 		     browser must never send the credentials as a GET query string -->
-		<form class="auth-form {{ 'hidden' if mfa_stage else '' }}" id="loginForm" method="post" action="api/auth/login" autocomplete="off">
-			<div style="display:flex;flex-direction:column;gap:6px">
+		<form class="auth-form {{ 'hidden' if mfa_stage else '' }}" id="loginForm" method="post" action="/api/auth/login" autocomplete="off" data-next="{{ next_path }}" data-captcha-key="{{ captcha_site_key }}">
+			<div class="u-d-flex u-dir-column u-gap-6">
 				<h2>Acessar o painel</h2>
 				<p class="lead">Use suas credenciais corporativas.</p>
 			</div>
@@ -55,11 +57,11 @@
 			<div class="stack">
 				<label class="field">
 					<span class="auth-label">Usuário</span>
-					<input class="input" id="username" name="username" type="text" autocomplete="username" style="height:38px" required autofocus>
+					<input class="input u-h-38" id="username" name="username" type="text" autocomplete="username" required autofocus>
 				</label>
 				<label class="field">
 					<span class="auth-label">Senha</span>
-					<input class="input" id="password" name="password" type="password" autocomplete="current-password" style="height:38px" required>
+					<input class="input u-h-38" id="password" name="password" type="password" autocomplete="current-password" required>
 				</label>
 			</div>
 
@@ -72,13 +74,13 @@
 			<!-- flex-wrap: abaixo de ~420px o aside some e o formulário fica com
 			     279px; sem quebrar, a dica de recuperação espremeria o rótulo do
 			     checkbox em duas linhas irregulares -->
-			<div class="row" style="gap:8px 12px;flex-wrap:wrap">
-				<label class="row pending" style="gap:7px;font-size:12px;color:var(--t3)"
+			<div class="row u-gap-8-12 u-wrap">
+				<label class="row pending u-gap-7 u-fs-12 u-c-t3"
 					title="Sessão persistente ainda não implementada">
-					<input type="checkbox" disabled style="width:13px;height:13px">
+					<input type="checkbox" disabled class="u-w-13 u-h-13">
 					Manter conectado
 				</label>
-				<span style="flex:1 1 180px;font-size:12px;color:var(--t3)">Esqueceu a senha? Peça a reposição a um global_admin.</span>
+				<span class="u-flex-1-1-180 u-fs-12 u-c-t3">Esqueceu a senha? Peça a reposição a um global_admin.</span>
 			</div>
 
 			{# Um código fechado vira frase aqui dentro; o que volta do provedor de
@@ -95,6 +97,21 @@
 			{% if session_ended %}
 			<div class="auth-info" role="status">A sessão foi encerrada porque a aba do painel foi fechada. Entre de novo para continuar.</div>
 			{% endif %}
+			{# Por que o segundo passo devolveu a pessoa para cá: auth.MFA_END_* #}
+			{% if mfa_ended == 'mfa_expired' %}
+			<div class="auth-info" role="status">O prazo para digitar o código acabou. Entre de novo para receber um prazo novo.</div>
+			{% elif mfa_ended == 'mfa_attempts' %}
+			<div class="auth-info" role="status">O código foi recusado vezes demais. Entre de novo para tentar outra vez.</div>
+			{% endif %}
+			{% if session_idle %}
+			<div class="auth-info" role="status">A sessão foi encerrada por inatividade. Entre de novo para continuar.</div>
+			{% endif %}
+			{% if session_expired %}
+			<div class="auth-info" role="status">A sessão atingiu a duração máxima. Entre de novo para continuar.</div>
+			{% endif %}
+			{% if password_changed %}
+			<div class="auth-info" role="status">A senha desta conta foi trocada, e as sessões abertas foram encerradas. Entre com a senha nova.</div>
+			{% endif %}
 
 			<div class="auth-error {{ '' if sso_error else 'hidden' }}" id="loginError" role="alert">{{ sso_messages.get(sso_error, '') }}</div>
 
@@ -107,7 +124,7 @@
 			     inerte porque a sessão persistente não existe). -->
 			<div class="auth-or"><span>OU</span></div>
 
-			<a class="auth-btn secondary" id="ssoBtn" href="{{ url_for('sso_start') }}">
+			<a class="auth-btn secondary" id="ssoBtn" href="{{ url_for('sso_start', next = next_path or None) }}">
 				<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 					<rect x="1.6" y="3.4" width="12.8" height="9.2" rx="1.6"></rect>
 					<path d="M2.2 4.6 8 8.9l5.8-4.3"></path>
@@ -129,8 +146,8 @@
 		     acima: 'enroll' para quem ainda não configurou (mostra o QR),
 		     'verify' para quem já tem o aplicativo. Vazio quando se chega pela
 		     senha, e aí quem revela o passo é a resposta do login. -->
-		<form class="auth-form hidden" id="mfaForm" method="post" action="api/auth/mfa/verify" autocomplete="off">
-			<div style="display:flex;flex-direction:column;gap:6px">
+		<form class="auth-form hidden" id="mfaForm" method="post" action="/api/auth/mfa/verify" autocomplete="off">
+			<div class="u-d-flex u-dir-column u-gap-6">
 				<h2 id="mfaTitle">Verificação em duas etapas</h2>
 				<p class="lead" id="mfaLead">Digite o código de 6 dígitos do seu aplicativo autenticador.</p>
 			</div>
@@ -160,10 +177,19 @@
 				<span class="auth-label">CÓDIGO DE 6 DÍGITOS</span>
 				<!-- inputmode numeric abre o teclado numérico no celular;
 				     one-time-code deixa o iOS oferecer o código copiado -->
-				<input class="input mono" id="mfaCode" name="code" type="text" inputmode="numeric"
-					autocomplete="one-time-code" maxlength="7" placeholder="000000"
-					style="height:38px;letter-spacing:0.24em;font-size:15px" required autofocus>
+				<input class="input mono u-h-38 u-ls-0_24em u-fs-15" id="mfaCode" name="code" type="text" inputmode="numeric"
+					autocomplete="one-time-code" maxlength="7" placeholder="000000" required autofocus>
 			</label>
+
+			<!-- Prazo e tentativas que restam neste desafio. Só informam: quem os
+			     cobra é o servidor (auth._challenge_user), e zerar a contagem pelo
+			     console não estende nada. Só as tentativas são anunciadas a quem usa
+			     leitor de tela: um relógio que muda a cada segundo seria lido em voz
+			     alta a cada segundo -->
+			<div class="mfa-status" id="mfaStatus">
+				<span>Tempo restante <b class="mono" id="mfaTimer">—</b></span>
+				<span aria-live="polite">Tentativas restantes <b class="mono" id="mfaAttempts">—</b></span>
+			</div>
 
 			<div class="auth-error hidden" id="mfaError" role="alert"></div>
 
@@ -178,6 +204,13 @@
 
 <!-- External script: the CSP allows scripts only from 'self', so an inline block
      would be blocked and the form would fall back to a native submit -->
+<script src="{{ url_for('static', filename='assets/js/i18n-en.js', v=asset_version) }}"></script>
+<script src="{{ url_for('static', filename='assets/js/i18n.js', v=asset_version) }}"></script>
+{# O script do Google só existe na página com o captcha ligado, e a CSP desta
+   resposta só o libera nesse caso (auth.login_page, captcha.login_csp) #}
+{% if captcha_site_key %}
+<script src="{{ captcha_script }}?render={{ captcha_site_key | urlencode }}"></script>
+{% endif %}
 <script src="{{ url_for('static', filename='assets/js/login.js', v=asset_version) }}"></script>
 </body>
 

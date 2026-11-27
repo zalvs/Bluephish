@@ -214,7 +214,7 @@ de solicitação, a fila, o time responsável. Eles aparecem como
 `customfield_NNNNN`. Para descobrir os seus:
 
 ```bash
-curl -u "soc@suaempresa.com:SEU_TOKEN" "https://suaempresa.atlassian.net/rest/api/2/field"
+curl -u "soc@suaempresa.com:${JIRA_TOKEN}" "https://suaempresa.atlassian.net/rest/api/2/field"
 ```
 
 Depois use o bloco **PARÂMETROS** do formulário (botão *Adicionar parâmetro*) — sem precisar mexer no JSON:

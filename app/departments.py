@@ -32,6 +32,7 @@ cache and the policy around it.
 """
 
 import json
+import config_file
 import re
 import time
 
@@ -145,8 +146,7 @@ def load_config(path = 'configuration.json'):
 	when it cannot even read the settings.
 	"""
 	try:
-		with open(path) as conf_file:
-			conf_dict = json.load(conf_file)
+		conf_dict = config_file.read(path)
 	except Exception:
 		return default_config(), ('', '', '')
 	config = normalize_config(conf_dict.get(CONFIG_SECTION))

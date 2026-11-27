@@ -23,15 +23,18 @@ Roda com:  python -m unittest test_mfa_gate   (a partir do diretório app/)
 
 import os
 import shutil
+import datetime
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import flask
 import flask_login
 import pyotp
 
 import auth
+import jwt_session
 import mfa
 import models
 
@@ -83,6 +86,9 @@ def build_app():
 				return lambda view: view
 		limiter = _NoLimiter()
 
+	# A mesma sessão da aplicação: um JWT (jwt_session). Todo teste de
+	# autenticação montado aqui roda sobre ela
+	application.session_interface = jwt_session.JwtSessionInterface()
 	auth.register(application, login_manager, limiter)
 
 	@application.route('/')
@@ -129,6 +135,7 @@ class Base(unittest.TestCase):
 		models._SessionFactory = None
 		auth.audit_log.handlers = []
 		auth._live_sessions.clear()
+		auth._mfa_challenges.clear()
 		self.app = build_app()
 		self.client = self.app.test_client()
 
@@ -404,6 +411,189 @@ class ReposicaoPorAdmin(Base):
 		alvo = self.create('outro')
 		self.enrolled_user('analista', models.ROLE_ANALYST)
 		self.assertEqual(403, self.client.post('/api/users/{0}/mfa/reset'.format(alvo)).status_code)
+
+
+def wrong_code_for(secret):
+	"""Um código de seis dígitos que não vale em nenhum passo da janela de agora."""
+	valid = set(code_for(secret, time.time() + offset * mfa.PERIOD_SECONDS) for offset in (-1, 0, 1, 2))
+	for candidate in ('000000', '111111', '222222', '333333', '444444'):
+		if candidate not in valid:
+			return candidate
+
+
+class PrazoETentativas(Base):
+	"""O desafio tem 45 s (2 min para parear) e 3 códigos errados.
+
+	Os dois limites moram no servidor. É isso que os testes de repetição do
+	cookie seguram: a sessão do Flask é um cookie que o navegador guarda, e um
+	contador gravado nele voltaria a zero para quem reenviasse o cookie de antes
+	do erro.
+	"""
+
+	def challenged(self):
+		"""Conta com aplicativo pareado e um desafio de código recém-aberto."""
+		secret = self.enrolled_user()
+		self.client.post('/api/auth/logout')
+		response = self.login()
+		return secret, response.get_json()
+
+	def later(self, seconds):
+		moment = datetime.datetime.utcnow() + datetime.timedelta(seconds = seconds)
+		return mock.patch.object(auth, '_utcnow', return_value = moment)
+
+	def verify(self, code):
+		return self.client.post('/api/auth/mfa/verify', json = {'code': code})
+
+	def session_cookie(self):
+		cookie = self.client.get_cookie('session')
+		return cookie.value if cookie is not None else None
+
+	def put_session_cookie(self, value):
+		self.client.set_cookie('session', value)
+
+	def failed_logins(self):
+		session = models.get_session()
+		try:
+			return session.query(models.User).first().failed_logins
+		finally:
+			session.close()
+
+	def test_o_login_diz_o_prazo_e_as_tentativas(self):
+		_, body = self.challenged()
+		self.assertEqual(3, body['attemptsLeft'])
+		self.assertTrue(43 <= body['expiresIn'] <= 45, body['expiresIn'])
+
+	def test_quem_ainda_vai_parear_tem_dois_minutos(self):
+		self.create()
+		body = self.login().get_json()
+		self.assertTrue(115 <= body['expiresIn'] <= 120, body['expiresIn'])
+		self.client.post('/api/auth/mfa/setup')
+		secret = self.secret_of('analista')
+		with self.later(110):
+			self.assertEqual(200, self.client.post('/api/auth/mfa/activate',
+				json = {'code': code_for(secret)}).status_code)
+
+	def test_o_pareamento_tambem_vence(self):
+		self.create()
+		self.login()
+		self.client.post('/api/auth/mfa/setup')
+		secret = self.secret_of('analista')
+		with self.later(2 * 60 + 1):
+			response = self.client.post('/api/auth/mfa/activate', json = {'code': code_for(secret)})
+		self.assertEqual(401, response.status_code)
+		self.assertTrue(response.get_json()['restart'])
+
+	def test_dentro_dos_45_segundos_o_codigo_entra(self):
+		secret, _ = self.challenged()
+		with self.later(44):
+			self.assertEqual(200, self.verify(code_for(secret, time.time() + mfa.PERIOD_SECONDS)).status_code)
+		self.assertOpen()
+
+	def test_depois_dos_45_segundos_nem_o_codigo_certo_entra(self):
+		secret, _ = self.challenged()
+		with self.later(46):
+			response = self.verify(code_for(secret, time.time() + mfa.PERIOD_SECONDS))
+		self.assertEqual(401, response.status_code)
+		self.assertTrue(response.get_json()['restart'])
+		self.assertEqual(auth.MFA_END_EXPIRED, response.get_json()['reason'])
+		self.assertBlocked()
+		# E o desafio não volta a valer com o relógio de novo dentro do prazo
+		self.assertEqual(401, self.verify(code_for(secret, time.time() + mfa.PERIOD_SECONDS)).status_code)
+
+	def test_cada_erro_diz_quantas_tentativas_restam(self):
+		secret, _ = self.challenged()
+		first = self.verify(wrong_code_for(secret))
+		self.assertEqual(401, first.status_code)
+		self.assertEqual(2, first.get_json()['attemptsLeft'])
+		self.assertNotIn('restart', first.get_json())
+		self.assertEqual(1, self.verify(wrong_code_for(secret)).get_json()['attemptsLeft'])
+
+	def test_o_terceiro_erro_devolve_para_a_senha(self):
+		secret, _ = self.challenged()
+		self.verify(wrong_code_for(secret))
+		self.verify(wrong_code_for(secret))
+		third = self.verify(wrong_code_for(secret))
+		self.assertEqual(401, third.status_code)
+		self.assertTrue(third.get_json()['restart'])
+		self.assertEqual(auth.MFA_END_ATTEMPTS, third.get_json()['reason'])
+		# Nem o código certo salva o desafio encerrado
+		response = self.verify(code_for(secret, time.time() + mfa.PERIOD_SECONDS))
+		self.assertEqual(401, response.status_code)
+		self.assertTrue(response.get_json()['restart'])
+		self.assertBlocked()
+
+	def test_reenviar_o_cookie_de_antes_do_erro_nao_devolve_tentativas(self):
+		secret, _ = self.challenged()
+		before = self.session_cookie()
+		for _ in range(2):
+			self.verify(wrong_code_for(secret))
+			self.put_session_cookie(before)
+		third = self.verify(wrong_code_for(secret))
+		self.assertTrue(third.get_json().get('restart'))
+		# O cookie do começo do desafio, de novo: o servidor já o encerrou
+		self.put_session_cookie(before)
+		response = self.verify(code_for(secret, time.time() + mfa.PERIOD_SECONDS))
+		self.assertEqual(401, response.status_code)
+		self.assertTrue(response.get_json()['restart'])
+		self.assertBlocked()
+
+	def test_o_cookie_de_um_desafio_ja_vencido_nao_reabre_o_passo(self):
+		"""Um acerto encerra o desafio: a cópia do cookie de antes dele não vale."""
+		secret, _ = self.challenged()
+		before = self.session_cookie()
+		self.assertEqual(200, self.verify(code_for(secret, time.time() + mfa.PERIOD_SECONDS)).status_code)
+		other = self.app.test_client()
+		other.set_cookie('session', before)
+		response = other.post('/api/auth/mfa/verify', json = {'code': code_for(secret, time.time() + 2 * mfa.PERIOD_SECONDS)})
+		self.assertEqual(401, response.status_code)
+		self.assertTrue(response.get_json()['restart'])
+
+	def test_um_login_novo_substitui_o_desafio_anterior(self):
+		secret, _ = self.challenged()
+		other = self.app.test_client()
+		other.post('/api/auth/login', json = {'username': 'analista', 'password': SENHA})
+		response = self.verify(code_for(secret, time.time() + mfa.PERIOD_SECONDS))
+		self.assertEqual(401, response.status_code)
+		self.assertTrue(response.get_json()['restart'])
+
+	def test_um_processo_reiniciado_nao_reconhece_o_desafio(self):
+		secret, _ = self.challenged()
+		auth._mfa_challenges.clear()
+		response = self.verify(code_for(secret, time.time() + mfa.PERIOD_SECONDS))
+		self.assertEqual(401, response.status_code)
+		self.assertTrue(response.get_json()['restart'])
+
+	def test_o_bloqueio_da_conta_continua_contando_entre_desafios(self):
+		"""3 por desafio não substitui os 5 por conta: dois desafios bloqueiam."""
+		secret, _ = self.challenged()
+		for _ in range(3):
+			self.verify(wrong_code_for(secret))
+		self.assertEqual(3, self.failed_logins())
+		self.login()
+		self.verify(wrong_code_for(secret))
+		# O quinto erro da conta bloqueia, e o desafio acaba junto
+		fifth = self.verify(wrong_code_for(secret))
+		self.assertTrue(fifth.get_json()['restart'])
+		self.assertEqual(401, self.login().status_code)
+
+	def test_voltar_da_tela_do_codigo_encerra_o_desafio(self):
+		self.challenged()
+		page = self.client.get('/login?reason=mfa_cancel').get_data(as_text = True)
+		self.assertIn('data-mfa-stage=""', page)
+		self.assertIn('data-mfa-stage=""', self.client.get('/login').get_data(as_text = True))
+
+	def test_a_tela_de_login_diz_por_que_a_pessoa_voltou(self):
+		self.assertIn('O código foi recusado vezes demais',
+			self.client.get('/login?reason=mfa_attempts').get_data(as_text = True))
+		self.assertIn('O prazo para digitar o código acabou',
+			self.client.get('/login?reason=mfa_expired').get_data(as_text = True))
+		self.assertNotIn('vezes demais', self.client.get('/login?reason=qualquer').get_data(as_text = True))
+
+	def test_a_tela_aberta_no_passo_do_codigo_traz_o_prazo(self):
+		self.challenged()
+		page = self.client.get('/login').get_data(as_text = True)
+		self.assertIn('data-mfa-attempts-left="3"', page)
+		self.assertRegex(page, r'data-mfa-expires-in="4[3-5]"')
 
 
 if __name__ == '__main__':

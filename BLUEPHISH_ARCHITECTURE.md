@@ -1,4 +1,4 @@
-# Bluephish — Architecture & Migration Guide
+# ThePhish — Architecture & Migration Guide
 
 > Reference document for migrating this deployment to a new environment.
 > Generated from the state of the code at commit `ba15d53`.
@@ -11,16 +11,21 @@
 
 ### 1.1 What this project does
 
-Bluephish is an automated phishing-email analysis platform for a SOC/CSIRT. It reads a
+ThePhish is an automated phishing-email analysis platform for a SOC/CSIRT. It reads a
 monitored mailbox, extracts the observables from each suspicious email (URLs, domains,
 IPs, addresses, attachment hashes), runs them through its own reputation analyzers
 (§4.9), asks a Large Language Model for a social-engineering assessment, and produces a
 final verdict — `Safe`, `Suspicious` or `Malicious` — handed to every enabled recording
-destination: a disk archive (the default), and/or a case in TheHive, a Jira issue, and any
+destination: a disk archive (the default), and/or a Jira issue, a case in TheHive, and any
 generic connectors (§4.10). With none enabled, nothing is recorded.
 
-Bluephish was inspired by [emalderson/ThePhish](https://github.com/emalderson/ThePhish)
-and has grown into an independent project with the following capabilities:
+The application is an API behind two nginx hops, with PostgreSQL in its own container (§5.5);
+outside compose, and in the tests, it falls back to a SQLite file. TheHive is a destination it can record
+to, installed apart from it; MISP is reached only by TheHive. Neither is part of the stack
+(§5.5, `docs/integracoes/thehive.md`).
+
+This deployment extends the upstream [emalderson/ThePhish](https://github.com/emalderson/ThePhish)
+with the following capabilities:
 
 | Capability | Summary |
 |---|---|
@@ -29,7 +34,7 @@ and has grown into an independent project with the following capabilities:
 | **LLM social-engineering analysis** | Local (Ollama) or hosted (OpenRouter/OpenAI-compatible) model. |
 | **Sender authentication** | Parses SPF/DKIM/DMARC to tell a genuine brand email from an impersonation. |
 | **Visual analysis** | Sends embedded/attached images to a vision model (image-only phishing). |
-| **AI chat** | Free-form investigation of an already-analyzed case, with the case as context. |
+| **Case assistant** | Free-form investigation of an already-analyzed case, in a panel beside the open case, with that case as context. |
 | **Whitelist manager** | Five rule types (sender/domain/url/hash/ip), expiry per rule, dry-run against history, automatic suspension of a rule that hides too many bad verdicts. |
 | **Authentication, RBAC and audit** | Three roles, account lockout, CSRF, session policy, audit log. |
 
@@ -55,7 +60,7 @@ LLM escalation (raises only, never lowers; requires social_engineering_detected)
 Prompt-injection floor (raises only, stops at Suspicious):
   Safe + prompt_guard.inspect() found markers    → Suspicious
 
-AI council floor (multi-agent modes only; withholds, never grants — §8.5):
+AI council floor (multi-agent modes only; withholds, never grants — §8.6):
   reviewer says hold_for_human or is           → Safe becomes Suspicious
   unavailable (its default), or agents never
   reached consensus (a debate with one agent is none)
@@ -106,7 +111,8 @@ bulletin quoting an attack phrase matches. See §8.3.
 
 ### 1.2.1 The weighted score (`scoring.py`)
 
-The verdict above is categorical. A category answers *what this is*; it does not answer *what I
+The verdict above is categorical, and that is the whole of what the Cortex-era
+pipeline produced. A category answers *what this is*; it does not answer *what I
 open first*, and forty Suspicious cases on a Monday are forty indistinguishable
 lines. The score orders that queue.
 
@@ -261,17 +267,17 @@ depends on analyzers running.
 
 | Layer | Technology | Notes |
 |---|---|---|
-| Runtime | **Python 3.8** | Constrained by the pinned dependency set on Ubuntu 20.04 — see §7.2. |
+| Runtime | **Python 3.14** | Latest mature minor (security support until 2030); 3.15 is too new for the compiled wheels — see §7.2. |
 | Web framework | Flask 2.0.1 + Flask-SocketIO 5.1.1 | Real-time analysis log over WebSocket. |
 | WSGI server | eventlet 0.31.1 | `socketio.run()` with TLS. |
 | Auth stack | Flask-Login 0.6.2 · Flask-WTF 1.0.1 (CSRF) · Flask-Limiter 2.6.3 · bcrypt 4.0.1 · pyotp 2.9.0 + qrcode 7.4.2 (TOTP second factor) · msal 1.24.1 (Entra ID SSO and the M365 mailbox) | |
-| Database | SQLAlchemy 1.4.46 + SQLite | Users, whitelist rule state and suppressions, analysis history, reclassifications, analysis fingerprints and verdict memory (§5.1); the cases themselves are recorded by the enabled destinations (§4.10). |
+| Database | SQLAlchemy 1.4.46 + PostgreSQL 17 (psycopg2; SQLite outside compose) | Users, whitelist rule state and suppressions, analysis history, reclassifications, analysis fingerprints and verdict memory (§5.1); the cases themselves are recorded by the enabled destinations (§4.10). |
 | Front-end | Vanilla JS and CSS (`bluephish.js`, `login.js`, `bluephish.css`) | No build step. The Socket.IO 4.0.1 client is loaded from cdnjs and the Geist fonts from Google Fonts; the old Bootstrap and Font Awesome assets are removed from the image (`app/Dockerfile`). |
-| Case management | TheHive 4.1.9-1 | |
-| Analyzers | In-process (`analyzers.py`, §4.9) | VirusTotal, AbuseIPDB, YARA, etc. |
-| Verdict email | `mailer.py` — SMTP | Sent by the application itself. |
-| Threat sharing | MISP (optional) | Export of malicious cases, done by TheHive's MISP connector at the app's request (`export_to_misp`, when `misp.id` is set); the app never calls MISP. The connector ships disabled in `docker/thehive/application.conf` while `misp.id` ships set, so out of the box the case records "a exportação para o MISP falhou". |
-| Orchestration | Docker Compose | |
+| Case management | TheHive (optional, external) | One of the recording destinations (§4.10), through `thehive4py` 1.8.1. Not shipped with the stack; the compose file used to run TheHive 4.1.9-1 and `docs/integracoes/thehive.md` shows how to keep it alongside. |
+| Analyzers | In-process (`analyzers.py`, §4.9) | VirusTotal, AbuseIPDB, YARA, etc. — no Cortex. |
+| Verdict email | `mailer.py` — SMTP | Replaced Cortex's Mailer responder. |
+| Threat sharing | MISP (optional, external) | Export of malicious cases, done by TheHive's MISP connector at the app's request (`export_to_misp`, when the TheHive destination has a MISP export name); the app never calls MISP. With a name set and TheHive's connector not configured, the case records "a exportação para o MISP falhou". |
+| Orchestration | Docker Compose | One service (§5.5). |
 
 ---
 
@@ -282,7 +288,7 @@ the interface and its assets are BluePhish. The remaining "thephish" names are c
 leftovers.
 
 ```
-Bluephish/
+ThePhish/
 ├── app/                             # Flask application (built into the image)
 │   ├── __init__.py                  # Empty package marker
 │   │
@@ -301,8 +307,8 @@ Bluephish/
 │   │
 │   │  # Mailbox and the reported email
 │   ├── email_provider.py            # Provider abstraction: GraphProvider / ImapProvider
-│   ├── graph_mail.py                # Microsoft Graph API calls (mailbox)
-│   ├── m365_auth.py                 # MSAL token: Graph (graph_mail, graph_directory) and IMAP XOAUTH2 (legacy)
+│   ├── graph_mail.py                # Microsoft Graph API calls (mailbox); @odata.nextLink only followed on graph.microsoft.com over https (UnsafeNextLink otherwise)
+│   ├── m365_auth.py                 # MSAL token: Graph (graph_mail, graph_directory) and IMAP XOAUTH2 (legacy); MSAL_TIMEOUT (20 s) limita cada chamada ao Entra ID, também a do SSO
 │   ├── list_emails.py               # Mailbox listing (hybrid: attached .eml / raw), lazy body load (§7.10)
 │   ├── inbox_pages.py               # Queue paging and what the background loader reads next (§7.10.1)
 │   ├── email_render.py              # "As delivered" view: sanitizer, blocked hosts, attachment manifest (§7.11)
@@ -314,7 +320,7 @@ Bluephish/
 │   ├── ioc_noise.py                 # Observables the extractor finds that are not what they look like
 │   ├── spam_headers.py              # Bulk-mail markers in the headers (RFC 2369/8058)
 │   ├── run_analysis.py              # Analyzer orchestration, LLM call, verdict, whitelist and memory
-│   ├── analyzers.py                 # Native observable analyzers (§4.9)
+│   ├── analyzers.py                 # Native observable analyzers (§4.9) — what replaced Cortex
 │   ├── analyzer_guides.py           # Prose shown on the analyzer screen (families, per-analyzer)
 │   ├── custom_analyzers.py          # Analyst-defined analyzers + the SSRF guard (§4.5.1)
 │   ├── pinned_http.py               # HTTP pinned to the address the SSRF guard approved (§4.5.1)
@@ -350,10 +356,10 @@ Bluephish/
 │   ├── configuration.json           # Runtime config TEMPLATE (secrets empty)
 │   ├── whitelist.json               # Whitelist TEMPLATE
 │   ├── logging_conf.json            # Logging (must list every module — see §7.3)
-│   ├── requirements.txt             # Pinned dependencies (image and CI; see §7.2)
+│   ├── requirements.txt             # Pinned dependencies (the image and CI; see §7.2)
 │   ├── Dockerfile · .dockerignore
 │   ├── templates/
-│   │   ├── index.html               # BluePhish SPA shell: dashboards, queues, case detail, chat, settings
+│   │   ├── index.html               # BluePhish SPA shell: dashboards, queues, case detail (with the case assistant), settings
 │   │   └── login.html               # Login page: password, MFA step, SSO button
 │   ├── static/assets/
 │   │   ├── css/bluephish.css        # Design tokens and components; the layout scale is §7.13
@@ -368,29 +374,28 @@ Bluephish/
 │                                    #   analises/ (Disk destination default) · yara/ (operator's YARA rules)
 │
 ├── docker/
-│   ├── docker-compose.yml           # Bluephish; port bound to 127.0.0.1
-│   ├── docker-compose.integrations.yml  # Optional: TheHive and MISP (docs/integracoes.md)
-│   ├── README.md
+│   ├── docker-compose.yml           # One service, bluephish; port bound to 127.0.0.1
+│   ├── README.md                    # The container, and the upgrade from the stack that had TheHive
 │   ├── .env.example                 # Template for .env (setup.sh generates the real one)
 │   ├── .env                         # SECRETS — gitignored, see §5.4
-│   ├── thehive/application.conf     # TheHive config — skip-worktree, real secrets (§7.8)
+│   ├── docker-compose.override.yml  # Optional and local — gitignored (e.g. a TheHive kept alongside)
 │   ├── thephish_conf_files/         # LIVE config, bind-mounted into the container:
 │   │   ├── configuration.json       #   ← contains real secrets at runtime; skip-worktree (§7.8)
 │   │   └── whitelist.json           #   ← the analysts' rules
 │   └── vol/                         # Persistent data — gitignored, BACK THIS UP (§6)
-│       ├── thephish_data/           #   app/data above: users DB, audit log, TLS keys, archives
-│       ├── cassandra-data/ · data/ · index/     # TheHive
-│       └── mysql/                   # MISP
+│       └── thephish_data/           #   app/data above: users DB, audit log, TLS keys, archives
+│                                    #   (an installation from the stack that shipped TheHive and MISP
+│                                    #    also has cassandra-data/ · data/ · index/ · mysql/ here)
 │
-├── .github/workflows/python-app.yml # CI: install, flake8, compileall, unit tests
+├── .github/workflows/python-app.yml # CI: install, flake8, compileall, unit tests; image build + suite inside it
 ├── .github/dependabot.yml
 ├── .github/ISSUE_TEMPLATE/ · pull_request_template.md · hooks/impeccable.json
 ├── .graphifyignore                  # Keeps generated and binary content out of the knowledge graph
 ├── .impeccable/config.json          # Shared exceptions of the design detector
-├── .gitattributes                   # LF endings for scripts and files read inside the containers
-├── setup.sh                         # First run: docker/.env, protect the live configs, compose up
+├── .gitattributes                   # LF endings for scripts and files read inside the container
+├── setup.sh                         # First run: docker/.env, protect the live config, compose up
 ├── docs/                            # llm-analysis, m365-oauth-setup, sso-entra-setup,
-│                                    # conectores-genericos, conectores-manual
+│                                    # conectores-genericos, conectores-manual, integracoes/thehive
 ├── README.md · ROADMAP.md · diagrams.md · CLAUDE.md · AGENTS.md
 └── BLUEPHISH_ARCHITECTURE.md         # This document
 ```
@@ -414,7 +419,7 @@ ROLES = [ROLE_ANALYST, ROLE_ADMIN, ROLE_GLOBAL_ADMIN]
 | Capability | analyst | admin | global_admin |
 |---|:---:|:---:|:---:|
 | List emails, run analyses, view verdicts | ✅ | ✅ | ✅ |
-| AI chat over a case | ✅ | ✅ | ✅ |
+| AI assistant over an open case | ✅ | ✅ | ✅ |
 | Reclassify an analyzed email as legitimate (reason required, audited) | ✅ | ✅ | ✅ |
 | Undo a reclassification (reason required, audited) | ❌ | ✅ | ✅ |
 | Read the whitelist / export it | ✅ | ✅ | ✅ |
@@ -428,6 +433,9 @@ ROLES = [ROLE_ANALYST, ROLE_ADMIN, ROLE_GLOBAL_ADMIN]
 | **Manage users** (list, create, delete, change role, unlock, reset second factor) | ❌ | ❌ | ✅ |
 | **Reset any user's password** (no current password needed) | ❌ | ❌ | ✅ |
 | Configure corporate SSO and where the audit trail is stored | ❌ | ❌ | ✅ |
+| Configure the session policy — auto logoff, maximum session, warning (Configurações → Segurança) | ❌ | ❌ | ✅ |
+| Configure the per-IP rate limit, the IP ban and the allowlist; unban an address (Configurações → Segurança) | ❌ | ❌ | ✅ |
+| Configure the login reCAPTCHA (Configurações → Segurança) | ❌ | ❌ | ✅ |
 
 ### 3.2 Enforcement
 
@@ -486,9 +494,55 @@ response carries `reauthenticate: true`, so the UI sends them back to the login 
 - The **last `global_admin` cannot be deleted** — nor **demoted** to a lower role. Both paths
   are blocked, so the platform can never be left without an administrator. A group change in
   Entra ID is one of those paths and is blocked the same way (§3.5).
-- A user **cannot delete their own account**.
+- A user **cannot delete their own account, nor change their own role** — global_admin
+  included. Either would remove, in one click, the access needed to undo it; the
+  last-global_admin rule does not cover a second global_admin who is away. A global_admin
+  can still delete or re-role *another* account. The users screen does not offer either
+  action on the signed-in user's own row, but the refusal is in `api_delete_user` /
+  `api_set_role`.
 - There is **no default user and no hardcoded password**: the first administrator is created
   interactively via CLI (§5.2).
+
+### 3.4.1 Access profiles — per-account screens, beyond or below the role (`access_profiles.py`)
+
+The role still exists and still decides by default. On top of it, a global_admin creates **access
+profiles** in *Usuários → Perfis de acesso*: a name, a description and a set of items checked in a
+catalogue — the screens (Visão executiva, Caixa de entrada, Casos analisados…), every tab of
+Configurações and Integrações, and the actions that used to be split by role inside shared
+screens (undo a reclassification, block indicators, edit the whitelist, permanent whitelist rule,
+verdict memory, Panorama sources). Each account gets one profile or none:
+
+* **No profile:** the role's items, exactly what the role always gave (`role_items`). An
+  installation that never creates a profile changes nothing.
+* **A profile:** exactly its items, **more or less than the role** — an analyst can get the IA
+  tab, an admin can lose Bloqueio. The editor can start from what a role gives and shows, next to
+  each item, the role that used to grant it.
+
+**Enforced on the server, on every route.** `auth.requires_role` asks `access_profiles.allows`
+first: each protected endpoint is declared in `ENDPOINT_ITEMS` with the item(s) it belongs to
+(any one suffices — the case reads are shared by Casos, Mesa, Executiva and Tático), and
+`page_routes` asks `can_open_page` for each screen path. `/api/auth/me` returns `pages`
+(`visible`), from which the menu, the tabs and the block buttons are built — hiding is still only
+usability. **`test_access_profiles` fails when a protected endpoint is in neither
+`ENDPOINT_ITEMS` nor `ROLE_ONLY`**: a route forgotten in the map would be one the profile does
+not govern, the menu would hide the screen and the API would stay open. Every new protected route
+must be added there.
+
+Rules that are not obvious:
+
+1. **Usuários and profile management are global_admin's alone, and no profile touches them.** They
+   are not in the catalogue and their routes are in `ROLE_ONLY`. Whoever hands out access must hold
+   all of it: the users screen given to an analyst would be a global_admin by another name (create
+   a global_admin account, or assign oneself a profile with everything). And no profile removes it
+   from a global_admin, so a badly built profile cannot lock the administrators out.
+2. **Minha conta is everyone's**, profile or not.
+3. **Configurações / Integrações open when any of their tabs does.**
+4. **A profile in use cannot be deleted**, and an account pointing at a missing profile gets
+   nothing — never the role, which would grant more in silence.
+
+Every profile save (with the items before and after), deletion and assignment is audited
+(`profile_save`, `profile_delete`, `user_profile_change`). Page refusals keep the
+`required=<role>` field and add `item=<catalogue item>`.
 
 ### 3.5 Roles from the identity provider (`sso.py`)
 
@@ -524,7 +578,21 @@ stored hash is of a random value, password login refuses them before checking it
 | Lockout duration | **15 minutes** (`locked_until`) |
 | Login rate limit | **5 per minute per IP** (Flask-Limiter, on `/api/auth/login`) |
 | Second-factor and SSO rate limit | **10 per minute per IP** (on `/api/auth/mfa/setup`, `/activate`, `/verify`, and on the two SSO endpoints) |
+| Second-factor challenge deadline | **45 seconds** to type the code (`MFA_CODE_TTL`); **2 minutes** for an account that is still pairing its app (`MFA_ENROLL_TTL`) — reading a QR does not fit in 45 s |
+| Wrong codes per challenge | **3** (`MFA_MAX_ATTEMPTS`), then the challenge ends and the screen goes back to the password. On top of the account lockout, not instead of it: every wrong code also counts toward the 5 |
 | Password-change rate limit | **5 per minute per IP** (on `/api/users/change_password`); a wrong current password counts toward the lockout (§3.3) |
+
+**The challenge counts on the server.** The password (or the SSO return) opens a
+second-factor challenge; the session cookie carries only its random id, and the deadline and
+the wrong-code counter live in `auth._mfa_challenges`. The Flask session is a signed cookie the
+browser keeps, so a counter stored in it would be rewound by anyone replaying the cookie from
+before a wrong code — three fresh attempts per replay (`test_mfa_gate.PrazoETentativas` holds
+this). An id the server does not know — ended, expired, or from before a restart — is refused,
+failing closed like the tab registry. One challenge per account: a new password login replaces
+the previous one, so parallel challenges do not multiply the attempts. A challenge that ends
+answers `restart: true` with a closed `reason` (`mfa_expired`, `mfa_attempts`); `login.js`
+sends the browser to `/login?reason=…`, which ends any challenge still alive and shows why.
+The countdown on screen only informs — the server enforces both limits.
 
 **Anti-enumeration:** wrong password, unknown user and locked account all return the exact
 same message from a single constant — `GENERIC_LOGIN_ERROR = 'Invalid username or password'`
@@ -533,13 +601,10 @@ same message from a single constant — `GENERIC_LOGIN_ERROR = 'Invalid username
 ### 4.2 Flask security configuration (`thephish_app.py`)
 
 ```python
-# Signing key: from the environment, never a hardcoded default. Without it a random
-# per-process key is generated (safe, but every restart logs users out).
-_secret = os.environ.get('THEPHISH_SECRET_KEY', '')
-if not _secret:
-    _secret = secrets.token_urlsafe(48)
-    print('[WARNING]_[thephish_app]: THEPHISH_SECRET_KEY is not set, using a per-process random key')
+# Signing key: generated once and kept encrypted in the vault (§5.4.1); a legacy
+# THEPHISH_SECRET_KEY still wins; without both, a random per-process key.
 app.config['SECRET_KEY'] = _secret
+app.session_interface = jwt_session.JwtSessionInterface()   # §4.2.1
 
 app.config['SESSION_COOKIE_SECURE']    = True        # HTTPS only
 app.config['SESSION_COOKIE_HTTPONLY']  = True        # unreadable from JavaScript (anti-XSS)
@@ -557,6 +622,36 @@ Because `SESSION_COOKIE_SECURE = True`, **the app must be served over HTTPS or l
 work at all** — the browser would refuse to store the cookie. A self-signed certificate is
 generated on first start into `data/` (`generate_cert.py`).
 
+### 4.2.1 The session cookie is a strict JWT (`jwt_session.py`)
+
+`thephish_session` is a JWT signed with **HS256** by the application key, not the itsdangerous
+format. The Flask session (flask_login's user, the CSRF token, the second-factor challenge in
+progress) travels inside it, in the `sess` claim, serialized exactly as Flask always did
+(`TaggedJSONSerializer`), so nothing else in the application changed. Strict means, each with a
+test in `test_jwt_session`:
+
+* **One algorithm.** HS256 only — `none`, HS512 and the rest are refused (the classic JWT attack;
+  PyJWT only avoids it with an explicit algorithm list).
+* **Fixed issuer and audience** (`bluephish` / `bluephish-panel`) and required `exp`, `iat`,
+  `nbf`, `jti`, `sess`. A forged, tampered, expired or oversized token opens an empty session.
+* **Server-side revocation through the `jti`.** For an authenticated session the `jti` *is* the
+  `sid` that `auth.start_session` generates, and the `sid` is the key of the liveness registry
+  (`auth._live_sessions`). Logout, a password change, a closed tab, an idle or absolute timeout and
+  a process restart all remove it there, and the session policy refuses the token on the next
+  request — HTTP and websocket alike. A token carrying one session's `sid` under another `jti` is
+  refused in `decode`. No second registry: the revocation that already existed is the JWT's.
+* **Login rotates the `jti`** (a new `sid`): the token of the sign-in screen never becomes the
+  session's.
+* **Still HttpOnly + Secure + SameSite=Strict.** The token never reaches JavaScript nor an
+  `Authorization` header — kept anywhere else in the browser, an XSS would carry the session.
+
+Dates are checked by `jwt_session`, not PyJWT, with `session_clock`'s tolerance for a clock that
+jumps back (§7.19: up to `MAX_BACKWARD_SECONDS`, logged once a minute); `exp` has no slack, and
+covers the larger of the 12 h Flask lifetime and the maximum session set in Segurança — the end of
+the session is still decided by `auth.enforce_session_policy`. The content is signed, not
+encrypted, as Flask's cookie was. `test_mfa_gate.build_app` installs the same interface, so the
+whole authentication suite runs over the JWT.
+
 ### 4.3 Session lifecycle (`auth.enforce_session_policy`, runs `@before_request`)
 
 Four controls are validated on every request. The first three are markers in the signed
@@ -564,8 +659,8 @@ session cookie, so a client cannot extend its own session by editing them:
 
 | Control | Value | Marker |
 |---|---|---|
-| **Idle timeout** | 30 minutes since the last request | `last_seen` |
-| **Absolute timeout** | 12 hours since sign-in, regardless of activity | `started_at` |
+| **Idle timeout** (auto logoff) | 30 minutes by default, **5–240** configurable, since the last *human* request — one clock for all tabs (§7.18.1) | `last_seen` |
+| **Absolute timeout** | 12 hours by default, **1–24** configurable, since sign-in, regardless of activity | `started_at` |
 | **Password-change revocation** | session invalid if `password_changed_at` is newer | `pwd_marker` |
 | **Tab closed** | no sign of life for `BLUEPHISH_TAB_GRACE_SECONDS` (300) | `sid` + in-memory registry |
 
@@ -618,6 +713,126 @@ refusal, not only on a closed tab. The `sid` an analysis route receives is honou
 it belongs to a socket of the same session (`socket_guard.log_target()`); otherwise the
 `WebSocketLogger` drops the log — in python-socketio an empty `to` is a broadcast.
 
+### 4.3.1 Auto logoff is configurable, and the panel warns first (`security_policy.py`)
+
+*Configurações → Segurança*, **global_admin only** (`/security-config`): lengthening the session
+loosens the control that exists for the person who left the desk, the same bar as SSO and the
+audit trail. The limits are checked on the server (idle 5–240 min, session 1–24 h, warning
+30–300 s and at most half the idle time; the session cannot be shorter than the idle time), and
+a value written by hand outside them is not obeyed — the nearest limit applies. Every change goes
+into the trail with the before and after.
+
+The numbers are read by `auth._session_violation` on every request — the one rule for HTTP and
+for the websocket handshake (`session_policy_holds`), so a saved value cannot apply to one and not
+the other. They are read once per request (`auth.session_limits`, kept in `flask.g`), and
+`security_policy` rereads `configuration.json` only when its mtime changes. **An unreadable file
+loosens nothing:** broken JSON or a section of the wrong shape (`"session": "x"`) keeps the last
+configuration this process read successfully, and logs the error — falling back to the 30 min
+default in silence would turn a 5-minute policy into a 30-minute one with nobody knowing. The
+write is in place, not a rename (`config_store`): the live file is bind-mounted into the container
+as a single file, and renaming over a mount point fails — so the reader is the side that has to
+tolerate a half-written file.
+
+**Shortening applies at once.** A stricter value holds on the next request of every open session,
+and a session already past it ends without the banner, the saving admin's included. The screen
+asks for confirmation before saving a shorter idle time or maximum session.
+
+**Why a session ended comes from the server.** A 401 from the session policy carries a closed
+`reason` (`idle`, `expired`, `password`, `tab` — `auth.LOGIN_REASONS`), in the JSON body for an
+API call and in the `/login` redirect for a page navigation. The panel passes it to the login page
+and to the other tabs with the sign-out broadcast. It is not guessed from the panel's countdown,
+which would tell someone whose session a password change revoked that they had been idle.
+
+**The warning comes from the server's clock, not the tab's.** Idle time is one clock for every
+tab (§7.18.1), so a per-tab timer would warn someone who is working in another tab. Each
+`/api/auth/heartbeat` answer carries `secondsLeft` (the smaller of the idle and the absolute
+deadline), `endsBy` (which of the two is binding) and `warnSeconds`; the panel counts down from that number between heartbeats and shows a
+banner at the top (`#idleWarning`, not a modal, so it does not fight an open confirmation). Any
+gesture while it is up, or *Continuar conectado*, sends a heartbeat flagged as human, which renews
+`last_seen`. When the count reaches zero the panel asks the server once more before leaving —
+another tab may have renewed the session, and these extra questions go out at most once every 5 s,
+so an erroring server is not hammered by every tab — and the 401 then lands on
+`/login?reason=idle`, which says the session ended for inactivity. Near the end of the maximum session (`endsBy: absolute`)
+the banner says so instead: no gesture postpones that deadline, so there is no *Continuar
+conectado*, focus is not moved off what the person is typing, and the login screen says the
+session reached its maximum duration (`reason=expired`) — not that the person was idle.
+
+### 4.3.2 Per-IP rate limit and IP ban (`abuse_guard.py`)
+
+The application's own fail2ban, configured in *Configurações → Segurança* (**global_admin only**,
+`POST /security-config/protection`, audited with before/after). Two pieces, both keyed on the
+address `client_addr` resolved — not on the proxy's address, which is what a host fail2ban
+reading a log would see:
+
+* **A ceiling of requests per minute per IP, across every route** (default 1200, 60–10000). It is
+  *not* Flask-Limiter's `default_limits`: that limit is per route, and spreading requests over fifty
+  routes would get fifty times the ceiling. Static assets do not count. Over the ceiling the answer
+  is 429 with `Retry-After` until the minute turns. The stricter per-route limits (login 5/min,
+  second factor and password change 10/min) and the per-account lockout are untouched.
+* **A temporary ban after N failures in a window** (default 10 in 10 min, banned 30 min). A failure
+  is a wrong password (any account, unknown user and locked account included), a wrong
+  second-factor code, a wrong current password on a password change, and **each minute** the
+  address went over the ceiling — once per minute, not once per request, so a burst is not an
+  instant ban. A banned address gets 403 (JSON for the API, plain text for a page) on every
+  route, the login and the static assets included, and the websocket handshake is refused
+  (`socket_guard.admit` → `auth.address_refused`). The ban goes into the trail (`ip_ban`).
+
+Decisions that are not obvious from the code:
+
+1. **An address that is not a person is never counted or banned**: the Docker bridge gateway
+   (`docker_gateway`, the real IP lost on the published port) and a trusted proxy that sent no
+   `X-Forwarded-For` (the proxy itself, or someone on the host talking to loopback). Those are
+   everybody at once; banning one would lock the whole installation out on the first burst of
+   wrong passwords. The screen says so when it is the viewer's case.
+2. **The opposite trap is not detectable server-side, so the screen warns about it.** A reverse
+   proxy *not* listed in `BLUEPHISH_TRUSTED_PROXIES` makes every client have the proxy's IP, and
+   the first ban locks everyone out. Exempting requests that carry `X-Forwarded-For` would be the
+   bypass — an attacker would send the header. Instead `/security-config` reports
+   `you.forwardedIgnored`, and the screen tells the admin to list the proxy. **When the vhost
+   container is introduced, its network must be in `BLUEPHISH_TRUSTED_PROXIES`.**
+3. **The allowlist comes first.** An allowlisted IP or network (at most 100 entries, no network
+   larger than /8 for IPv4 or /32 for IPv6 — `0.0.0.0/0` would be "ban off" by another name) is
+   not limited, counted or banned, and saving it releases an address already banned. The login
+   limit and the account lockout still apply to it.
+4. **State lives in the process's memory** (one process, like the tab-liveness registry).
+   Restarting the container releases every ban — that is also the way out for someone who locked
+   themselves out without being on the allowlist. The tables are bounded (`MAX_TRACKED`).
+5. **Saving one part never erases the other.** Session and protection live in the same
+   `security` section of `configuration.json`; each route writes `security_policy.merged(part)`.
+   A hand-written value out of range is clamped; a malformed section keeps the last good one; an
+   invalid allowlist line is dropped and logged, the rest stays.
+
+### 4.3.3 reCAPTCHA v3 on the password login (`captcha.py`)
+
+*Configurações → Segurança*, **global_admin only** (`POST /security-config/captcha`, audited with
+before/after — the secret never in the trail). Off by default. When on, the login page loads
+Google's script, `login.js` asks for a fresh token per submit (`action: login`), and `api_login`
+verifies it **before** looking at the password, against the fixed host
+`www.google.com/recaptcha/api/siteverify`, with a 5 s timeout, no redirects and without the
+client's IP. Below the minimum score (0.1–0.9, default 0.5), a missing or invalid token, or a
+token for another action, the login is refused and the refusal counts toward the IP ban
+(`captcha` kind, §4.3.2). The SSO and the second factor do not go through it.
+
+Decisions that are not obvious from the code:
+
+1. **It never locks the installation out.** Google unreachable (network, timeout, non-200,
+   non-JSON) and Google rejecting *this installation's* secret (`invalid-input-secret`) let the
+   login through, logged and audited (`captcha` / `unavailable` or `misconfigured`). Refusing there
+   would hand the availability of the login to a third party, or to a typo. What the client
+   controls — the token — is refused.
+2. **Two emergency exits outside the screen**, for the case the screen cannot fix (a corporate
+   proxy blocking Google's script in the browser leaves every login without a token):
+   `BLUEPHISH_CAPTCHA_DISABLED=1` in `docker/.env`, and `manage.py captcha-off`, which writes the
+   switch off and keeps the keys. An address on the abuse allowlist (§4.3.2) skips the captcha.
+3. **The panel's CSP does not change.** The base policy is `auth.BASE_CSP`; only the `/login`
+   response, and only with the captcha on, sets its own header adding
+   `https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/` to `script-src` and
+   `frame-src https://www.google.com/recaptcha/` (`captcha.login_csp`). `_security_headers` uses
+   `setdefault`, so it does not overwrite it.
+4. **The secret key never goes back to the browser**: the screen gets `hasSecret`, and a blank
+   field keeps the stored one (the SSO secret's rule). In `configuration.json` it is a vault
+   reference like every secret (§5.4.1).
+
 ### 4.4 CSRF
 
 `Flask-WTF` validates a token on every state-changing request. The token is published in a
@@ -638,15 +853,41 @@ X-Frame-Options: DENY
 Referrer-Policy: same-origin                 ← required by CSRF, see §4.4
 Strict-Transport-Security: max-age=31536000; includeSubDomains
 Content-Security-Policy: default-src 'self'; img-src 'self' data:;
-    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    style-src 'self' https://fonts.googleapis.com;
     font-src 'self' https://fonts.gstatic.com data:;
-    script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self'
+    script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self';
+    frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'
+Cache-Control: no-store                      ← every response except /static
 ```
+
+The policy lives in `app/security_headers.py` (`CONTENT_SECURITY_POLICY`), guarded by
+`test_security_headers`; `auth.BASE_CSP` is the same string, and the `/login` response alone
+extends it when the reCAPTCHA is on (§4.3.3). The last four directives do **not** inherit from
+`default-src`: `frame-ancestors` is the modern twin of `X-Frame-Options`, `base-uri` stops an
+injected `<base href>` from repointing relative URLs, `object-src` closes plugins, and
+`form-action` stops an injected form from posting off-origin. The login is the only `<form>` and
+posts to its own path; SSO is a plain `GET` link, so `form-action 'self'` does not affect it. A new
+form with an absolute `action` would be blocked silently — the test fails on it.
+
+`Cache-Control: no-store` comes from `page_routes.no_store_unless_static()`, called by the same
+`after_request`. It covers the screens, the JSON of `/api/*`, downloads, errors and the login, and it
+**overrides** a `public, max-age` that a route might set. `/static` is the one exception, on purpose:
+its week of cache (`SEND_FILE_MAX_AGE_DEFAULT`) is what stops every F5 from re-requesting ~13 assets
+and having the eventlet server reset connections. Do not turn the exception into a blanket rule.
 
 > **Migration trap:** `script-src` has **no `'unsafe-inline'`**. Inline `<script>` blocks and
 > inline `onclick="…"` attributes are blocked by the browser. All handlers are therefore
 > declared as `data-click` / `data-change` / `data-input` / `data-enter` attributes and wired
 > by delegated listeners in `bluephish.js`. See §7.4.
+>
+> **`style-src` has no `'unsafe-inline'` either.** A `style="…"` attribute or a `<style>` block
+> is ignored by the browser without an error, so the layout breaks silently. One-off layout is
+> a `u-*` utility class in `bluephish.css` (one declaration each, `!important` because it
+> replaces an inline style, declared before `.hidden` so hiding still wins); in JS, `el(…,
+> {style})` applies it through the CSSOM (`node.style.cssText`), which the CSP does not govern —
+> never `setAttribute("style", …)`. `test_security_headers` fails on any of the three. The one
+> exception is `/login` with the reCAPTCHA on: Google's script injects inline styles, so
+> `captcha.login_csp` adds `'unsafe-inline'` to that response's `style-src` (never `script-src`).
 
 ### 4.8 Case history and insights
 
@@ -840,12 +1081,66 @@ incident, and it must not be one click away from "mark as legitimate". Rules:
 - A reverted decision still overrides: a TheHive case reopened after a resolution keeps its
   old `resolutionStatus`, and without the row the screen would read it as Safe again.
 
+### 4.8.2 External panorama (`threat_intel.py`)
+
+The insights of §4.8 count what happened *here*. The external panorama shows what the security
+community published about phishing over the same window, and crosses it with the cases. It is
+not an analyzer: nothing it collects changes a verdict.
+
+- **Sources are RSS/Atom feeds with fixed addresses** (`threat_intel.SOURCES`). There is no field
+  to type one, so, as with `feeds.py` (§4.9.1), the collector is not a consumer of the SSRF
+  chain. HTTPS only, redirects refused, size capped while streaming, conditional requests with
+  `ETag` / `Last-Modified`. A source that adds a typed address goes through `validate_destination`
+  / `pinned_http` and into `test_ssrf_rebinding`.
+- **XML from a third party is parsed with the DTD refused.** The expat handlers for `DOCTYPE` and
+  entity declarations raise, which is what `defusedxml` does, without adding a dependency the
+  image would have to install (§7.2). No RSS feed needs a DTD; every source in the catalog was
+  checked to have none.
+- **Items accumulate.** A news feed carries its last 10–50 items, two days for some. A trend over
+  a month only exists if what was seen is kept: items live 365 days in
+  `data/threat_intel/items.json`, swapped atomically, deduplicated by link. The payload says when
+  collection started (`collectingSince`), and a window that predates it is reported as partial,
+  never as a quiet month.
+- **What is kept from an item:** title, link, publication date and an excerpt of at most 400
+  characters with the HTML stripped. The link is kept only when its scheme is `http(s)`; it is
+  the only thing the browser follows, as a plain navigation with `rel="noopener noreferrer"`.
+- **Classification is a closed vocabulary, not a model** (`classify()`): themes, sectors, a
+  Brazil/Latin America flag, and named groups, by naming pattern (`UNC1151`, `TA577`,
+  `Storm-1234`) and a short list of proper names. An item is *relevant* when it matches a phishing
+  term or a theme; only relevant items count.
+- **The cross with the environment exists only where something is measurable**
+  (`THEME_SIGNALS`): `.ics` attachments, `.html`/`.svg` attachments, URLs and domains on shared
+  platforms (`feeds.SHARED_HOSTS`), counted over the threat cases' observables that
+  `/api/insights` already reads. A theme with no local signal answers `None` and the screen says
+  "sem como medir aqui": zero would claim the environment was checked.
+- **A source that fails is reported, not dropped.** Each source keeps `lastError`, `fetchedAt`
+  and its item count; `/api/threat-intel` returns `partial` and the screen lists the failing
+  ones. A failed fetch keeps the items already collected.
+- **The optional LLM summary** (`threat_intel_summary.py`; Configurações › IA, off by default,
+  its own model setting) reads only the 40 most recent titles and excerpts of the period,
+  sanitized and fenced as untrusted text by `prompt_guard` with a per-request nonce and canary; a
+  leaked canary discards the answer. Each sentence must cite the publications it came from, and
+  a sentence whose citations do not resolve to collected items is dropped. Numbers on screen
+  come from the counts, never from the summary. `manual` mode generates only when someone asks
+  on the screen; `auto` regenerates the default period after a collection that brought something
+  new. Stored per period in `data/threat_intel/summaries.json` with the hash of the ids it read,
+  so a summary older than the publications is shown marked as outdated.
+- **"Em alta" needs a baseline.** A theme is trending only when the previous window of the same
+  length was collected in full and the count grew. Without it, a frequent theme is shown as
+  frequent, not rising.
+- **The screen** (`/intel`, `panorama.js`): highlights composed from the counts, the optional
+  summary with linked citations, one card per theme with its headlines (each links to the
+  source), groups, sectors and Brazil on the side, the filterable list of publications, and the
+  state of every source. The Visão Executiva card shows three themes, those already seen in the
+  cases first.
+
 ### 4.9 Native analyzers
 
-`analyzers.py` runs the analyzers in-process. Each one returns a taxonomy **level** —
-`info`, `safe`, `suspicious` or `malicious` — and the verdict logic downstream only counts
-those levels, so the level is the contract between an analyzer and the verdict.
-`run_analysis.analyze_observables` calls `analyzers.run()` in-process (§7.1).
+`analyzers.py` is what replaced Cortex. The old pipeline submitted every observable to
+Cortex and read back a taxonomy **level** — `info`, `safe`, `suspicious` or `malicious` —
+and the verdict logic downstream only ever counted those levels. The level was therefore
+the real contract, and it is the contract this module reproduces by calling each vendor
+directly. `run_analysis.analyze_observables` now calls `analyzers.run()` in-process (§7.1).
 
 - **The registry is the interface.** Each analyzer declares its identity, the observable
   types it can judge, the credential fields to collect and the tunable thresholds. The
@@ -869,14 +1164,14 @@ those levels, so the level is the contract between an analyzer and the verdict.
 
 > **A 429 is not a verdict — but today it lands as `info`.** `RateLimited` is a distinct
 > exception, and `run_analysis.run_jobs` has a requeue loop (up to `RATE_LIMIT_RETRIES = 3`
-> rounds, `RATE_LIMIT_WAIT_SECONDS = 60` apart) for results marked `retryable` — it retries a lookup
-> a vendor rate-limited. Nothing marks them yet: `run()` catches `RateLimited` with
+> rounds, `RATE_LIMIT_WAIT_SECONDS = 60` apart) for results marked `retryable` — the job
+> Cortex's "delayed jobs" did. Nothing marks them yet: `run()` catches `RateLimited` with
 > every other `AnalyzerError` and returns `info` with the reason, and a custom analyzer's 429
 > is a plain `AnalyzerError`. A rate-limited lookup is therefore recorded as `info` carrying
 > the vendor's message and, because it carries an error, it is not cached, so the next
 > analysis asks again.
 
-**Shipped (12).** Reputation and scoring: VirusTotal, AbuseIPDB, AlienVault OTX,
+**Shipped (12) native API analyzers.** Reputation and scoring: VirusTotal, AbuseIPDB, AlienVault OTX,
 Microsoft Defender Threat Intelligence, CrowdStrike Falcon Intel, Hybrid Analysis,
 CrowdStrike Falcon Sandbox. Blocklists — binary, so they declare no thresholds: Google
 Safe Browsing, PhishTank, OpenPhish, URLhaus. Local: YARA (`yara-python` compiled into
@@ -907,6 +1202,45 @@ report is `info`, not `safe`: nobody looked.
 OpenPhish is the odd one: it publishes a feed, not a per-indicator API, so the whole list
 is fetched and cached in-process for 15 minutes rather than re-downloaded per observable.
 
+### 4.9.1 Public feeds, queried offline
+
+A **fourteenth shape** (family `feed`): a free list downloaded once and read from a local file,
+so the analysis never calls the publisher. `feeds.py` holds the registry (`FEEDS`), the
+downloader and the lookup; each feed is also an entry of `ANALYZERS`, so the card, the toggle,
+`plan_jobs`, the scoring table and `run()` treat it like any other analyzer.
+
+**Shipped (3):** CERT Polska domains, Phishing.Database domains, Phishing.Database URLs. Only
+CERT Polska is in the *recommended pack* (the one-click button): its terms allow any use,
+commercial included. Phishing.Database is MIT on the compilation but does not say where its
+entries come from, so its cards carry "confirmar licença" and it is turned on on purpose; the URL
+list is also ~66 MB.
+
+- **Not listed is `info`, never `safe`.** A list of some hundred thousand entries has not looked
+  at the indicator, and a `safe` would also count as "an analyzer answered", switching off the
+  floor that keeps an email nobody could evaluate from closing as Safe (§7.6, the
+  `analyzers_answered` check in `run_analysis`). Listed carries the level the feed declares:
+  `malicious` for the curated CERT Polska list and the URL list, `suspicious` for the automatic
+  Phishing.Database domain list.
+- **A stale or missing copy does not vouch for anything.** A copy not confirmed current for three
+  intervals, or never downloaded, answers `info` **with an error**, which also keeps it out of the
+  analysis cache. A hit stays a hit when the copy is old: the list still names it.
+- **Shared platforms never convict through a domain list** (`feeds.SHARED_HOSTS`). The
+  Phishing.Database domain list names `sites.google.com` and `bit.ly` exactly (checked
+  2026-10-23); without the guard every email linking to a Google Site would be Suspicious.
+  Checked at lookup time, so a change needs no re-download.
+- **The URL is fixed in the code.** There is no field to type one, so the downloader is not an
+  eighth consumer of the SSRF chain. HTTPS only, redirects refused, size capped while streaming,
+  decompression counted. If a feed with a typed address is ever added, it goes through
+  `validate_destination` / `pinned_http` and into `test_ssrf_rebinding`.
+- **A list is swapped whole or not at all.** Built as `current.sqlite.tmp`, replaced with
+  `os.replace`; a list below its minimum or smaller than half the one it replaces is refused and the
+  previous one kept. Lookups open the file read-only per call, so the swap is seen at once.
+- **The build runs off the eventlet hub** (`analyzers.run_off_hub`): parsing 700k lines is CPU-bound
+  and would stop the websocket and the mailbox polling.
+- **Licences are per feed and shown on the card.** Free to download is not free to use: OpenPhish's
+  community terms forbid commercial use, and URLhaus/ThreatFox/MalwareBazaar are free only for
+  not-for-profit use, so none of them is a bundled feed. See `docs/estudo-feeds-offline.md`.
+
 ### 4.5.1 Analyzers the analyst defines
 
 A thirteenth shape: a definition saved in configuration becomes a first-class analyzer,
@@ -924,7 +1258,7 @@ exfiltration path too. Hence, in order:
 2. **`validate_destination()`** — by default HTTPS only, and the host is resolved and
    refused if *any* resolved address is not globally routable (`is_global`), multicast or
    IPv6 site-local. The rule used to be a sum of `is_private`, `is_loopback` and friends,
-   which on the image's Python 3.8 let `100.64.0.0/10` through (Tailscale, and Alibaba
+   which on Python 3.8 (the image until 11/2026) let `100.64.0.0/10` through (Tailscale, and Alibaba
    Cloud's metadata service at `100.100.100.200`). An IPv4 carried inside an IPv6 address
    (`::ffff:`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`) is judged as the IPv4 it is, and the
    metadata list is compared in canonical form, not as the text that was typed.
@@ -969,22 +1303,24 @@ one an admin typed, and four of those send attacker-written or sensitive content
 |---|---|---|
 | `custom_analyzers` | an admin typed it; the request carries the observable | `require_https` on, `allow_internal` per analyzer |
 | `connectors` | an admin typed it — generic connectors, and the volume-alert webhooks that go through `connectors.deliver()` (§7.14); the body carries the report | `require_https` on, `allow_internal` per connector, revalidated at send |
-| `tickets` | the TheHive and Jira URLs an admin typed; the ticket carries the report | `allow_internal = True`; TheHive also `require_https = False` (the compose service name); Jira revalidated at each call |
+| `tickets` | the TheHive and Jira URLs an admin typed; the ticket carries the report | `allow_internal = True`; TheHive also `require_https = False` (it is typically an internal service, reached by name); Jira revalidated at each call |
 | `responders` (block) | a firewall management address | `allow_internal = True` by construction |
 | `unshorten` | a link inside the reported email | `require_https = False` (nothing secret goes out) |
 | `email_render` | an `<img src>` inside the reported email | `require_https = False`, `allow_internal` never passed |
-| `audit_store` (syslog) | the SIEM host a global admin typed; every audit record goes there | `allow_internal = True`, `require_https = False` (raw syslog, not HTTP); checked when the form is saved and again on every apply (startup and each save). The rule is that the handler is given the validated IP, never the name, so it never re-resolves while sending — but today `resolve_syslog()` hands it `infos[0]` from a second `getaddrinfo` made right after the check, and that address is not judged again: a known gap, to be fixed in code (§4.6.2) |
+| `analyzers` (OpenPhish `feedUrl`) | the feed address an admin typed; the request carries nothing secret, but the body is parsed as a URL list | `require_https` on, `allow_internal` never passed (the feed is external); validated on every fetch, connection pinned, redirects refused (`_fetch_openphish_feed`) |
+| `audit_store` (syslog) | the SIEM host a global admin typed; every audit record goes there | `allow_internal = True`, `require_https = False` (raw syslog, not HTTP); checked when the form is saved and again on every apply (startup and each save). The rule is that the handler is given the validated IP, never the name, so it never re-resolves while sending. `resolve_syslog()` makes a second `getaddrinfo` to pick that IP, and every address of that second answer goes through the same guard before one is handed over, so a name that resolves differently the second time (rebinding) is refused (§4.6.2) |
 
-A change to `validate_destination()` is a change to all seven; a change to `pinned_http` is a
-change to the six that speak HTTP, TheHive excepted (`audit_store` hands a raw IP to the
-syslog handler). TheHive is the one HTTP path not pinned: `thehive4py` (writing cases) and
-`thehive_query()` in `thephish_app.py` (history, insights, chat) call `requests` directly,
-with no session to swap in the first and none swapped in the second — so the second also
-skips the call-time revalidation and follows redirects by the library default. Its address
-is admin-typed with the internal network allowed, so pinning would add only the metadata
-refusal there.
+A change to `validate_destination()` is a change to all eight; a change to `pinned_http` is a
+change to the seven that speak HTTP, TheHive excepted (`audit_store` hands a raw IP to the
+syslog handler). TheHive is only partly pinned: `thehive_query()` and the chat's `.eml` read in
+`thephish_app.py` (history, insights, chat) go through `tickets.thehive_call()`, which
+revalidates at call time (`allow_internal`), pins the connection and refuses redirects —
+a 302 would carry the API key wherever its `Location` pointed. `thehive4py` (writing
+cases) still calls `requests` directly, with no session to swap in, so it skips the
+call-time revalidation and follows redirects by the library default. Its address is
+admin-typed with the internal network allowed, so pinning adds only the metadata refusal.
 
-Of the seven, the one in `email_render` is the least obvious and the most exposed: it fires on
+Of the eight, the one in `email_render` is the least obvious and the most exposed: it fires on
 an ordinary click, over addresses nobody reviewed, from a message the sender wrote — on the
 inbox and on the work desk, see §7.11 and §7.15.
 
@@ -1042,7 +1378,9 @@ SHA-256 into the Tenant Allow/Block List. There is no Graph API for that list, s
 through `POST /adminapi/beta/{org}/InvokeCommand`, the REST endpoint the Exchange Online
 PowerShell v3 module itself uses; the app registration needs `Exchange.ManageAsApp` **and**
 an Exchange/Security Administrator directory role, which is the failure everyone hits
-first. Firewalls: **PAN-OS** (IP via the User-ID register API into a Dynamic Address Group
+first. Both EOP calls (the token POST, whose body carries the client secret, and `InvokeCommand`)
+refuse redirects: a 3xx from the fixed Microsoft hosts is a `ResponderError`, never a hop
+(`test_responders_no_redirect`). Firewalls: **PAN-OS** (IP via the User-ID register API into a Dynamic Address Group
 tag — instant and commit-free — domain and URL into a custom URL category, which does need
 a commit), **FortiGate** (address object → address group; URL as a webfilter urlfilter
 entry), **Check Point** (host → network group, or URL into an Application/Site url-list,
@@ -1079,9 +1417,18 @@ event:
 login) and `target` is what the action applies to (`-` when the caller passes none): the
 account on account events (login, MFA, session, users) — so an administrator resetting
 someone else's password is unambiguous. On other events it is a route (`config_change`), a
-rule or definition id, a blocked value or a case reference. `client_ip()` honours only the
-first entry of `X-Forwarded-For` and records it as a hint: the value is attacker-controllable
-and is **never** used for an authorization decision.
+rule or definition id, a blocked value or a case reference. `client_ip()` honours
+`X-Forwarded-For` only when the socket peer is a trusted proxy (`BLUEPHISH_TRUSTED_PROXIES`,
+CIDRs or addresses separated by commas; loopback only by default), and then takes the
+rightmost entry that is not itself a trusted proxy — the first entry is the one the client
+wrote. The value is attacker-controllable, is recorded as a hint, and is **never** used for an
+authorization decision; the login limiter keys on the same function. The rule lives in
+`client_addr.py` (no Flask, `test_client_addr.py`). When the peer is the Docker bridge gateway
+(`172.x.0.1`) and no trusted proxy reported the client, the real address was lost before it
+reached the process — a published port forwarded by Docker's userland proxy shows the gateway
+for everybody. The record keeps `ip=<gateway>` and appends `ip_origem=gateway-docker (IP real
+indisponivel)` to `detail`, rather than presenting the gateway as a person. The fix is on the
+host, not in the app: see `docker/README.md`.
 
 Recorded events: `login` (success/failure/mfa_required; the reason goes in `detail`, e.g.
 `reason=locked`), `logout`, `session_expired` (idle/absolute), `session_revoked`,
@@ -1155,8 +1502,10 @@ quickest ways to erase one's own tracks. Stored in `configuration.json → audit
 - **Syslog copy** (UDP/TCP, facility `auth`), the seventh caller of the SSRF chain (§4.5.1).
   The host is validated when the form is saved and on every apply, and the rule is that the
   handler is given the validated IP, never the name, so it never re-resolves while sending.
-  Today `resolve_syslog()` hands it `infos[0]` from a second `getaddrinfo` made right after
-  the check, and that address is not judged again — a known gap, to be fixed in code.
+  `resolve_syslog()` makes a second `getaddrinfo` to pick that IP, and every address of that
+  second answer goes through the guard again before one is handed over — the lookup the
+  handler uses is the one that was judged. `test_audit_store` (`Syslog`) pins this with two
+  lookups that answer differently.
   A SIEM being down never stops the local file. Sends time out after 3 s. Over TCP the
   connection is opened once when the setting is applied, before that timeout is set, and is
   not reopened after a failure until the next save or restart. The screen shows the last
@@ -1181,13 +1530,15 @@ report row to those ids from the first parse to the verdict, and nothing in the
 pipeline waits on a TheHive id. TheHive is the first entry of `DESTINATIONS`, and
 `create_thehive()` builds the case *after* the verdict, from the report.
 `dispatch()` runs it first only because it produces the case number the later
-destinations carry as `caseRef`. On a fresh installation only the disk destination ships
-enabled (`DEFAULT_ENABLED = ('disk',)`), because it is the one that needs no service.
-An installation that already had a TheHive key saved, or destinations already saved,
-keeps TheHive on (`UPGRADE_ENABLED`): an upgrade that silently stopped creating cases
-would look like lost cases. Turning a destination off is a setting like any other; its
-card says the history screens read every enabled destination, so switching off the only
-one empties them (§4.8).
+destinations carry as `caseRef`. It ships **disabled**: the destination enabled on a
+fresh installation is disk (`DEFAULT_ENABLED = ('disk',)`), the only one that needs
+nothing outside the process. An installation that already has a TheHive address and
+key and never saved the destinations keeps what it was installed with — TheHive on,
+the others off (`LEGACY_ENABLED`, applied in `load_config()`) — because an upgrade
+that silently stopped creating cases would look like lost cases, and one that
+silently started writing reported mail to disk would be a decision nobody made.
+Whatever the administrator saved outranks both. The card says the history screens
+read every enabled destination, so switching off the only one empties them (§4.8).
 
 What the module does is build the seam:
 
@@ -1244,8 +1595,8 @@ platform makes about its own analyses.
 | `whitelist_suppression` | `whitelist_state.py` | Every verdict a whitelist rule or a verdict memory (`vm_<id>`) downgraded, kept a year — resuming a suspended rule clears that rule's rows to reset its window |
 | `analysis_history` | `whitelist_state.py` | A short-retention record of each analysis, so a new rule can be simulated before it takes effect |
 | `case_reclassification` | `reclassification.py` | An analyst disagreeing with a verdict — append-only, reason mandatory |
-| `analysis_fingerprint` | `case_scope.py` | The content and body digests of each analysis plus its normalized sender address: what answers "how many people reported this same email" and what the verdict memory matches on: what answers "how many people reported this same email" and what the verdict memory matches on |
-| `verdict_memory` | `verdict_memory.py` | The lesson a reclassification left for later analyses. Only ever lowers a verdict, never raises one |
+| `analysis_fingerprint` | `case_scope.py` | The content and body digests of each analysis plus its normalized sender address: what answers "how many people reported this same email" and what the verdict memory matches on. `flagged` keeps the hosts and IPs the analyzers flagged, which a false-positive correction turns into indicator precedents (§7.17) |
+| `verdict_memory` | `verdict_memory.py` | The lesson a reclassification left for later analyses. Only ever lowers a verdict, never raises one; `indicator` rows lower nothing and only inform the LLM and the verdict trail (§7.17) |
 
 The `users` table in full, since it is the one the authorization rules read:
 
@@ -1266,8 +1617,14 @@ class User(Base):
     mfa_last_counter    = Column(Integer, nullable = True)       # replay guard (mfa.verify)
 ```
 
-- **Engine:** `sqlite:///{DB_PATH}` with `check_same_thread=False` (eventlet greenlets).
-- **Path:** `THEPHISH_DB_PATH` env var, default `app/data/thephish.db`.
+- **Engine:** `database.create_engine`. With `BLUEPHISH_DB_HOST` set (compose), PostgreSQL via
+  psycopg2, the password read from `BLUEPHISH_DB_PASSWORD_FILE` (a missing or empty file is an
+  error, never a silent SQLite), and psycopg2's wait made green for eventlet. Without it,
+  `sqlite:///{DB_PATH}` with `check_same_thread=False`, as before.
+- **Path (SQLite):** `THEPHISH_DB_PATH` env var, default `app/data/thephish.db`. With PostgreSQL
+  that file, if present, is migrated once (`database.migrate_from_sqlite`: one transaction,
+  backup `.pre-postgres-<date>.bak`, marker `.migrated`, sequences advanced, over-long text cut
+  to the column and counted) and then no longer used.
 - **Schema creation:** `Base.metadata.create_all()` on startup creates any missing table, then
   `_add_missing_columns` adds each column listed in `NEW_COLUMNS` to a table that already exists
   (`ALTER TABLE … ADD COLUMN`; today the SSO and MFA columns of `users`). Idempotent and additive
@@ -1277,7 +1634,7 @@ class User(Base):
 ### 5.2 Secure bootstrap (no default credentials)
 
 ```bash
-docker exec -it thephish python3 manage.py create-admin
+docker exec -it bluephish python3 manage.py create-admin
 ```
 
 Prompts for username and password twice (never echoed, never passed as an argument, so it
@@ -1294,8 +1651,8 @@ Every route below is protected; the decorator column **is** the authorization ru
 
 | Method | Path | Access |
 |---|---|---|
-| GET | `/login` | public (login page) |
-| POST | `/api/auth/login` | public, **rate-limited 5/min per IP** |
+| GET | `/login` | public (login page); `?next=` carries the screen to return to after sign-in (only a panel page is honoured, §7.18) |
+| POST | `/api/auth/login` | public, **rate-limited 5/min per IP**; accepts an optional `next` |
 | POST | `/api/auth/logout` | public: no decorator, exempt in `PRE_SESSION_ENDPOINTS`; an anonymous call only clears the session |
 | GET | `/api/auth/me` | authenticated — identity + RBAC flags for the UI |
 | POST | `/api/auth/heartbeat` | authenticated — proof the browser tab is still open (§4.3) |
@@ -1314,19 +1671,38 @@ Every route below is protected; the decorator column **is** the authorization ru
 | POST | `/api/users/<id>/unlock` |
 | POST | `/api/users/<id>/mfa/reset` |
 
+**Screens** (`page_routes.py`) — GET only; every path returns the same `index.html`, and the
+route — not the JavaScript — decides who may open it (§7.18)
+
+| Path | Role |
+|---|---|
+| `/exec`, `/tactic`, `/inbox`, `/done`, `/queues`, `/account` | `analyst` |
+| `/done/<case_ref>` — the archive with that case open; `/queues/<case_ref>` — the work desk with that case open | `analyst` |
+| `/inbox/<mail_uid>` — the monitored mailbox with that e-mail open (a uid of `[A-Za-z0-9._-]`; any other id opens without a link) | `analyst` |
+| `/audit` | `admin` |
+| `/integr` and `/integr/{analisadores,priorizacao,bloqueio,tickets}` | `admin` |
+| `/integr/plataforma` — a retired tab; redirects to `/integr` (`page_routes.RETIRED_PAGES`) and is not a page `next` can return to | — |
+| `/chat` — the retired "Chat AI" tab; redirects to `/done`, where the case assistant lives (`page_routes.RETIRED_PAGES`), and is not a page `next` can return to | — |
+| `/config` and `/config/{auto,ia,email,notificacao,caso,departamentos,whitelist}` | `admin` |
+| `/config/sso`, `/config/auditoria` | `global_admin` (the same rule as their data routes) |
+| `/users` | `global_admin` |
+
+No session → redirect to `/login?next=<path>`. A session without the role → **403** (audited as
+`authorization_denied`). A path not in the table → 404. A trailing slash is accepted.
+
 **Analysis** (`thephish_app.py`) — all `analyst`
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | Main SPA |
+| GET | `/` | Main SPA (lands on the executive dashboard) |
 | GET | `/list` | List every pending email (read-only; never starts an analysis) |
 | GET | `/email/<mailUID>` | Body of one listed email, on demand (peek: the message stays unread) |
 | GET | `/email-rendered/<mailUID>` | The same email as delivered: sanitized markup, blocked hosts, attachment manifest (§7.11) |
 | POST | `/analysis` | Analyze one email |
 | POST | `/analysis-selected` | Analyze a selected batch (≤50) |
-| GET | `/api/chat/load/<case_ref>` | Load a case as AI-chat context |
-| POST | `/api/chat/message` | Ask the LLM about the loaded case |
-| GET | `/api/cases` | Analyzed-email history (filters: `range`, `verdict`, `q`, `ioc`; `pending=1` drops what a person already decided — the work queues) |
+| GET | `/api/chat/load/<case_ref>` | Load a case as the context of the case assistant |
+| POST | `/api/chat/message` | Ask the LLM about the case the assistant was opened on |
+| GET | `/api/cases` | Analyzed-email history (filters: `range`, `verdict`, `q`, `ioc`; `pending=1` drops what a person already decided — the work queues; `ref=<case_ref>` looks one record up across the whole history, ignoring `range` — what opening `/done/<case_ref>` uses) |
 | GET | `/api/cases/<case_ref>` | One case: verdict, observables, LLM assessment, body, the decisions it accepts, whether its original is held |
 | GET | `/api/cases/<case_ref>/scope` | How many people reported the same message (§7.16) |
 | GET | `/api/cases/<case_ref>/rendered` | The reported email as delivered, from the kept original (§7.15); `?images=1` fetches remote images under the SSRF guard |
@@ -1336,6 +1712,12 @@ Every route below is protected; the decorator column **is** the authorization ru
 | GET | `/api/verdict-memory` | What corrections taught the pipeline (`admin`, §7.17) |
 | POST | `/api/verdict-memory/<id>/revoke` · `/dismiss` | Revoke a lesson or refuse a sender proposal (`admin`, audited) |
 | GET | `/api/insights` | Executive aggregates for a window (cached, see §4.8) |
+| GET | `/api/threat-intel` | External panorama of a period (`period` = `7d`/`30d`/`90d` or one of the last three months as `YYYY-MM`), crossed with the cases; cached with the insights (§4.8.2) |
+| GET | `/api/threat-intel/sources` | Source catalog, which are on and the state of each (read by analysts; no secret in it) |
+| POST | `/api/threat-intel/sources` · `/recommended` | Turn sources on/off by catalog id, or the recommended pack (`admin`); a newly enabled source is fetched in the background |
+| POST | `/api/threat-intel/sources/<id>/refresh` | Fetch one source now (`admin`) |
+| POST | `/api/threat-intel/summary` | Generate the LLM summary of a period (analyst, 6 per hour per client — each call is paid) |
+| GET/POST | `/api/threat-intel/summary-config` | Summary settings from Configurações › IA: on/off, model, `manual`/`auto`, `short`/`medium` (`admin`) |
 | GET | `/api/analyzers` | Analyzer registry + configuration (`admin`) |
 | POST | `/api/analyzers/<id>` | Save one analyzer's credentials and thresholds (`admin`) |
 | POST | `/api/analyzers/<id>/test` | Run it against a value and report the level (`admin`) |
@@ -1350,6 +1732,17 @@ Every route below is protected; the decorator column **is** the authorization ru
 | GET | `/api/audit/export` | The filtered trail as CSV (`admin`, audited as `audit_export`) |
 | GET | `/api/audit/assistant/context` | What the audit assistant reads: window, record count, sample size, model (`admin`) |
 | POST | `/api/audit/assistant` | Ask about the last 7 days of the trail (`question`, `history`) (`admin`) |
+| GET / POST | `/security-config` | Session policy: idle minutes, maximum hours, warning seconds (`global_admin`, audited, §4.3.1). The GET also returns the protection settings, the current bans and the viewer's own address (§4.3.2) |
+| POST | `/security-config/protection` | Per-IP rate limit, IP ban and allowlist (`global_admin`, audited, §4.3.2) |
+| POST | `/security-config/captcha` | Login reCAPTCHA: switch, site key, secret, minimum score (`global_admin`, audited, §4.3.3) |
+| GET / POST | `/api/profiles` | List / create access profiles; the GET also returns the catalogue and each role's defaults (`global_admin`, §3.4.1) |
+| POST / DELETE | `/api/profiles/<id>` | Edit / delete a profile — refused while in use (`global_admin`) |
+| POST | `/api/users/<id>/profile` | Assign a profile to an account, or `null` for "by role" (`global_admin`) |
+| GET | `/cert-config` | The two certificates (no keys) and the Let's Encrypt settings (`global_admin`, §5.4.2) |
+| POST | `/cert-config/pem`, `/cert-config/pfx`, `/cert-config/selfsigned` | Replace the vhost certificate (`global_admin`, audited) |
+| POST | `/cert-config/internal` | Reissue the internal certificate, optionally with a new CA (`global_admin`) |
+| POST | `/cert-config/letsencrypt`, `/cert-config/letsencrypt/issue` | Save the Let's Encrypt settings / issue now (`global_admin`) |
+| POST | `/security-config/unban` | Release a banned address (`global_admin`, audited as `ip_unban`) |
 | GET / POST | `/audit-log-config` | Trail folder, retention, ceiling and syslog copy (`global_admin`, audited, §4.6.2) |
 | POST | `/audit-log-config/test` | Write a test record through the applied handlers (`global_admin`) |
 
@@ -1364,7 +1757,7 @@ Every route below is protected; the decorator column **is** the authorization ru
 | `/smtp-config` (+ `/test`) | SMTP server for the verdict notifications; the test never sends |
 | `/api/tickets` (+ `/<id>`, `/<id>/test`) | Ticket destinations: TheHive, Jira and disk (TheHive's URL and API key live here too); the test never opens a ticket |
 | `/verdict-config` | Reporter notices — start, safe, malicious, errata — each with its own switch and template |
-| `/case-config` | TLP, PAP, case tags, MISP export name |
+| `/case-config` | TLP, PAP, case tags. The MISP export name is still read and returned for compatibility, and written only when a request carries it — the field lives on the TheHive destination card |
 | `/case-evidence-config` | Whether the original message is kept, retention days and space (§7.15) |
 
 **Whitelist** (`thephish_app.py`)
@@ -1397,21 +1790,20 @@ different host **discards** the stored key, so it can never be sent to an attack
 | File | Role | Secrets? |
 |---|---|---|
 | `app/configuration.json` | Template baked into the image | **No** — empty placeholders |
-| `docker/thephish_conf_files/configuration.json` | Live file, bind-mounted, written by the app at runtime | **Yes** |
+| `docker/thephish_conf_files/configuration.json` | Live file, bind-mounted, written by the app at runtime | **References only**, with the vault master key present (§5.4.1); real secrets without it |
 
 The live file is tracked by git but marked `skip-worktree` so its runtime secrets can never be
 staged. Reapply this in the new environment:
 
 ```bash
-git update-index --skip-worktree \
-    docker/thephish_conf_files/configuration.json \
-    docker/thehive/application.conf
+git update-index --skip-worktree docker/thephish_conf_files/configuration.json
 ```
 
-Environment secrets live in `docker/.env` (gitignored):
+`docker/.env` (gitignored) holds no secret any more; the session signing key lives in the vault
+(§5.4.1). `THEPHISH_SECRET_KEY` is still honoured, and wins, for installations that have it:
 
 ```bash
-THEPHISH_SECRET_KEY=<openssl rand -base64 48>   # session signing key; without it, restarts log everyone out
+THEPHISH_SECRET_KEY=<legacy>                    # only without the vault; removing it signs everybody out once
 BLUEPHISH_BASE_URL=<https://host>               # public origin; only needed behind a TLS proxy, for the SSO redirect URI
 BLUEPHISH_TAB_GRACE_SECONDS=<seconds>           # default 300, minimum 60 — see §4.3
 ```
@@ -1429,40 +1821,179 @@ through Entra ID and the group → role mapping that decides who gets in, §3.5)
 `llm_analysis` (`enabled`, `api_endpoint`, `model_name`, `api_key`,
 `escalation_threshold`, `malicious_escalation`, `system_prompt`) · `thehive` · `misp` ·
 `case` (`tlp`, `pap`, `tags`) · `notification` (message templates + `smtp`) ·
-`native_analyzers` · `custom_analyzers` · `responders` · `ticketing` (`jira`, `disk`) · `connectors` · `alertConnectors` and `volumeAlerts` (§7.14) · `caseEvidence` (§7.15) · `scoring` (§1.2.1–1.2.2) · `whitelist` (suspension limits and history retention) · `auditLog` (§4.6.2).
+`native_analyzers` · `custom_analyzers` · `responders` · `ticketing` (`jira`, `disk`) · `connectors` · `alertConnectors` and `volumeAlerts` (§7.14) · `caseEvidence` (§7.15) · `scoring` (§1.2.1–1.2.2) · `whitelist` (suspension limits and history retention) · `auditLog` (§4.6.2) · `security` (`session`: `idleMinutes`, `absoluteHours`, `warnSeconds` — §4.3.1; `protection` — §4.3.2; `captcha` — §4.3.3).
+
+### 5.4.1 The secret vault (`secret_vault.py`, `config_file.py`)
+
+Every secret of `configuration.json` — a leaf string whose key ends in `password`, `secret`,
+`token`, `apiKey`/`api_key`/`apikey` or `authValue` (a name that is a question, `isSecret` or
+`hasClientSecret`, is a flag, not a secret), and the `value` of a connector parameter marked
+`isSecret` — is replaced in the file by a reference `vault:v1:<32 hex>`. The value lives in the
+`vault_secret` table of the SQLite database, encrypted with **AES-256-GCM**: per secret, a random
+16-byte **salt** and HKDF-SHA256 derive the row key from the master key, a random 12-byte nonce,
+and the row id as associated data (swapping two rows' contents makes both fail instead of putting
+the SMTP password where the IMAP one was).
+
+The **master key** is 32 random bytes (base64 or hex) in a file outside the database and outside
+its volume: `docker/secrets/master.key` on the host, generated by `setup.sh`; the `docker/secrets`
+folder is bind-mounted read-only only into the application container
+(`BLUEPHISH_MASTER_KEY_FILE`, default `/run/secrets/bluephish/master.key`). The folder, not the
+file, and not a compose `secrets:` entry: compose refuses to start when a secret's file is missing,
+which would lock an installation out on upgrade — with the folder, a missing key starts in
+plaintext mode as decision 1 says. A copy of
+`docker/vol/` — a backup, a forgotten disk — carries no secret. **Back the key up apart from
+the data volume: without it the secrets do not open.** This is what answers the rationale on
+`models.User.mfa_secret` ("encrypting only moves the problem"): the problem moves, on purpose,
+off the data volume. The TOTP secrets are not in the vault yet.
+
+**The trap this creates, and the test that holds it.** A module that opened `configuration.json`
+on its own would now read `vault:v1:…` as a password and send it — the integration just stops
+authenticating, with no error anywhere. So `config_file` is the **only** door: `read()` returns
+the secrets opened, `write()` seals plaintext values, writes in place and only then deletes the
+rows no reference uses any more. `test_config_file.NinguemAbreOArquivoDireto` walks the AST of
+every module and fails on any `open()` of the configuration outside `config_file`. **Any new code
+that reads or writes the configuration goes through `config_file` (or `config_store`, which uses
+it).**
+
+Decisions:
+
+1. **No master key, nothing changes.** Secrets stay in plaintext as before; the log and
+   Configurações → Segurança say so. Refusing to start would lock an installation out on upgrade.
+2. **A reference that does not open reads as empty**, never as the reference, and is logged
+   once (wrong master key, deleted row, database from another installation).
+3. **Nothing is written while a secret would be lost.** With references in the file and no
+   master key, or rows encrypted under another key, `write()` raises `VaultError` and the file
+   stays as it was; garbage collection never deletes a row of another key. Otherwise a screen
+   saved in that state would write empty values over the references for good.
+4. **References are random ids, not JSON paths**, so removing a connector from the middle of the
+   list cannot hand its secret to its neighbour.
+5. **Migration is automatic**: on start (`config_file.migrate()`) and with
+   `manage.py vault-seal`; `manage.py vault-status` prints the counts and the key fingerprint,
+   never a value. The session signing key is generated once and kept under the fixed id
+   `app:flask-secret-key`, outside garbage collection.
+
+### 5.4.2 Certificates (`cert_store.py`, `acme_client.py`, Configurações → Certificados)
+
+**global_admin**, audited (`cert_import`, `cert_selfsigned`, `cert_internal`, `cert_letsencrypt*`).
+The tab lists the vhost and the internal certificate (subject, names, issuer, validity, days
+left, SHA-256) — never a private key — and replaces the vhost one by **PEM** (certificate, key,
+optional chain, optional key password), **PFX/PKCS#12** (with password), a **self-signed**
+certificate for the names given, or **Let's Encrypt**. Before anything is written: the key must be
+the certificate's, the certificate must not be expired, RSA keys are ≥ 2048 bits, and the chain is
+put in order (leaf first) with each link checked to have signed the previous one. Files are
+written beside and `os.replace`d (the vhost never reads half a file); keys are `0600`.
+
+The internal certificate can be **reissued** or the internal **CA replaced**; the API reads it at
+start, so both take effect after restarting the API container (the screen says so). The frontend
+trusts `trust/ca.pem`, a **bundle of the current and the previous CA**: it rereads the file within
+30 s, while the API keeps the old certificate until restarted — with the new CA alone, every
+request would be a 502 in between, the screen that asked for the change included. The current CA
+itself is `private/ca.pem`.
+
+**A CA-issued vhost certificate is not replaced by a self-signed one without confirmation**
+(`NeedsConfirmation` → 409, the screen asks and resends with `confirm`). Once a valid certificate
+was served, browsers recorded the vhost's two-year HSTS, and a self-signed one is then an error
+with no way past — nobody could reach the screen to undo it. From a shell:
+`manage.py cert-import cert.pem key.pem [--chain chain.pem]`. Startup
+(`ensure_defaults`) only generates what is missing — an imported certificate survives restarts.
+
+**Let's Encrypt** (`acme_client`, a small RFC 8555 client — no extra dependency): HTTP-01 only,
+so **port 80 must be reachable from the internet** (an internal-only SOC uses PEM/PFX from its
+CA). **Staging by default, and staging is a dry run**: it runs the whole order (challenge, issuance,
+chain validation), records `stagingOkAt`, and installs nothing — a test certificate installed
+over a production one would be the HSTS lockout above. Production is an explicit switch, because
+it rate-limits issuances, and renewal always uses production. `badNonce` is retried once with a
+fresh nonce; the first renewal check runs 5 minutes after start. RS256 account key (ES256 needs a DER→`r||s` conversion that fails as a bare
+`badSignature`), persisted in `vol/certs/private/`. Every URL the server returns must be on the
+directory's host, without following redirects. Renewal: a loop every 12 h renews when 30 days or
+fewer are left, and waits 12 h after a failure (shown on the screen). `test_cert_store` runs the
+whole flow against a fake ACME server that checks the JWS signatures and the challenge file.
 
 ### 5.5 Services and ports
 
-All ports are bound to **`127.0.0.1`** — the backing stores run with development-grade
-credentials and must never be exposed. Inter-container traffic uses the Docker network by
-service name.
+Three services; only the vhost publishes ports (443/80, on **`127.0.0.1`** unless
+`BLUEPHISH_BIND` says otherwise):
 
-| Service | Port (localhost) | Image |
-|---|---|---|
-| **thephish** | **8080 (HTTPS)** | `thephish-custom` (built from `app/`) |
-| thehive | 9000 | `thehiveproject/thehive4:4.1.9-1` |
-| misp | 80 / 443 | `coolacid/misp-docker:core-v2.4.148a` |
-| cassandra · redis · mysql | (internal) | backing stores |
+| Service | Port | Image | Networks |
+|---|---|---|---|
+| **vhost** | 443 (HTTPS), 80 | `bluephish-vhost` (`docker/vhost/`) | `edge` |
+| **frontend** | — | `bluephish-frontend` (`docker/frontend/`) | `edge`, `backend` |
+| **bluephish** (API) | — (8080 HTTPS inside `backend`) | `bluephish` (built from `app/`, §7.2) | `backend`, `data`, `egress` |
+| **db** | — | `postgres:17-alpine` pinned by digest | `data` |
+
+`backend` is `internal: true`; the API reaches the internet through `egress`, which publishes
+nothing, and the API listens only on its `backend` address (`BLUEPHISH_LISTEN_ADDRESS`) — on
+`egress` the host could reach it around the vhost. Fixed subnets (`172.30.10.0/24` edge, `172.30.11.0/24` backend) are the default of
+`BLUEPHISH_TRUSTED_PROXIES`: the API sees the frontend as its peer and `X-Forwarded-For` as
+`client, vhost`, and both nginx hops append (`$proxy_add_x_forwarded_for`), never overwrite —
+`test_client_addr` holds the two-hop chain. Without those subnets everyone would have the
+frontend's address, and the first IP ban would lock everybody out (§4.3.2).
+
+**The database has its own container.** PostgreSQL on `data` (`internal: true`), which only the
+API joins, with no published port; data in `docker/vol/postgres/`, password in
+`docker/secrets/db.password` (a compose secret for the database, the read-only secrets folder for
+the API). `test_docker_configs` holds all of it. Evidence, the audit log and the certificates
+stay under `docker/vol/thephish_data/` and `docker/vol/certs/`.
+
+**The frontend is nginx, not a separate application** — the hop that verifies the API over
+internal TLS. It proxies everything, `/static` included: the HTML comes from the API and asks
+for each asset with `?v=<the API image's version>`, so a copy baked into the frontend image would
+be served under the new version and cached for a week whenever only the API was rebuilt.
+`login.html` and `index.html` are rendered by Flask, because the CSRF token, the reCAPTCHA and
+the asset version are the server's. Both hops pass `Host $http_host` — `$host` drops the port,
+and off 443 Flask-WTF's Referer check (`https://{host}/`) would refuse every POST. The vhost
+config is a template (`default.conf.template`) so the port-80 redirect carries
+`BLUEPHISH_HTTPS_PORT`; no `listen [::]` (nginx refuses to start in a container without IPv6).
+
+**TLS, two certificates on purpose.** The vhost terminates public TLS (1.2/1.3, ECDHE + AEAD
+ciphers, no session tickets) with the certificate of Configurações → Certificados. The frontend
+talks to the API over a second TLS hop, with `proxy_ssl_verify on` against the **internal CA**
+(`vol/certs/trust/ca.pem`, `proxy_ssl_name bluephish`); the API's certificate is issued by that
+CA, whose key only the API container mounts. Not mutual TLS: eventlet's server-side client
+verification was not something to make the API's start depend on without running it.
+
+**Headers at the vhost — only what the application does not send.** HSTS (two years; the
+application's is hidden so there are not two), `Permissions-Policy`,
+`Cross-Origin-Opener-Policy`, `X-Permitted-Cross-Domain-Policies`, all `always` and all at
+`server` level (an `add_header` inside a `location` silently drops the inherited ones). **Never**
+CSP or `Referrer-Policy` there: a second CSP is enforced together with the application's and
+would kill the `/login` captcha CSP (§4.3.3), and `no-referrer` breaks every POST (§4.4).
+An SSL Labs **A+ needs a CA-issued certificate**: a self-signed one grades T whatever the rest.
+
+**Reload without the Docker socket.** `docker/nginx/reload-on-change.sh` hashes the certificate
+files every 30 s and runs `nginx -t && nginx -s reload` on a change; a pair nginx refuses keeps
+the previous one. Both nginx containers wait at start for the files the API generates on its
+first start. The image carries a `HEALTHCHECK` on `/login`, so
+`docker compose ps` reports the container as healthy once the interface answers.
+
+The compose file used to declare six more services — `thehive` with `cassandra`, `misp` with
+`mysql` and `redis`, and `hive-ai-agent` — and the application's own service was called
+`thephish`. They left because none of them is needed to analyze an email: TheHive is one
+recording destination among several (§4.10), MISP is something TheHive exports to, and the
+agent only answered TheHive's webhooks. An installation from that time is upgraded with the
+steps in `docker/README.md`; one that wants to keep its TheHive declares it in a local
+`docker-compose.override.yml` (`docs/integracoes/thehive.md`). The paths kept the old name
+on purpose (`thephish_conf_files/`, `vol/thephish_data/`, `/root/thephish`): renaming them
+would move the data of every existing installation.
 
 ---
 
 ## 6. Migration checklist
 
 1. **Copy the repository** (or clone the fork) into the new host.
-2. **Restore `docker/vol/`** from backup — it holds the SQLite database (users,
+2. **Restore `docker/vol/` and `docker/secrets/`** from backup — `vol/postgres/` is the database (users,
    reclassifications, verdict memory, whitelist counters, case fingerprints — §5.1), the audit
-   log, the stored original messages (§7.15) and the inbox's rendered layouts (§7.10.1), the TLS key pair, and
-   all TheHive/MISP data. Losing `vol/thephish_data/` means recreating every user and losing the
+   log, the recorded analyses of the disk destination, the stored original messages (§7.15) and the inbox's rendered layouts (§7.10.1), and the TLS key pair. Losing `vol/thephish_data/` means recreating every user and losing the
    analysts' reclassifications and verdict memory, the whitelist counters and suppression
    timeline, the stored original messages, and the audit trail.
 3. **Recreate `docker/.env`** with a fresh `THEPHISH_SECRET_KEY` (§5.4). A new key invalidates
    existing sessions, which is expected on migration.
-4. **Reapply `skip-worktree`** on the two secret-bearing files (§5.4).
+4. **Reapply `skip-worktree`** on the secret-bearing file (§5.4).
 5. **Restore the live configuration** — `docker/thephish_conf_files/configuration.json` —
    from the old host, or reconfigure through the UI afterwards.
 6. **Build and start:** `cd docker && docker compose up -d --build`.
 7. **Create the first administrator** if the database is new (§5.2).
-8. **Rotate the credentials** that moved between hosts: the TheHive API key, every analyzer
+8. **Rotate the credentials** that moved between hosts: the TheHive API key if that destination is used, every analyzer
    API key, the SMTP password, the Gmail App Password or M365 client secret, and the LLM API key.
 9. **Verify:** `https://localhost:8080/login` (accept the self-signed certificate once) → sign
    in → confirm the sidebar shows only what the role allows → run one analysis end to end.
@@ -1484,20 +2015,36 @@ calls that never yield, and would stop the whole hub — the analysis log, the m
 interface — not just their greenlet. `analyzers.run_off_hub()` hands them to `eventlet.tpool`,
 a real OS thread, so the hub keeps turning while a large attachment is scanned.
 
-### 7.2 `requirements.txt` is the lock the image installs
+### 7.2 The image installs `requirements.txt`, on Python 3.14
 
-`app/Dockerfile` starts from `ubuntu:20.04`, installs the system **Python 3.8**, `libmagic`,
-`openssl` and `netbase`, then runs `pip3 install -r requirements.txt` (`yara-python` is compiled
-from source in a single build-and-purge layer that keeps `netbase`). The pins are the old
-package set the code relies on (`flask.escape` used to be one of those dependencies and is now
-banned by `test_analysis_input`). Consequences:
+`app/Dockerfile` builds `FROM python:3.14-slim-trixie`, pinned by digest, and installs
+`app/requirements.txt`. It used to build `FROM emalderson/thephish:latest` — the upstream
+project's image — and only layer extra packages on top, which left the interpreter, `libmagic`
+and the whole pinned set in the hands of an image this repository does not control. What came
+from that base is now written down: `libmagic1t64`, `openssl` and `netbase` as system packages
+(after an `apt-get upgrade`, so Debian's fixes land at build time), and the lock as the package
+set, with `yara-python` compiled from source in a single build-and-purge layer that keeps
+`netbase` pinned. The build ends by importing every third-party module the application uses,
+so a broken set fails the build and not the deploy, and then removes `pip`: nothing installs
+at run time.
 
-- `requirements.txt` governs **both** CI and the running container: changing a pin changes what runs.
-- Dependabot is switched off for `app/` (`.github/dependabot.yml`): it used to propose
-  versions requiring Python ≥3.9/3.10 (`attrs` 26, `MarkupSafe` 3, `ioc-finder` 9,
-  `d8s-strings` 0.6) that **cannot** be merged without migrating off 3.8. The upgrades
-  Python 3.8 allows are listed at the top of `app/requirements.txt`.
-- Adding a runtime dependency means adding a pinned line to `requirements.txt` and rebuilding the image.
+**Why 3.14 and not 3.15.** The image ran 3.8 until 11/2026 (EOL since 10/2024; Flask 2.0 and
+eventlet 0.31 did not run on anything newer). The move went to the latest *mature* minor:
+3.14 has a year of patch releases and security support until 2030, while the newest minor is
+weeks old and the compiled dependencies' wheels come months later. The next minor is a
+migration of its own, not a Dependabot bump (the docker entry ignores minor/major for
+`python`).
+
+- `requirements.txt` governs **CI and the running container** — one file, so the combination
+  CI proves is the one that runs. It is a full lock (transitive packages included), built with
+  a 30-day cooldown (`pip --uploaded-prior-to P30D`): no version younger than 30 days, except
+  documented security fixes. The pins held back on purpose (bcrypt 4.3, SQLAlchemy 1.4,
+  ioc-finder 6, thehive4py 1.8) are listed at its top with the reason.
+- Dependabot manages `app/` again (`.github/dependabot.yml`), weekly, with the same 30-day
+  cooldown, minor/patch grouped; the `docker-image` job builds the image and runs the suite
+  inside it for each PR.
+- Adding a runtime dependency means adding a pin to `app/requirements.txt` — and to the
+  import at the end of the Dockerfile's install layer, which is what catches it missing.
 
 ### 7.3 Every module must be listed in `logging_conf.json`
 
@@ -1540,6 +2087,24 @@ behind a verdict must not exist only in this container's log: it is kept in full
 The prose version (`report_as_markdown` — the TheHive task log, the Jira description,
 `report.md`) lists only what was flagged, not the analyzers that could not look; what it does
 carry is the verdict trail, with a `coverage` step when the floor below fires.
+
+**A vendor's redirect is one of those failures.** Each native client sends its API key in a
+header of its own (`x-apikey`, `Key`, `X-OTX-API-KEY`...), and `requests` strips only
+`Authorization` when a redirect changes host, so following a 3xx would carry the key wherever
+the answer pointed. All vendor calls go through `_vendor_get` / `_vendor_post`, which pass
+`allow_redirects = False` and turn a 3xx into an `AnalyzerError` (level `info`, never `safe`).
+Do not call `requests.get/post` directly in `analyzers.py`; `test_analyzers_no_redirect` fails
+if any client does. (These calls go to fixed vendor hosts, so they are outside the SSRF chain;
+`openphish`'s `feedUrl` is the one address an admin types, so it is the exception: it goes
+through the SSRF chain, §4.5.1, and has its own test, `test_openphish_feed_guard`.)
+
+**The Microsoft Graph reads follow the same rule.** `graph_mail` (listing, MIME download, mark as
+read) and `graph_directory` (department lookup, probe) carry the tenant's app-only token to a
+fixed host, so they pass `allow_redirects = False`. A 3xx is a failure, never a result: in
+`graph_mail` it raises `GraphRedirectError` (a `RequestException`, not an `HTTPError`, so the
+listing's `$orderby` retry does not swallow it) because `raise_for_status()` ignores 3xx and the
+empty body would otherwise be analyzed as the reported e-mail; in `graph_directory` it becomes a
+`DirectoryError`, not an unattributed report. `test_graph_no_redirect` holds this.
 
 **The same rule holds for the whole email.** Contributing nothing per observable used to add
 up to Safe for the message: on 2026-09-14 a re-analysis of an Amazon-impersonating delivery
@@ -1607,16 +2172,30 @@ The automatic analysis passes no `have` and is unchanged: it downloads in order 
 
 ### 7.8 The live configuration carries real secrets and is `skip-worktree`
 
-`docker/thephish_conf_files/configuration.json` and `docker/thehive/application.conf`
-are tracked but marked `skip-worktree`, because the working copies hold real API keys
-while the committed versions hold empty placeholders. A `git merge` that touches either
-one **aborts** ("local changes would be overwritten"), which is the protection working.
+With the vault master key present (§5.4.1) the live file carries references instead of the
+secrets, and checking out the committed version no longer loses them silently — but it still
+drops every reference, so the rule below still holds.
 
-The way through, in order: back the two files up, `git update-index --no-skip-worktree`,
-stash them, merge, reapply the intended edits to the backed-up copies by hand, write them
+`docker/thephish_conf_files/configuration.json` is tracked but marked `skip-worktree`,
+because the working copy holds real API keys while the committed version holds empty
+placeholders. A `git merge` that touches it **aborts** ("local changes would be
+overwritten"), which is the protection working.
+
+The way through, in order: back the file up, `git update-index --no-skip-worktree`,
+stash it, merge, reapply the intended edits to the backed-up copy by hand, write it
 back, and `git update-index --skip-worktree` again. Never resolve this by checking out the
 committed version — that silently replaces every configured credential with an empty
 string, and the application will run and simply stop analyzing.
+
+This is also why the committed file is left alone whenever the code can cope instead. It
+still carries the TheHive address and the MISP name of the stack that shipped TheHive, and
+`tickets.load_config()` reads those two as blank when no API key sits next to them (§4.10)
+rather than have every installation go through the steps above for two default values.
+
+`docker/thehive/application.conf` used to be the second file under this rule. It left the
+repository with the TheHive service, and its removal is the one conflict an installation
+from that time meets on upgrade — `docker/README.md` has the steps, and that file is the
+only one they touch.
 
 ### 7.9 Operational warning — automatic analysis
 
@@ -2106,9 +2685,13 @@ and (3) the analyst leaves "Enviar errata" ticked in the decision form. The reci
 reporter recorded in the fingerprint; with none recorded the outcome says so rather than
 "sent". A dead SMTP becomes an outcome on screen and never undoes the decision.
 
-**Assistant beside the case.** The AI chat, loaded with the open case through the same
-`/api/chat/load` and `/api/chat/message` — the same `build_chat_system_prompt` fencing and
-canary. One conversation per case: an answer that arrives after another case was opened is
+**Assistant beside the case.** The only entry point of the per-case AI chat: the panel loads
+the open case through `/api/chat/load` and `/api/chat/message` — `build_chat_system_prompt`
+fencing and canary. There used to be a separate "Chat AI" tab where the analyst typed a case
+number to load; it was removed because the assistant already opens on the case in front of
+the analyst, with the scope closed on it, and a second door asked for the case by hand, which
+is exactly how an answer about one case ends up read next to another. `/chat` still answers,
+as a redirect to `/done`. One conversation per case: an answer that arrives after another case was opened is
 dropped, because an answer about one case read next to another is the mistake this panel must
 not make.
 
@@ -2123,6 +2706,7 @@ loop with the same locks the whitelist has, because the power is the same — lo
 | *Só este caso* | — | Nothing learned |
 | **Mensagem idêntica** (`content`) | `content_key` exactly | **Yes**, with a `memory` step in the verdict trail naming who decided and when |
 | **Este remetente** (`sender`) | — | **No.** It records the identical message *and* a whitelist **proposal**, which an admin turns into a rule under *Whitelist › Aprendido* — through domain authentication and the dry run |
+| *Precedente de indicador* (`indicator`), on any false-positive correction, whatever the scope above | each host (`domain:<host>`, from URLs too) or IP (`ip:<net>`) an analyzer flagged in the corrected case **and the analyst checked as verified** | **No.** It is read, not applied: see below |
 
 Rules, each one there because breaking it makes the memory the bypass it must not be:
 
@@ -2142,7 +2726,258 @@ Rules, each one there because breaking it makes the memory the bypass it must no
 - **Expires in 180 days** (the whitelist default) and **is revoked when its decision is undone.**
 - **A proposal closes only on its own rule.** `/api/whitelist/rule` resolves `memoryProposalId`
   only when the saved rule is a sender rule with exactly the proposed address — checked against
-  the database, not trusted from the browser.
+  the database, not trusted from the browser. An indicator proposal closes, with every other
+  pending proposal of the same indicator, only on a domain/IP rule with exactly that value
+  (`verdict_memory.rule_matches_indicator`).
+
+**Indicator precedents — what the identical-message scope cannot learn.** The most common false
+positive in this deployment is not a message, it is a host: the image CDN of an email service
+provider (a `dXXXX.cloudfront.net`) that one reputation engine flags, back next week in another
+newsletter with another subject and another image. The content key never matches it. So a
+false-positive correction (any role allowed to reclassify — a precedent lowers nothing) records
+one `indicator` row per flagged host or IP **the analyst checked**, carrying the analyst's reason:
+
+- **The analyst picks the hosts.** The reclassify form lists the flagged hosts and IPs
+  (`flaggedIndicators` in the case detail), all unchecked: a precedent is someone's word that they
+  looked at that host, and a case with a tracking redirect through an attacker domain must not
+  clear it by accident. The server intersects the submitted `indicators` with what the analyzers
+  actually flagged in that record (`verdict_memory.select_indicators`), so a crafted form cannot
+  seed a precedent for a host the case never had.
+
+- **The flagged indicators are kept with the analysis.** `analysis_fingerprint.flagged`
+  (added by the `NEW_COLUMNS` migration) holds what the analyzers flagged, so a Jira record or a
+  Suspicious verdict — neither carries IoC flags in its context — still teaches. An analysis older
+  than the column has `NULL` there (not `[]`: "unknown" is not "nothing flagged") and falls back to
+  the observables the record marked as IoC.
+- **The LLM reads it** (`verdict_memory.consult` → `describe_for_model`), inside the same fenced
+  analyzer-findings block: the reason is free text an analyst may have copied from the email, so it
+  goes through `prompt_guard` like the findings do. A trusted line in the prompt states its weight:
+  it lowers that one reputation flag, never makes the email legitimate. The LLM only raises (§8),
+  so the worst a bad precedent does is keep the model from adding its own escalation; the analyzer
+  verdict is untouched.
+- **The verdict trail shows it** as a `precedent` step right after the analyzers, without changing
+  the verdict, so whoever opens the case does not redo an investigation already done.
+- **It becomes a domain/IP whitelist proposal** under *Aprendido*. Taking the host out of the
+  analysis is the rule's job, with the rule's public-suffix lock (`cloudfront.net` itself is
+  refused; `d1a2b3c4.cloudfront.net` is not). *Recusar* revokes the precedent, so the LLM stops
+  receiving it; an accepted one keeps being consulted.
+- **Attachments never become precedents** — the same floor as "a malicious attachment is never
+  lowered". Mail addresses neither: the sender scope covers them, with its own locks.
+- **Shared hosts never become precedents** (`verdict_memory.is_shared_host`): shorteners, document
+  and form hosting (`bit.ly`, `docs.google.com`, any `*.sharepoint.com`…), a whitelist public suffix
+  itself and the parent of one (`google.com`). A legitimate case that went through them says nothing
+  about the next link there. A single-tenant host under a public suffix — the CloudFront
+  distribution — is exactly the case this exists for, and is kept. An IP-literal URL becomes `ip:`.
+- **A reason that quotes an injection is withheld from the model**: `prompt_guard` would otherwise
+  flag every later email on that host as an injection attempt. The decision still counts.
+- **Dismissing one proposal dismisses every pending one of that indicator**, like accepting closes
+  them all; otherwise the LLM would keep receiving the host through the other rows.
+- **The *Aprendido* list is capped per scope, filtered in SQL**: dozens of precedents per correction
+  must not push a live content downgrade off the only screen that can revoke it.
+- **Fails open**, unlike `apply`: an unreadable precedent only stops informing. Expires in 180
+  days and is revoked when its decision is undone, like the rest of the table.
+
+### 7.18 Every screen has a path (`page_routes.py`) — and what has to stay true for it to work
+
+`/config/ia`, `/integr/tickets`, `/done/<case_ref>`… each screen of the panel has an address, so it
+can be bookmarked, sent to a colleague, reloaded with F5, and returned to after the session dropped.
+The table of paths and of the role each one needs lives in **one place**, `page_routes.PAGES`;
+`test_page_routes` checks it against the `data-view`, `data-config-tab` and `data-integr-tab` of
+`index.html`, so a new screen without a path (or the reverse) fails CI. Four things break silently:
+
+- **Request addresses start at the root.** The scripts are written with relative addresses
+  (`"api/cases"`, `"login"`), which resolve against the folder of the current page: harmless at
+  `/`, a request to `/config/api/cases` at `/config/ia`. The `fetch` wrapper in `bluephish.js`
+  normalises every string address (`absolute_url`), and redirects go through `go_to_login()`. What
+  the wrapper cannot see — an `<a href>` the script creates, a `location.href` — has to be written
+  root-relative by hand (the whitelist export link was the one that got missed), and
+  `test_page_routes` fails on any relative `href`/`src`/`action`/`location.href` in the scripts. A
+  `<base href="/">` was rejected: it would also rewrite the `#conteudo` skip link into a navigation.
+- **A page path must not shadow a data route.** `/email`, `/list`, `/scheduler`, `/analysis`,
+  `/inbox-poll` already answer JSON to the panel. The test matches every page path against every
+  `@app.route` in `thephish_app.py` and `auth.py`.
+- **The client router waits for the identity.** `show_view` refuses the privileged screens until
+  `/api/auth/me` has answered, so `router_start()` runs at the end of `load_identity()`, never at boot;
+  resolving the path earlier would bounce every administrator to the first screen. The server's 403 is
+  the control; the client only declines to show what the role cannot use.
+- **`next` only accepts a panel page.** `page_routes.safe_next()` takes a plain path (no `//`, `\`,
+  `%`, `.`/`..` segments, query, fragment, spaces or control characters) that the URL map resolves
+  to a page endpoint —
+  never `/api/...`, never another site. It is applied when the login page renders, when the password
+  is posted, when the SSO flow starts and **again** when the second factor completes. It rides inside
+  the MFA challenge (`MFA_PENDING['next']`) because `_start_mfa_challenge` clears the session; for SSO
+  it is held in `session['sso_next']` across the provider's round trip and collected in the callback
+  before that clear. The browser is told where to go by the server's answer, and `login.js`
+  distrusts it once more.
+
+History: opening a case writes `/done/<ref>` (or `/queues/<ref>` on the work desk), opening an e-mail
+of the mailbox writes `/inbox/<uid>`; Back/Forward re-apply the screen without adding entries. The
+case detail is **one component shared by the archive and the work desk**, so `show_view` closes it
+(`close_case()`) whenever the screen changes: leaving a case open under a list with nothing selected
+let an analyst decide on an e-mail they were not looking at. Going back to `/done` or `/inbox`
+closes the open case/e-mail too, so the screen says what the address says. A decision answered after
+the analyst has left the case is recorded but does not reopen it. `/inbox/<uid>` opened cold waits
+for the websocket listing (`open_pending_inbox_item`) and says so when the e-mail is no longer in
+the mailbox. The menu and the tabs of Configurações/Integrações are real `<a href>` links, so the middle button
+and Ctrl/Cmd-click open a screen in a new tab (the click handler leaves modified clicks to the
+browser). Every response but `/static` is served `Cache-Control: no-store` (§4.5), so
+Back after signing out does not reopen a screen, or the data it read, from the browser cache.
+
+A case that is no longer in the window is found by `GET /api/cases?ref=`, which ignores the period
+and answers only for a `ref` of the right shape (`case_insights.valid_record_ref`) — an address is
+typed by anybody, and garbage must not cost a read of the whole history. The reply carries `partial`,
+`notice` and `truncated`, and the screen says "caso não encontrado" **only** when none of them is set
+and nothing errored: a destination that was down, or a case older than the `MAX_CASES` cut, is "could
+not tell", and the address is left alone so a reload can try again. An answer that arrives after the
+address has moved to another case is dropped.
+
+#### 7.18.1 Several tabs, one session
+
+Opening a second tab (middle click on the menu) works because every tab shares the one session
+cookie and a new tab asks its siblings for the tab token (§4.3 "Sessão presa à aba"). Two rules follow
+from the cookie being shared, and both live where the failure would be silent:
+
+- **The idle clock counts people, not timers.** The panel polls by itself — the tab heartbeat every
+  30 s, the scheduler read, the live tactical view — and if each of those renewed `last_seen`, the
+  30-minute limit would never fire while any tab was open. `auth._counts_as_activity()` renews it only
+  for a page navigation or for an XHR carrying `X-User-Activity: 1`; every other request keeps the
+  tab alive (`_live_sessions`) and nothing more. The client sends that header while a gesture (pointer,
+  key, wheel, touch) happened in **any** tab in the last 60 s — the last gesture is shared through
+  `localStorage` (`bluephish.activity`). A gesture in tab B therefore keeps tab A's session alive, and
+  no gesture anywhere lets it expire for all of them. `test_session_activity` pins it.
+- **Signing out, expiring or being revoked in one tab ends it in all.** The server already revokes
+  the cookie; `go_to_login()` also writes `bluephish.signout` to `localStorage`, and the other tabs
+  go to `/login` at once instead of at their next request (up to 30 s later, with a dead session's
+  content on screen).
+
+### 7.19 The clock can go backwards, and the session cookie used to die of it (`session_clock.py`)
+
+Flask's session cookie is signed with a timestamp, and itsdangerous refuses a timestamp from the
+future: a negative age is `SignatureExpired`. Flask turns that into an empty session — no log,
+no audit line — so the person lands on the login page in the middle of a click. The Docker
+Desktop VM corrects its clock in steps: on 2026-10-30 it went back 4.3 s while the External
+panorama was collecting feeds, and every cookie signed in those seconds was refused until the
+clock caught up. It looked like "enabling a feed logs me out"; the feed was only where the jump
+happened to land. The trace was in the logs all along: lines with timestamps out of order.
+
+The application's interface is now `jwt_session.JwtSessionInterface` (§4.2.1), which applies the
+same tolerance to the JWT dates. `session_clock.SkewTolerantSessionInterface` — what follows — is
+the itsdangerous-format version, still tested: the signature is still
+checked by itsdangerous in full, but a timestamp up to `MAX_BACKWARD_SECONDS` (300) in the future
+is accepted and logged (`session_clock`, at most once a minute). The 12-hour limit is unchanged,
+and the idle and absolute timeouts in `auth.enforce_session_policy` read the times stored inside
+the session, which a backward jump only makes look younger. `test_session_clock` reproduces the
+drop with Flask's default interface.
+
+### 7.20 Indicator extraction reads text the attacker wrote (`ioc_extract.py`)
+
+`ioc_finder` tries its grammar from every word start, so on one long token without a separator
+(`a.a.a.a...`) each attempt walks the rest of the token and the cost is quadratic. Measured on
+2026-11-23 with ioc-finder 9.2: 2 KB of that text took 5.8 s, and it ran on the eventlet hub, so
+for those seconds the interface, the analysis log and the mailbox polling all stopped. The sender
+of a phishing email chooses that text. Nothing calls `ioc_finder` directly any more:
+`case_from_email.search_observables` goes through `ioc_extract.extract`, off the hub.
+
+Rules that must survive any simplification:
+
+- **Never cap the text by size.** Junk placed before the malicious URL would then hide it. A token
+  longer than a hostname (253) is replaced by the pieces of it that can still be a domain or an
+  address; a domain keeps the **end** of an oversized run, at a label boundary, because that is
+  the registrable part. Text with no long token reaches the library unchanged.
+- **A URL is only rewritten past 8 KiB in one token.** A long URL is legitimate, and rewriting it
+  would change the value sent to the reputation analyzers. Past that, each `scheme://` becomes its
+  own candidate. The pinned ioc-finder 6.0.1 tries hundreds of schemes at every word start, so the
+  URL and IP searches cannot receive a whole hostile token either: this is what CI caught in the
+  image when only the domain and address searches were bounded.
+- **One time budget per message** (`EXTRACTION_BUDGET_SECONDS`, 45 s), checked between 8 KiB
+  blocks. Per message and not per field, or it would multiply by the number of `Received` headers
+  the sender wrote. It exists because extraction holds `analysis_semaphore`, and with it the
+  mailbox reading.
+- **Running out of budget is reported, not swallowed.** `extraction_complete = False` travels to
+  `terminate_analysis`, where a Safe verdict becomes Suspicious with a `coverage` step: an analyzer
+  saying `safe` only vouches for the indicators extraction found (§7.6). It raises only, and
+  neither a sender whitelist rule nor the verdict memory may lower that message afterwards:
+  otherwise a compromised account with valid DKIM plus enough junk would undo the floor.
+- **An oversized label ends a chain, it does not void it.** The grammar reads `evil.com-----` as
+  `evil.com`, so discarding the whole run would let a line of hyphens hide the domain.
+- **Only the extraction goes to the thread.** The loop over its results emits on the websocket,
+  which is the hub's job, and yields every 200 observables.
+
+`test_ioc_extract` covers both directions: hostile shapes finish, and indicators hidden in them
+still come out. It runs the hostile cases in a child process because this regression does not
+fail, it just never ends.
+
+### 7.21 One email cannot spend the vendors' quota (`run_analysis.plan_capped_jobs`)
+
+`plan_jobs` creates one job per observable and per enabled analyzer, and the sender of the email
+decides how many observables there are. Measured on 2026-11-23: a synthetic email with 40,000
+unique domains planned 320,001 jobs with every native analyzer on. The 14 real emails stored on
+this installation ask for at most 70 queries of one native vendor (75 of a custom analyzer that
+accepts every type), so `MAX_JOBS_PER_ANALYZER` is **150**, twice that. It is a constant, like
+the other quota limits in that module (`MAX_PARALLEL_ANALYSES`, `RATE_LIMIT_RETRIES`). The same
+email now makes 1,201 calls.
+
+Rules that must survive any simplification:
+
+- **The cap is per analyzer, not per message.** Quota belongs to each vendor. A single cap for the
+  message, on an installation with one vendor enabled, would be spent entirely on that vendor; and
+  a flood of domains is no reason for AbuseIPDB to stop looking at the IPs.
+- **Under the cap nothing changes.** `plan_capped_jobs` returns `plan_jobs` itself, same jobs in
+  the same order. Only an analyzer over the cap is cut.
+- **What weighs most runs first** (`observable_priority`): attachments and their hashes, the
+  destination of a shortener, body URLs, body domains, body IPs, the sender headers (`From`,
+  `Reply-To`, `Return-Path`, `Sender`), and last the rest of the header, mostly `Received`
+  repetition. The jobs that survive keep their original order.
+- **A copy of a value already queried neither spends the cap nor counts as left out.** Copies are
+  the cheapest way to push a real domain past the cap, and the analyzer cache would not hold them
+  back while a vendor is failing, because errors are not cached.
+- **Shortener resolution has the same cap** (`urls_to_unshorten`). It makes one request per URL, in
+  sequence, before planning: without a cap the analysis would never reach the plan. URLs it did not
+  resolve count as left out even with no URL analyzer enabled, because the destination behind a
+  shortener never became an observable.
+- **Nothing is dropped silently.** The analysis log and a `coverage` step in the verdict trail state
+  how many observables were left out, of which types, which analyzers hit the cap and the first few
+  values. That step is written even when the verdict is already above Safe. The model is told the
+  count, and no text from the email, so it does not read a clean sheet as a full one.
+- **A capped analysis cannot close as Safe.** `terminate_analysis` raises Safe to Suspicious, the
+  same coverage floor as §7.6 and §7.20. It raises only, and neither a sender whitelist rule nor the
+  verdict memory may lower that message afterwards.
+- **The observables left out stay in the list**, so what walks it must stay linear. The verdict and
+  `tickets.build_report` index the reports by observable once; searching them per observable stopped
+  the hub for about 4 s each on this email.
+
+The cap counts jobs. A job retried after a 429 (`RATE_LIMIT_RETRIES`) is the same job, and one
+analyzer may make more than one HTTP request to answer it. `test_job_cap` covers the cap, the order,
+the floor and the wiring through `main`.
+
+### 7.22 One email cannot flood a TheHive case (`tickets.thehive_observables_to_record`)
+
+`create_thehive` makes one POST per observable, and §7.21 deliberately keeps the observables it cut
+in the report, so a 40,000-domain email still made 40,000 POSTs. Measured on 2026-11-23: the largest
+of the 14 real emails stored on this installation records 76 observables (70 distinct values), so
+`MAX_THEHIVE_OBSERVABLES` is **200**. The same email now makes 200.
+
+Rules that must survive any simplification:
+
+- **Under the cap nothing changes.** The same observables, copies included, in the same order, with
+  the same case description and task log.
+- **An IoC is never cut.** This is the one exception to the ceiling, and §7.21 is what bounds it: only
+  an observable an analyzer queried can become an IoC, at most 150 per analyzer. The 40,000-domain
+  email stays at 200 with every analyzer on. An email mixing types could pass 200 POSTs only if the
+  vendors flag more than 200 distinct values, and then it makes exactly one POST per IoC.
+- **After the IoCs, `observable_priority` decides**, and the POSTs go in that order.
+- **A copy neither spends the cap nor counts as left out**, as in §7.21. Attachments are never copies
+  by name, because the attacker chooses the name.
+- **Nothing is dropped silently.** The case description says how many were left out and of which
+  types; it is written with the case, so a failed task log cannot lose it. A `coverage` step in the
+  task log's trail carries the same text to the case screen, and the destination's outcome carries
+  the count to the analysis log. All of it is counts and types, no text from the email.
+- **The report is not touched.** The next destination receives the whole list, so the disk keeps
+  every observable. The `coverage` step exists only in the copy written to TheHive's log.
+
+With TheHive and disk both on, the history row is the TheHive one (§4.8), so its count is what the
+case holds (200), and the COBERTURA step in the detail says how many stayed out.
+`test_thehive_observable_cap` covers this against a stand-in for TheHive.
 
 ## 8. LLM security system prompt
 
@@ -2150,6 +2985,16 @@ Defined in `llm_analysis.py`. The prompt has **two parts**: a configurable behav
 (editable by an admin under *Settings → IA*, persisted as
 `llm_analysis.system_prompt`) and a fixed output contract appended by the code and **not**
 editable — so a customized prompt can never break the parser or drop the injection guardrail.
+
+**The transport refuses redirects.** Every call that carries the reported e-mail to the model
+(`llm_analysis.chat()` for the analysis and the council, `ask_chat_llm()` for the two chats)
+goes through `llm_analysis.post_completion()`: `allow_redirects = False`, and a 3xx answer is an
+error. With the library default a 307/308 resends the body — the attacker's text and its
+images — to whatever host the `Location` names (`requests` drops only the `Authorization`
+header across hosts). The endpoint is the host the admin typed; if the provider moved, the
+fix is the URL in *Settings → IA*. Same rule as `llm_catalog.http_post`; guarded by
+`test_llm_no_redirect`. The endpoint itself is not under the SSRF chain (it may be internal:
+Ollama), so this refusal is the only thing keeping the body on the host the admin chose.
 
 ### 8.1 Configurable core — `DEFAULT_SYSTEM_PROMPT`
 
@@ -2309,13 +3154,13 @@ and the model's text reaches the DOM through `textContent` / `escape_html()` onl
 
 ### 8.4 Chat context prompt
 
-The AI chat reuses the same configurable core and gets the **same four layers**: the case
+The case assistant (the AI chat of an open case) reuses the same configurable core and gets the **same four layers**: the case
 context — a body written by the attacker, a subject they chose, observables that are their URLs
 — is sanitized, fenced with a per-request nonce, and the answer is read back for the canary. A
 leaked canary blocks the answer outright and tells the analyst why, rather than rendering a
 paragraph about the attacker's payload as if it were a statement about the case.
 
-The chat is the softer of the two surfaces and is hardened accordingly: the analysis asks for
+The case assistant is the softer of the two surfaces and is hardened accordingly: the analysis asks for
 one JSON object and throws away anything that is not it, while the chat answers in free prose
 that the analyst reads as fact. An injection that merely shifts a tone is useless against a
 schema and effective against a sentence.
@@ -2329,10 +3174,22 @@ Two smaller decisions:
   injection against their own tool buys them nothing they cannot already do, and scanning it
   would fire every time an analyst asks "did this email contain a prompt injection?".
 
-When the loaded case carries injection markers, the chat says so once per conversation, next to
+When the loaded case carries injection markers, the assistant says so once per conversation, next to
 the answers. Once, not per turn: a banner on every turn stops being read.
 
-### 8.5 Multi-agent pipelines — `llm_council.py`
+### 8.5 The third surface — `hive_ai_agent` (no longer in this repository)
+
+There used to be a third place where attacker-chosen text reached a model: the
+`hive_ai_agent` container, which fed IOC values lifted out of phishing cases to an LLM and
+wrote the answer back as a comment on the TheHive case. It carried a byte-identical copy of
+`prompt_guard.py`, kept in step by a test (`CopiesInSync`).
+
+The agent left the repository together with TheHive's place in the compose file. It only ever
+answered TheHive's webhooks, the application never called it, and it took no part in the
+verdict. With it went the second copy and the test: `app/prompt_guard.py` is the only one.
+The last commit of `main` that contains the agent is `4275102`.
+
+### 8.6 Multi-agent pipelines — `llm_council.py`
 
 Configurable under *Settings → IA → Agentes e revisão* (`llm_analysis.pipeline_mode`):
 
@@ -2376,7 +3233,7 @@ pattern (Willison, refined by DeepMind's CaMeL): the component closest to the ac
 never touches attacker-controlled text. It receives the structured verdicts, the
 deterministic `prompt_guard` findings, and the justifications — model-written prose,
 fenced as untrusted because a model that had just read the attacker's email wrote it.
-It never receives the body or the subject. It does receive the analyzer summary (summarize_analyzer_findings() plus the link hosts), and that summary names every flagged observable and every link host. Those are attacker-chosen strings, and today they reach the reviewer unfenced under a 'trustworthy' label. This is a known gap to fix in code: fence the summary, or reduce the hosts to safe_token. It cannot be enlisted by
+It never receives the body or the subject. It does receive the analyzer summary (summarize_analyzer_findings() plus the link hosts), and that summary names every flagged observable and every link host. Those are attacker-chosen strings, so the summary is sanitized and fenced as `UNTRUSTED-ANALYZER-FINDINGS` with the per-request nonce, exactly as in the assessment prompt, and is no longer introduced as "trustworthy" (`test_llm_council.ReviewerNeverTrustsTheAnalyzerSummary` holds this). It cannot be enlisted by
 text it never gets.
 
 Its output is a closed vocabulary, not prose (`parse_review`), because this answer is

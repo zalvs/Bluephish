@@ -455,6 +455,35 @@ def record_ref(case):
 	return str(case.get('_id', ''))
 
 
+# What a reference can look like: a TheHive number or `~id`, or `<source>:<ref>`
+# where a disk record's ref is the analysis folder (timestamp plus a slug of the
+# subject, `[A-Za-z0-9._-]`, see tickets.slugify) and a Jira one is an issue key.
+# The ceiling covers the longest folder name with room to spare.
+RECORD_REF_PATTERN = re.compile(r'^[A-Za-z0-9~:._-]{1,160}$')
+
+
+def valid_record_ref(ref):
+	"""Whether `ref` has the shape of a record reference.
+
+	Asked before a lookup widens its window to the whole history: a reference
+	comes from an address anybody can type, and "anything at all" must not cost
+	a read of every destination.
+	"""
+	return isinstance(ref, str) and bool(RECORD_REF_PATTERN.match(ref))
+
+
+def with_record_ref(cases, ref):
+	"""The records whose `record_ref` is exactly `ref`.
+
+	What opening a case from its address (/done/<ref>) asks for: the reference is
+	the one the detail route takes, and an empty one names nothing — it must not
+	read as "every case".
+	"""
+	if not ref:
+		return []
+	return [case for case in cases if record_ref(case) == ref]
+
+
 def record_label(case):
 	"""The short name of a record, as its pill shows it."""
 	source = case.get('source') or 'thehive'
@@ -612,25 +641,66 @@ def llm_view(llm):
 	return view
 
 
-# How many score factors the detail shows. The memory of the calculation lists
-# every analyzer that answered; past the top contributors the rows are zeros
-MAX_SCORE_FACTORS = 8
+def _points(factor, weight_total):
+	"""Quantos pontos do score esta linha pôs: contribuição ÷ peso total × 100.
+
+	É o que faz a lista fechar. `contribuição` sozinha é peso × fator e não soma
+	nada que a analista reconheça; dividida pelo denominador, as linhas somam a
+	média ponderada. None quando o registro é anterior ao denominador gravado —
+	a tela diz que não sabe em vez de inventar um número.
+	"""
+	if not weight_total:
+		return None
+	return round((factor.get('contribution') or 0) * 100.0 / weight_total, 1)
+
+
+def _average_of(score):
+	"""A média ponderada antes do teto, ou None quando o registro não a guardou.
+
+	`average` é a média como saiu da conta. Um registro anterior só tem `raw`, e
+	nele `raw` já passou pelo teto: sendo o score limitado, a média verdadeira se
+	perdeu e `raw` seria uma média que nunca existiu.
+	"""
+	if score.get('average') is not None:
+		return score['average']
+	if score.get('capped'):
+		return None
+	return score.get('raw')
 
 
 def score_view(score):
-	"""The weighted score and its top contributors, or None when it was not computed."""
+	"""The weighted score and the whole memory of how it was reached, or None.
+
+	Every factor that took part is listed — a list cut at the top contributors
+	cannot be added up, and "the score should have been 47" is a complaint only a
+	list that adds up can answer. Beside the rows come the three things that turn
+	their sum into the final number: the weighted average (`raw`), the floor the
+	verdict imposes, and the ceiling that context alone is held under.
+	"""
 	if not score or score.get('score') is None:
 		return None
+	weight_total = score.get('weightTotal')
+	tiers = score.get('tiers') if isinstance(score.get('tiers'), dict) else {}
+	ceiling = None
+	if score.get('capped') and tiers.get('phishing') is not None:
+		ceiling = max(0, tiers['phishing'] - 1)
 	return {
 		'score': score.get('score'),
 		'tier': score.get('tier') or '',
 		'label': score.get('label') or '',
 		'capped': bool(score.get('capped')),
+		'raw': _average_of(score),
+		'floor': score.get('floor'),
+		'ceiling': ceiling,
+		'weightTotal': weight_total,
 		'factors': [{
 			'label': factor.get('label') or factor.get('id') or '',
+			'weight': factor.get('weight'),
+			'factor': factor.get('factor'),
 			'contribution': factor.get('contribution') or 0,
+			'points': _points(factor, weight_total),
 			'reason': factor.get('reason') or ''
-		} for factor in (score.get('factors') or []) if (factor.get('participation') or 0) > 0][:MAX_SCORE_FACTORS]
+		} for factor in (score.get('factors') or []) if (factor.get('participation') or 0) > 0]
 	}
 
 

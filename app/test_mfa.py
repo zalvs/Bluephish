@@ -138,13 +138,13 @@ class Provisionamento(unittest.TestCase):
 
 	def test_a_uri_traz_o_que_o_aplicativo_precisa(self):
 		secret = mfa.new_secret()
-		uri = mfa.provisioning_uri('ana.silva', secret)
+		uri = mfa.provisioning_uri('analista.soc', secret)
 		self.assertTrue(uri.startswith('otpauth://totp/'))
 		self.assertIn(secret, uri)
 		self.assertIn('issuer=' + mfa.ISSUER, uri)
 
 	def test_o_qr_sai_como_data_uri_de_svg(self):
-		uri = mfa.provisioning_uri('ana.silva', mfa.new_secret())
+		uri = mfa.provisioning_uri('analista.soc', mfa.new_secret())
 		data = mfa.qr_data_uri(uri)
 		# `data:` e não um endereço próprio: o segredo não pode passar por uma
 		# URL (histórico, log de acesso, Referer)

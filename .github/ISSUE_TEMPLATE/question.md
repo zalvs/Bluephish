@@ -1,24 +1,31 @@
 ---
 name: Question
-about: Ask how something in Bluephish works or how to set it up.
-title: "[Question] "
+about: Ask a question about ThePhish
+title: "[Question]"
 labels: question
 assignees: ''
 
 ---
 
-**What you are trying to do**
+**Work environment**
 
-Describe the goal first, then where you got stuck.
+| Question                   | Answer                                |
+| -------------------------- | ------------------------------------- |
+| OS version (server)        | Debian, Ubuntu, CentOS, RedHat, ...   |
+| OS version (client)        | XP, Seven, 10, Ubuntu, ...            |
+| Python version | |
+| Type of email address used | Gmail, Hotmail, ... |
+| Mail client type & version | Thunderbird, Gmail, ... |
+| Browser type & version     | Firefox, Chrome, Edge, Opera, ...                    |
+| Virtualized  Env.          | True / False                          |
+| Dedicated RAM              | XX GB                                 |
+| vCPU                       | 4 / 8 / 16 / 32                       |
+| ThePhish version  |           |
+| Record destinations in use (disk, Jira, TheHive)  |           |
+| Installed using Docker and Docker Compose | True / False |
+| Docker Version | If applicable |
+| Docker Compose version | If applicable |
 
-**What you already tried**
+**Question**
 
-The documentation you read (`README.md`, `docker/README.md`,
-`BLUEPHISH_ARCHITECTURE.md`) and what it did not answer.
-
-**Your setup, if it matters**
-
-Mailbox provider (Gmail / Microsoft 365 / other IMAP), where verdicts are
-recorded, and whether you run it with Docker Compose.
-
-Please do not paste credentials, API keys or real phishing content here.
+Describe the question/requirement as clearly as possible.

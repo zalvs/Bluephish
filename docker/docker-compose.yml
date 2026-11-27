@@ -1,23 +1,119 @@
-# Bluephish. `docker compose up -d` starts the application and nothing else.
+# BluePhish são quatro contêineres, e só um deles é porta de entrada:
 #
-# TheHive and MISP are optional integrations and live in
-# docker-compose.integrations.yml; see ../docs/integracoes.md to run them.
-
+#   vhost      nginx, TLS público (1.2/1.3) e os cabeçalhos de segurança; o único
+#              que publica porta (443, e 80 para o desafio da Let's Encrypt)
+#   frontend   nginx, repassa tudo à API por TLS interno,
+#              conferindo o certificado dela contra a CA interna da instalação
+#   bluephish  a API (Flask/eventlet); não publica porta nenhuma
+#   db         PostgreSQL; não publica porta, e só a API o alcança
+#
+# Quatro redes: `edge` (vhost ↔ frontend), `backend` (frontend ↔ API, interna:
+# sem saída para fora), `data` (API ↔ banco, interna) e `egress` (só a API,
+# para a caixa de e-mail, os analisadores e o LLM — sem porta publicada, ela
+# não é entrada). O vhost não alcança a API, e o frontend não alcança o banco:
+# nenhum dos dois está na rede do outro.
+#
+# A senha do banco é um secret em arquivo (./secrets/db.password, gerado pelo
+# ../setup.sh), lido pelo Postgres em POSTGRES_PASSWORD_FILE e pela API em
+# BLUEPHISH_DB_PASSWORD_FILE; nunca uma variável de ambiente. Uma instalação que
+# vinha do SQLite migra sozinha na primeira subida (app/database.py), com cópia
+# de segurança do arquivo antigo em ./vol/thephish_data.
+#
+# Os certificados moram em ./vol/certs (app/cert_store.py), e a tela
+# Configurações → Certificados os troca; o vhost e o frontend recarregam sozinhos.
+#
+# TheHive, MISP and their backing stores (Cassandra, MySQL, Redis) used to be
+# declared here, along with hive-ai-agent. They are optional integrations, not
+# part of the application, and are now installed apart from it: see
+# ../docs/integracoes/thehive.md. An installation that came from that stack
+# upgrades with the steps in the README.md of this folder, "Atualizando de uma
+# instalação com TheHive e MISP" — a plain `up -d` next to the old containers
+# fails on port 8080.
 services:
 
-  thephish:
+  vhost:
+    build:
+      context: .
+      dockerfile: vhost/Dockerfile
+    image: bluephish-vhost:latest
+    container_name: bluephish-vhost
     restart: unless-stopped
+    # Nenhum processo do contêiner ganha privilégio por setuid/setcap
+    security_opt:
+      - no-new-privileges:true
+    # A única porta de entrada. 127.0.0.1 por padrão, como era o 8080: abrir para
+    # a rede é uma decisão, não um efeito da atualização. Para a Let's Encrypt, a
+    # porta 80 tem de chegar da internet: BLUEPHISH_BIND=0.0.0.0 em docker/.env
+    ports:
+      - '${BLUEPHISH_BIND:-127.0.0.1}:${BLUEPHISH_HTTPS_PORT:-443}:443'
+      - '${BLUEPHISH_BIND:-127.0.0.1}:${BLUEPHISH_HTTP_PORT:-80}:80'
+    environment:
+      # A porta pública do HTTPS, para o redirecionamento da porta 80
+      - BLUEPHISH_HTTPS_PORT=${BLUEPHISH_HTTPS_PORT:-443}
+    volumes:
+      - ./vol/certs/vhost:/etc/nginx/certs:ro
+      - ./vol/certs/acme:/var/www/acme:ro
+    networks:
+      edge:
+        ipv4_address: 172.30.10.10
+    depends_on:
+      - frontend
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: bluephish-frontend:latest
+    container_name: bluephish-frontend
+    restart: unless-stopped
+    # Nenhum processo do contêiner ganha privilégio por setuid/setcap
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # Só a CA interna: é com ela que o frontend confere a API
+      - ./vol/certs/trust:/etc/nginx/trust:ro
+    networks:
+      edge:
+        ipv4_address: 172.30.10.20
+      backend:
+        ipv4_address: 172.30.11.20
+    depends_on:
+      - bluephish
+
+  bluephish:
     build:
       context: ../app
-    image: ${BLUEPHISH_IMAGE:-thephish-custom:latest}
-    container_name: ${BLUEPHISH_CONTAINER:-thephish}
-    ports:
-      - '127.0.0.1:8080:8080'
+    image: bluephish:latest
+    container_name: bluephish
+    restart: unless-stopped
+    # Nenhum processo do contêiner ganha privilégio por setuid/setcap
+    security_opt:
+      - no-new-privileges:true
+    # Sem `ports`: a API só é alcançada pelo frontend, na rede backend
+    networks:
+      backend:
+        ipv4_address: 172.30.11.30
+      data:
+        ipv4_address: 172.30.12.30
+      egress: {}
     environment:
-      # Signing key for the session cookie. Set it in docker/.env (which is
-      # gitignored) so that sessions survive a restart; when it is empty the
-      # application falls back to a random per-process key and everybody is
-      # signed out on restart.
+      # TLS interno: o certificado que a CA interna emitiu (gerado na primeira
+      # subida, em ./vol/certs/private), e a pasta que a tela de certificados usa
+      - THEPHISH_TLS_CERT=/root/thephish/certs/private/api.pem
+      - THEPHISH_TLS_KEY=/root/thephish/certs/private/api.key
+      - BLUEPHISH_CERTS_PATH=/root/thephish/certs
+      # Escuta só na rede backend: na egress, o host chegaria na API sem passar
+      # pelo vhost. É o ipv4_address dela em `networks.backend`, logo acima
+      - BLUEPHISH_LISTEN_ADDRESS=172.30.11.30
+      # O banco: o contêiner db, na rede data. A senha é o mesmo arquivo que o
+      # Postgres lê, dentro da pasta ./secrets montada abaixo
+      - BLUEPHISH_DB_HOST=db
+      - BLUEPHISH_DB_NAME=bluephish
+      - BLUEPHISH_DB_USER=bluephish
+      - BLUEPHISH_DB_PASSWORD_FILE=/run/secrets/bluephish/db.password
+      # Legado. A chave que assina o cookie de sessão mora cifrada no banco
+      # (app/secret_vault.py); esta variável só vale para instalação sem a chave
+      # mestra, e deve ficar vazia
       - THEPHISH_SECRET_KEY=${THEPHISH_SECRET_KEY:-}
       # Public origin, needed only behind a TLS-terminating proxy: the SSO
       # redirect URI has to match what is registered in Entra ID, and the
@@ -28,10 +124,94 @@ services:
       # Name the authenticator app shows next to the second-factor code; only
       # worth setting when one phone is paired with more than one installation
       - BLUEPHISH_MFA_ISSUER=${BLUEPHISH_MFA_ISSUER:-}
+      # Proxies em quem confiar para dizer o IP do cliente: os dois saltos do
+      # compose, por endereço (o vhost na edge e o frontend na backend). Sem eles,
+      # todo mundo teria o IP do frontend, e o primeiro banimento trancaria todos
+      # (app/abuse_guard.py). A rede inteira não: o gateway do Docker (.1) está
+      # nela e falaria pelo cliente. Quem trocar este valor mantém os dois /32
+      - BLUEPHISH_TRUSTED_PROXIES=${BLUEPHISH_TRUSTED_PROXIES:-172.30.10.10/32,172.30.11.20/32}
+      # Saída de emergência do reCAPTCHA do login: 1 desliga sem abrir a tela
+      # (uma chave errada trancaria todo mundo de fora). Ver app/captcha.py
+      - BLUEPHISH_CAPTCHA_DISABLED=${BLUEPHISH_CAPTCHA_DISABLED:-}
+      # Onde a chave mestra do cofre de segredos aparece dentro do contêiner
+      # (ver o volume ./secrets abaixo e app/secret_vault.py)
+      - BLUEPHISH_MASTER_KEY_FILE=/run/secrets/bluephish/master.key
     volumes:
+      # A chave mestra do cofre: os segredos da configuração ficam cifrados no
+      # banco com ela. Fora de ./vol de propósito — copiar o volume de dados não
+      # leva a chave. É a pasta que se monta, somente leitura, e não o arquivo:
+      # sem a chave o contêiner sobe assim mesmo, com os segredos em texto como
+      # antes (secret_vault, decisão 2), em vez de o compose recusar a subida numa
+      # atualização. O setup.sh a gera
+      - ./secrets:/run/secrets/bluephish:ro
+      # The paths keep the name of the project this one was forked from
+      # (thephish_conf_files, thephish_data, /root/thephish). Renaming them would
+      # move the data of every existing installation, so they stay.
       - ./thephish_conf_files/configuration.json:/root/thephish/configuration.json
       - ./thephish_conf_files/whitelist.json:/root/thephish/whitelist.json
-      # SQLite database (users, whitelist state, analysis history, reclassifications,
-      # verdict memory), audit trail, TLS key pair, volume alerts and the kept
-      # originals and layouts: kept outside the image so they survive a rebuild
+      # O SQLite antigo (lido uma vez pela migração para o Postgres) e a cópia de
+      # segurança dele, audit trail, TLS key pair, volume alerts, the analyses the
+      # disk destination records and the kept originals and layouts: kept outside
+      # the image so they survive a rebuild
       - ./vol/thephish_data:/root/thephish/data
+      # Os certificados: o do vhost, a CA interna e a chave dela (só a API monta a
+      # pasta inteira), o desafio da Let's Encrypt
+      - ./vol/certs:/root/thephish/certs
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    # Imagem oficial presa por digest (PostgreSQL 17, Alpine); o Dependabot do
+    # ecossistema docker não olha o compose, então a troca é à mão
+    image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+    container_name: bluephish-db
+    restart: unless-stopped
+    # Nenhum processo do contêiner ganha privilégio por setuid/setcap
+    security_opt:
+      - no-new-privileges:true
+    # Sem `ports`: só a API, na rede data, fala com o banco
+    networks:
+      data:
+        ipv4_address: 172.30.12.40
+    environment:
+      - POSTGRES_DB=bluephish
+      - POSTGRES_USER=bluephish
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      # scram-sha-256 para toda conexão pela rede, inclusive a da API
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=scram-sha-256
+    secrets:
+      - db_password
+    volumes:
+      - ./vol/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U bluephish -d bluephish"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+secrets:
+  db_password:
+    # O setup.sh gera. Sem ele, o compose recusa subir, de propósito: a API
+    # recusaria também (app/database.py, decisão 1)
+    file: ./secrets/db.password
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+  backend:
+    # Interna: sem rota para fora. A API sai pela egress
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.11.0/24
+  data:
+    # Interna: o banco não sai para lugar nenhum, e ninguém além da API entra
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.12.0/24
+  egress: {}

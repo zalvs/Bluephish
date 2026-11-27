@@ -2,11 +2,16 @@
 
 **Português (Brasil)** · [English](en/security.md)
 
-- A porta é publicada somente em **`127.0.0.1`**. Se você roda as
-  [integrações opcionais](integracoes.md), o mesmo vale para as portas delas, e o Cassandra e
-  o MySQL do MISP, em particular, rodam com credenciais de desenvolvimento e jamais devem ser
-  expostos. Para alcançar a interface de outra máquina, use um túnel SSH ou um proxy reverso
-  com TLS em vez de mudar as ligações de porta ([como fazer](duvidas-gerais.md#como-acesso-de-outra-máquina)).
+- Só o **vhost** publica portas (443 e 80), e somente em **`127.0.0.1`** por padrão. A API e o
+  PostgreSQL não publicam nenhuma: a API fica numa rede `internal` alcançada só pelo frontend,
+  o banco numa rede `internal` alcançada só pela API, e entre vhost, frontend e API o tráfego é
+  TLS com uma CA interna. Para alcançar a interface de outra máquina, use um túnel SSH, um
+  proxy reverso com TLS ou `BLUEPHISH_BIND` com um certificado de verdade
+  ([como fazer](duvidas-gerais.md#como-acesso-de-outra-máquina)). Se você mantém TheHive e MISP
+  ao lado ([integrações](integracoes/thehive.md)), o Cassandra e o MySQL do MISP rodam com
+  credenciais de desenvolvimento e jamais devem ser expostos.
+- A chave mestra do cofre (`docker/secrets/master.key`) cifra os segredos guardados no banco
+  (AES-256-GCM). Ela fica fora de `docker/vol/` e deve ir num backup separado.
 - Os segredos nunca são devolvidos ao navegador: a API de configurações responde com
   booleanos (`hasApiKey`) e um campo vazio ao salvar significa "manter o valor guardado".
 - **O contêiner faz requisições de saída para infraestrutura que o phisher escolheu.** Duas

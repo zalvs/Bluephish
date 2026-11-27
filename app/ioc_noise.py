@@ -22,10 +22,11 @@ import re
 
 # O identificador de pacote no link de uma loja de aplicativos: Google Play e o
 # esquema market:// que o Android abre direto. A App Store usa id numérico, que
-# não tem forma de domínio e não precisa de filtro
+# não tem forma de domínio e não precisa de filtro. A busca pelo `id=` tem teto:
+# sem ele, um link repetido sem `id=` faria cada ocorrência varrer o resto do texto
 APP_STORE_PACKAGE = re.compile(
 	r'(?:play\.google\.com/store/apps/details|market://details)\?'
-	r'(?:[^\s"\'<>]*?(?:&amp;|&))?id=([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)',
+	r'(?:[^\s"\'<>]{0,2048}?(?:&amp;|&))?id=([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)',
 	re.IGNORECASE)
 
 

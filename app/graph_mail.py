@@ -17,6 +17,52 @@ REQUEST_TIMEOUT = 30
 # thousands an inbox listing may need, so the pages are followed to the end
 PAGE_SIZE = 100
 
+_GRAPH_NETLOC = urllib.parse.urlsplit(GRAPH_BASE_URL).netloc
+
+
+# A pagination link that does not point back at Microsoft Graph. A
+# RequestException on purpose: callers already treat it as "Graph could not be
+# read", never as an empty mailbox
+class UnsafeNextLink(requests.RequestException):
+	pass
+
+
+# The @odata.nextLink comes from the response body and is requested with the
+# Bearer token in the headers. requests only drops Authorization on a redirect,
+# not on a fresh call, so a link towards another host would carry the token
+# there. Anything that is not https on the Graph host (exact netloc: no port,
+# no userinfo, no look-alike suffix) is refused instead of followed
+def _checked_next_link(link):
+	parts = urllib.parse.urlsplit(link)
+	if parts.scheme != 'https' or parts.netloc != _GRAPH_NETLOC:
+		raise UnsafeNextLink('@odata.nextLink fora do Microsoft Graph, não será seguido: ' + (parts.netloc or 'sem host'))
+	return link
+
+
+class GraphRedirectError(requests.RequestException):
+	"""Graph answered with a redirect, which is never followed.
+
+	Every call carries the tenant's app-only token. `raise_for_status()` does not
+	complain about a 3xx and the body of one is empty, so following or ignoring it
+	would hand an empty message to the analysis as if it were the report. It is
+	not an HTTPError on purpose: the listing retries on those without $orderby.
+	"""
+
+
+def _no_redirect(response):
+	if 300 <= response.status_code < 400:
+		raise GraphRedirectError('Microsoft Graph respondeu com um redirecionamento (HTTP {0}); '
+			'a leitura da caixa não o segue.'.format(response.status_code))
+	return response
+
+
+def _get(url, **kwargs):
+	return _no_redirect(requests.get(url, allow_redirects = False, timeout = REQUEST_TIMEOUT, **kwargs))
+
+
+def _patch(url, **kwargs):
+	return _no_redirect(requests.patch(url, allow_redirects = False, timeout = REQUEST_TIMEOUT, **kwargs))
+
 
 # Base URL of the mailbox that ThePhish reads the emails from
 def _mailbox_url(mailbox):
@@ -79,11 +125,13 @@ def _page_through(url, headers, params, wanted):
 	next_params = params
 	# Follow the @odata.nextLink pagination until enough messages have been collected
 	while next_url is not None and len(collected) < wanted:
-		response = requests.get(next_url, headers = headers, params = next_params, timeout = REQUEST_TIMEOUT)
+		response = _get(next_url, headers = headers, params = next_params)
 		response.raise_for_status()
 		data = response.json()
 		collected.extend(data.get('value', []))
 		next_url = data.get('@odata.nextLink')
+		if next_url is not None:
+			next_url = _checked_next_link(next_url)
 		# The nextLink URL already embeds the query parameters
 		next_params = None
 	return collected[:wanted]
@@ -92,7 +140,7 @@ def _page_through(url, headers, params, wanted):
 # Download the full RFC822 MIME content of a message
 def download_mime(headers, mailbox, message_id):
 	url = _mailbox_url(mailbox) + '/messages/{0}/$value'.format(urllib.parse.quote(message_id, safe = ''))
-	response = requests.get(url, headers = headers, timeout = REQUEST_TIMEOUT)
+	response = _get(url, headers = headers)
 	response.raise_for_status()
 	return response.content
 
@@ -117,7 +165,7 @@ def peek_message(tenant_id, client_id, client_secret, mailbox, message_id):
 def fetch_message(tenant_id, client_id, client_secret, mailbox, message_id):
 	headers = auth_headers(tenant_id, client_id, client_secret)
 	message_url = _mailbox_url(mailbox) + '/messages/{0}'.format(urllib.parse.quote(message_id, safe = ''))
-	response = requests.get(message_url, headers = headers, params = {'$select': 'isRead'}, timeout = REQUEST_TIMEOUT)
+	response = _get(message_url, headers = headers, params = {'$select': 'isRead'})
 	if response.status_code == 404:
 		return None
 	response.raise_for_status()
@@ -126,6 +174,6 @@ def fetch_message(tenant_id, client_id, client_secret, mailbox, message_id):
 	raw_message = download_mime(headers, mailbox, message_id)
 	patch_headers = dict(headers)
 	patch_headers['Content-Type'] = 'application/json'
-	response = requests.patch(message_url, headers = patch_headers, json = {'isRead': True}, timeout = REQUEST_TIMEOUT)
+	response = _patch(message_url, headers = patch_headers, json = {'isRead': True})
 	response.raise_for_status()
 	return raw_message

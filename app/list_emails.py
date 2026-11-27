@@ -1,24 +1,17 @@
-import base64
-import email
-import json
 import logging.config
+import json
+import config_file
+import email
+import email.utils
+import base64
 import traceback
-
 import bs4
 import magic
-
 import email_provider
 import email_render
 
-# O logger do módulo nasce vazio e é montado por _configure_logging()
+# Global variable used for logging
 log = None
-
-# Tipos de parte que podem carregar o e-mail denunciado. Os dois entram porque
-# cada cliente de e-mail anexa a mensagem encaminhada de um jeito
-EML_CARRIER_TYPES = ('application/octet-stream', 'message/rfc822')
-
-# O que o libmagic diz de um octet-stream que, de fato, é um .eml
-EML_MAGIC_TYPES = ('text/plain', 'message/rfc822')
 
 
 # Extract the human-readable text from an HTML email body
@@ -27,17 +20,8 @@ EML_MAGIC_TYPES = ('text/plain', 'message/rfc822')
 # by some mail clients and raises AttributeError on any other (e.g. the HTML
 # newsletters/marketing emails found in a regular, non-dedicated mailbox)
 def _extract_html_text(html):
-	return bs4.BeautifulSoup(html, 'html.parser').get_text(separator = ' ', strip = True)
-
-
-# O texto de uma parte text/*. Quem não é UTF-8 costuma ser ISO-8859-1, que
-# decodifica qualquer sequência de bytes
-def _decode_payload(part):
-	payload = part.get_payload(decode = True)
-	try:
-		return payload.decode()
-	except UnicodeDecodeError:
-		return payload.decode('ISO-8859-1')
+	soup = bs4.BeautifulSoup(html, 'html.parser')
+	return soup.get_text(separator=' ', strip=True)
 
 
 # Fetch all the unread emails and return their information
@@ -51,12 +35,18 @@ def retrieve_emails(messages, include_raw = True):
 		return []
 	log.info("{} unread messages to process".format(len(messages)))
 
+	# Variable that will contain the information related to the unread emails to show on the web interface
 	emails_info = []
+
+	# For each unread email parse the RFC822 message
+	# A single malformed/unusual message must not abort the whole batch
 	for num, message in messages:
-		# A single malformed/unusual message must not abort the whole batch
 		try:
-			_list_message(num, message, emails_info, include_raw)
-		except Exception:
+			# _process_one_message appends an entry only when the message carries
+			# an EML attachment; otherwise the message is listed as a raw email
+			if not _process_one_message(num, message, emails_info) and include_raw:
+				_process_raw_message(num, message, emails_info)
+		except Exception as e:
 			log.error("Error while trying to process the message with UID {0}: {1}".format(num, traceback.format_exc()))
 
 	# Everything that got this far was downloaded whole, so its body is on the
@@ -68,61 +58,11 @@ def retrieve_emails(messages, include_raw = True):
 	return emails_info
 
 
-# Uma mensagem vira uma entrada da lista: pelo .eml que carrega ou, sem ele (e se
-# o modo pedir), como e-mail "raw"
-def _list_message(num, message, emails_info, include_raw):
-	if _process_one_message(num, message, emails_info):
-		return
-	if include_raw:
-		_process_raw_message(num, message, emails_info)
-
-
 # Both helpers live in email_provider now: the providers build the envelope-only
 # listing entries themselves and need the same decoding, and the dependency only
 # runs one way (this module imports email_provider, never the reverse)
 _received_at = email_provider.received_at
 _decode_header_field = email_provider.decode_header_field
-
-
-# Um campo da entrada passa por aqui antes de ir para a tela: o texto é escapado
-# e desescapado para neutralizar caracteres de controle, e o \x92 (aspa curva do
-# Windows, que chega mal codificada) vira apóstrofo
-def _tidy_text(value):
-	if value is None:
-		value = ''
-	return value.encode("unicode-escape").decode().replace(r'\x92', '\'').encode().decode("unicode-escape")
-
-
-# A entrada da lista para uma mensagem. `attached_*` descrevem o e-mail
-# denunciado: o anexo, quando há, ou a própria mensagem no modo raw
-def _listing_entry(num, msg, from_field, subject_field, body, attached_subject, attached_from, email_type):
-	entry = {
-		'mailUID': num,
-		'from': from_field,
-		'subject': subject_field,
-		'date': msg['Date'],
-		'body': body,
-		'attachedMail': attached_subject,
-		'attachedFrom': attached_from,
-		'email_type': email_type
-	}
-	entry = {key: _tidy_text(value) for key, value in entry.items()}
-	# Added after the escaping above, which only knows how to handle strings
-	entry['receivedAt'] = _received_at(msg['Date'])
-	return entry
-
-
-# O primeiro text/plain e o primeiro text/html da mensagem, já decodificados
-def _first_text_parts(msg):
-	plain = None
-	html = None
-	for part in msg.walk():
-		mimetype = part.get_content_type()
-		if mimetype == 'text/plain' and plain is None:
-			plain = _decode_payload(part)
-		elif mimetype == 'text/html' and html is None:
-			html = _decode_payload(part)
-	return plain, html
 
 
 # Build the listing entry for a message in the "raw" analysis mode: the mailbox
@@ -134,69 +74,47 @@ def _process_raw_message(num, message, emails_info):
 	subject_field = _decode_header_field(msg['Subject'])
 	log.info("Message from: {0} with subject: {1}".format(from_field, subject_field))
 
-	# A prévia do corpo: o primeiro text/plain, ou o texto do primeiro text/html
-	# quando não há nenhum
-	body, html_body = _first_text_parts(msg)
+	# Extract a readable body preview: the first text/plain part is preferred,
+	# with the text extracted from the first text/html part as fallback
+	body = None
+	html_body = None
+	for part in msg.walk():
+		mimetype = part.get_content_type()
+		if mimetype == 'text/plain' and body is None:
+			try:
+				body = part.get_payload(decode=True).decode()
+			except UnicodeDecodeError:
+				body = part.get_payload(decode=True).decode('ISO-8859-1')
+		elif mimetype == 'text/html' and html_body is None:
+			try:
+				html_body = part.get_payload(decode=True).decode()
+			except UnicodeDecodeError:
+				html_body = part.get_payload(decode=True).decode('ISO-8859-1')
 	if body is None and html_body is not None:
 		body = _extract_html_text(html_body)
 
-	# O e-mail a analisar é a própria mensagem
-	emails_info.append(_listing_entry(num, msg, from_field, subject_field, body, subject_field, from_field, 'Raw Email'))
-
-
-# Há algum text/plain antes do .eml anexado? Um text/plain que vem depois do
-# message/rfc822 é o do próprio anexo e não conta como corpo do e-mail externo
-def _has_text_before_eml(msg):
-	for part in msg.walk():
-		mimetype = part.get_content_type()
-		if mimetype == 'text/plain':
-			return True
-		if mimetype == 'message/rfc822':
-			return False
-	return False
-
-
-# A mensagem denunciada que uma parte carrega, ou None quando a parte não é um
-# .eml. Um octet-stream traz os bytes (e só vale se o libmagic reconhecer um e-mail
-# depois da decodificação); um message/rfc822 traz a mensagem já aberta ou, em
-# alguns clientes, o texto dela em base64
-def _embedded_report(part, mimetype):
-	if mimetype == 'application/octet-stream':
-		payload = part.get_payload(decode = 1)
-		internal_msg = email.message_from_bytes(payload)
-		if magic.from_buffer(payload, mime = True) not in EML_MAGIC_TYPES:
-			return None
-		return internal_msg
-	embedded = part.get_payload(decode = 0)[0]
-	try:
-		return email.message_from_string(base64.b64decode(str(embedded)).decode())
-	except Exception:
-		return embedded
-
-
-# O corpo escrito dentro de um multipart/mixed, quando o e-mail externo não tem
-# text/plain solto. Só a primeira subparte conta. Um text/plain ali dentro ganha;
-# um text/html só entra se o multipart não tiver nenhum text/plain (ele pode vir
-# depois do html)
-def _body_inside_mixed(container, body):
-	nested = container.get_payload()[0]
-	nested_has_plain = any(sub.get_content_type() == 'text/plain' for sub in nested.walk())
-	for sub in nested.walk():
-		mimetype = sub.get_content_type()
-		if mimetype == 'text/plain':
-			if not body:
-				body = _decode_payload(sub)
-		elif mimetype == 'text/html' and not nested_has_plain:
-			html = _decode_payload(sub)
-			if not body:
-				body = _extract_html_text(html)
-	return body
+	email_info = {}
+	email_info['mailUID'] = num
+	email_info['from'] = from_field
+	email_info['subject'] = subject_field
+	email_info['date'] = msg['Date']
+	email_info['body'] = body
+	# The email to analyze is the message itself
+	email_info['attachedMail'] = subject_field
+	email_info['attachedFrom'] = from_field
+	email_info['email_type'] = 'Raw Email'
+	for key in email_info:
+		if email_info[key] is None:
+			email_info[key] = ''
+		email_info[key] = email_info[key].encode("unicode-escape").decode().replace(r'\x92', '\'').encode().decode("unicode-escape")
+	# Added after the escaping loop above, which only knows how to handle strings
+	email_info['receivedAt'] = _received_at(msg['Date'])
+	emails_info.append(email_info)
 
 
 # Parse a single RFC822 message and, if it has an EML attachment, append its info to emails_info
-# Returns True when an entry has been appended (an EML attachment was found),
-# so that the caller can fall back to the raw-email listing otherwise
 def _process_one_message(num, message, emails_info):
+	# Obtain the Subject and From fields of the email
 	msg = email.message_from_bytes(message)
 	# A long non-ASCII header travels as several encoded-words, and taking only
 	# the last one ([-1]) threw away everything before it: the display name of
@@ -207,50 +125,153 @@ def _process_one_message(num, message, emails_info):
 	subject_field = _decode_header_field(msg['Subject'])
 	log.info("Message from: {0} with subject: {1}".format(from_field, subject_field))
 
-	has_text = _has_text_before_eml(msg)
+	# This will contain the body of the email
 	body = None
-	attached_subject = ''
-	attached_from = ''
-	report_found = False
 
+	# True if an EML attachment is found for the current email
+	eml_attachment_found = False
+
+	# True if there is a text/plain part in the email multipart structure
+	is_there_text = False
+
+	# Walk the multipart structure of the email
+	# If there is a text/plain part, set the corresponding variable to True
+	# However, if that text/plain part is found after the message/rfc822, then it is the text/plain part of the EML attachment and must not be considered
+	for part in msg.walk():
+		if part.get_content_type() == "text/plain":
+			is_there_text = True
+		elif part.get_content_type() == "message/rfc822":
+			break
+
+	# This will contain the Subject field of the email
+	attached_mail_subject = ''
+	# And this its From field
+	attached_mail_from = ''
+
+	# Walk the multipart structure of the email again
 	for part in msg.walk():
 		mimetype = part.get_content_type()
-		if mimetype in EML_CARRIER_TYPES:
-			internal_msg = _embedded_report(part, mimetype)
-			if internal_msg is None:
-				continue
-			report_found = True
+		# If the content type of this part is the rfc822 message, then stop because the EML attachment is the last part
+		# If there is any other part after the rfc822 part, then it may be related to the internal email, so it must not be considered
+		# Both message/rfc822 and application/octet-stream types are considered due to differences in how the attachment is handled by different mail clients
+		if mimetype in ['application/octet-stream', 'message/rfc822']:
+			# Obtain the internal EML file in both cases
+			if mimetype == 'application/octet-stream':
+				eml_payload = part.get_payload(decode=1)
+				internal_msg = email.message_from_bytes(eml_payload)
+				# Use the magic module to obtain the mimetype after the decoding procedure
+				# If it was octet-stream before the decode, it must become rfc/822, else that means that it was not an EML attachment and must be ignored
+				if magic.from_buffer(eml_payload, mime=True) not in ['text/plain', 'message/rfc822']:
+					continue
+			elif mimetype == 'message/rfc822':
+				eml_payload = part.get_payload(decode=0)[0]
+				try:
+					internal_msg = email.message_from_string(base64.b64decode(str(eml_payload)).decode()) 
+				except:
+					internal_msg = eml_payload
+			
+			# Set to true to consider this as an email to include in the list to return to the client
+			eml_attachment_found = True
+
 			# The subject of the attached report - the one the analyst reads. Same
 			# helper: an attacker writes these headers, and both a charset that does
 			# not exist and a missing Subject used to raise from here. The raise was
 			# caught per message upstream, so the reported phishing simply vanished
 			# from the queue with one line in the log - an evasion primitive
-			attached_subject = _decode_header_field(internal_msg['Subject'])
+			attached_mail_subject = _decode_header_field(internal_msg['Subject'])
 			# O remetente do e-mail denunciado, lido do mesmo .eml que já está em
 			# mãos: é ele — e não o colega que encaminhou — que o alerta de volume
 			# agrupa. Nenhum download a mais
-			attached_from = _decode_header_field(internal_msg['From'])
-			log.info("Found attached mail with subject: {0} ({1})".format(attached_subject, mimetype))
-			# O .eml é a última parte que importa: o que vier depois pode ser do
-			# e-mail interno
+			attached_mail_from = _decode_header_field(internal_msg['From'])
+			log.info("Found attached mail with subject: {0} ({1})".format(attached_mail_subject, mimetype))
+
+			# If the EML attachment has been found, then break the for
 			break
-		if mimetype == 'multipart/mixed':
-			# Só olha dentro dele se nenhum text/plain veio antes do anexo: nesse
-			# caso o corpo sai do text/plain
-			if not has_text:
-				body = _body_inside_mixed(part, body)
-		elif mimetype == 'text/plain':
-			if has_text and not body:
-				body = _decode_payload(part)
-		elif mimetype == 'text/html':
-			html = _decode_payload(part)
+
+		# If it is not an EML attachment, then check if it is multipart/mixed, but only if there is no text/plain part before 
+		# the EML attachment, because in that case the body will be obtained from the text/plain part
+		elif mimetype == "multipart/mixed":
+			if is_there_text == False:
+				part_payload = part.get_payload()[0]
+				# Variabile per vedere se c'e' un text plain in questomultipart mixed (visto che fuori non ci stava)
+				# True if there is a text/plain part in this multipart/mixed, since there was no text/plain part before
+				is_there_text_in_multipart = False
+				# Walk the subparts of this multipart 
+				# If there is a text/plain part here, set the corresponding variable to True
+				for subpart in part_payload.walk():
+					if subpart.get_content_type() == "text/plain":
+						is_there_text_in_multipart = True
+				# Walk the subparts of this multipart again 
+				# If the first part is a text/plain part then use it to populate the body
+				# Else, if the first part is text/html and there is a text/plain part, then it will be skipped
+				# because the text/plain part might be located after the current text/html part
+				# Otherwise, if the first part is text/html and there is no text/plain part, then use it to populate the body
+				for subpart in part_payload.walk():
+					if subpart.get_content_type() == "text/plain":
+						if not body:
+							try:
+								body = subpart.get_payload(decode=True).decode()
+							except UnicodeDecodeError:
+								body = subpart.get_payload(decode=True).decode('ISO-8859-1')
+					# Use the bs4 module to obtain the text from the text/html part
+					elif subpart.get_content_type() == "text/html":
+						if is_there_text_in_multipart == False:
+							try:
+								html = subpart.get_payload(decode=True).decode()
+							except UnicodeDecodeError:
+								html = subpart.get_payload(decode=True).decode('ISO-8859-1')
+							if not body:
+								soup = bs4.BeautifulSoup(html, 'html.parser')
+								body = _extract_html_text(html)
+		# Else if there was a text/plain part outside of the multipart/mixed part, the branch related to the multipart/mixed part is not executed
+		# The body will in fact be populated from this text/plain part
+		elif mimetype == "text/plain":
+			if is_there_text == True:
+				if not body:
+					try:
+						body = part.get_payload(decode=True).decode()
+					except UnicodeDecodeError:
+						body = part.get_payload(decode=True).decode('ISO-8859-1')
+		# If neither a text/plain part nor a multipart/mixed part has been encountered before this text/html part
+		# then use it to populate the body using the bs4 module
+		elif mimetype == "text/html":
+			try:
+				html = part.get_payload(decode=True).decode()
+			except UnicodeDecodeError:
+				html = part.get_payload(decode=True).decode('ISO-8859-1')
 			if not body:
+				soup = bs4.BeautifulSoup(html, 'html.parser')
 				body = _extract_html_text(html)
 
-	if report_found:
-		emails_info.append(_listing_entry(num, msg, from_field, subject_field, body, attached_subject, attached_from, 'Attached .eml'))
-	return report_found
+	# If there is an eml attachment in this email, then add to the list of emails the information on this email, which are:
+	# - UID of the email in the mailbox
+	# - From and Subject field of the external email
+	# - Arrival date of the external email
+	# - Body of the external email
+	# - Subject field of the internal email (EML attachment)
+	# Returns True when an entry has been appended (an EML attachment was found),
+	# so that the caller can fall back to the raw-email listing otherwise
+	if (eml_attachment_found == True):
+		email_info = {}
+		email_info['mailUID'] = num
+		email_info['from'] = from_field
+		email_info['subject'] = subject_field
+		email_info['date'] = msg['Date']
+		email_info['body'] = body
+		email_info['attachedMail'] = attached_mail_subject
+		email_info['attachedFrom'] = attached_mail_from
+		email_info['email_type'] = 'Attached .eml'
 
+		# Problematic characters substitution
+		for key in email_info:
+			# single quote
+			if email_info[key] is None:
+				email_info[key] = ''
+			email_info[key] = email_info[key].encode("unicode-escape").decode().replace(r'\x92', '\'').encode().decode("unicode-escape")
+		# Added after the escaping loop above, which only knows how to handle strings
+		email_info['receivedAt'] = _received_at(msg['Date'])
+		emails_info.append(email_info)
+	return eml_attachment_found
 
 # Main function called from outside
 # all_pending=True (the manual "List emails" button and the mailbox poll) lists
@@ -307,24 +328,19 @@ def assemble_queue(head_info, stubs, tail_info, order_ids):
 	"""
 	if not order_ids:
 		return head_info + stubs + tail_info
-	by_uid = {entry['mailUID']: entry for entry in head_info + stubs + tail_info}
+	by_uid = dict((entry['mailUID'], entry) for entry in head_info + stubs + tail_info)
 	return [by_uid[uid] for uid in order_ids if uid in by_uid]
-
-
-# Liga o log e lê a configuração, que é o que toda entrada deste módulo precisa
-# antes de falar com a caixa. Devolve (provedor, modo de análise), ou None quando
-# um dos dois passos falhou (e já foi registrado)
-def _open_mailbox():
-	global log
-	log = _configure_logging()
-	if log is None:
-		return None
-	return _read_configuration()
 
 
 def main(all_pending = False, limit = None, order = None, have = None):
 
-	conf = _open_mailbox()
+	global log
+
+	log = _configure_logging()
+	if log is None:
+		return
+
+	conf = _read_configuration()
 	if conf is None:
 		return
 	provider, analysis_mode = conf
@@ -342,10 +358,11 @@ def main(all_pending = False, limit = None, order = None, have = None):
 			order, limit or email_provider.IMAP_MAX_MESSAGES))
 		result = provider.list_unread(all_unread = all_pending, limit = limit, order = order,
 			include_stubs = all_pending, have = have)
-	except Exception:
+	except Exception as e:
 		log.error("Error while trying to connect to the email server: {}".format(traceback.format_exc()))
 		return
 
+	# Call the retrieve_emails function
 	# The raw entries are included in the manual listing and, for the automatic
 	# analysis, only when the raw analysis mode is configured
 	# The provider downloads both ends of the mailbox and describes the middle,
@@ -358,7 +375,7 @@ def main(all_pending = False, limit = None, order = None, have = None):
 	try:
 		head_info = retrieve_emails(result['messages'][:head_count], include_raw = include_raw)
 		tail_info = retrieve_emails(result['messages'][head_count:], include_raw = include_raw)
-	except Exception:
+	except Exception as e:
 		log.error("Error while trying to retrieve the emails: {}".format(traceback.format_exc()))
 		return
 	stubs = result.get('stubs') or []
@@ -382,7 +399,13 @@ def main(all_pending = False, limit = None, order = None, have = None):
 # there (already analyzed by somebody else, or moved out of the folder)
 def load_one(mail_uid):
 
-	conf = _open_mailbox()
+	global log
+
+	log = _configure_logging()
+	if log is None:
+		return
+
+	conf = _read_configuration()
 	if conf is None:
 		return
 	provider = conf[0]
@@ -390,7 +413,7 @@ def load_one(mail_uid):
 	try:
 		log.info('Loading the body of the email with UID {0} on demand'.format(mail_uid))
 		message = provider.peek(mail_uid)
-	except Exception:
+	except Exception as e:
 		log.error("Error while trying to load the email with UID {0}: {1}".format(mail_uid, traceback.format_exc()))
 		return
 	if not message:
@@ -417,7 +440,13 @@ def load_one(mail_uid):
 # Returns None when the mailbox could not be read or the email has left it
 def render_one(mail_uid):
 
-	conf = _open_mailbox()
+	global log
+
+	log = _configure_logging()
+	if log is None:
+		return
+
+	conf = _read_configuration()
 	if conf is None:
 		return
 	provider = conf[0]
@@ -425,7 +454,7 @@ def render_one(mail_uid):
 	try:
 		log.info('Rendering the email with UID {0} as delivered'.format(mail_uid))
 		message = provider.peek(mail_uid)
-	except Exception:
+	except Exception as e:
 		log.error("Error while trying to load the email with UID {0}: {1}".format(mail_uid, traceback.format_exc()))
 		return
 	if not message:
@@ -447,7 +476,13 @@ def render_one(mail_uid):
 # for Graph that is an HTTP request on a cached token, not a login.
 def peek_many(mail_uids):
 
-	conf = _open_mailbox()
+	global log
+
+	log = _configure_logging()
+	if log is None:
+		return
+
+	conf = _read_configuration()
 	if conf is None:
 		return
 	provider = conf[0]
@@ -456,24 +491,19 @@ def peek_many(mail_uids):
 		log.info('Loading {0} email(s) in the background: {1}'.format(len(mail_uids), ', '.join(mail_uids)))
 		if hasattr(provider, 'peek_many'):
 			return provider.peek_many(mail_uids)
-		return _peek_one_by_one(provider, mail_uids)
-	except Exception:
+		found = {}
+		for mail_uid in mail_uids:
+			try:
+				message = provider.peek(mail_uid)
+			except Exception:
+				log.warning('Could not load the email with UID {0}: {1}'.format(mail_uid, traceback.format_exc()))
+				continue
+			if message:
+				found[mail_uid] = message
+		return found
+	except Exception as e:
 		log.error("Error while trying to load emails in the background: {}".format(traceback.format_exc()))
 		return
-
-
-# Lê as mensagens uma a uma, pulando as que falham: uma não derruba o lote
-def _peek_one_by_one(provider, mail_uids):
-	found = {}
-	for mail_uid in mail_uids:
-		try:
-			message = provider.peek(mail_uid)
-		except Exception:
-			log.warning('Could not load the email with UID {0}: {1}'.format(mail_uid, traceback.format_exc()))
-			continue
-		if message:
-			found[mail_uid] = message
-	return found
 
 
 # The listing entry and the "as delivered" layout of one message the loader has
@@ -504,8 +534,9 @@ def entry_and_layout(mail_uid, message):
 def _configure_logging():
 	try:
 		with open('logging_conf.json') as log_conf:
-			logging.config.dictConfig(json.load(log_conf))
-	except Exception:
+			log_conf_dict = json.load(log_conf)
+			logging.config.dictConfig(log_conf_dict)
+	except Exception as e:
 		print("[ERROR]_[list_emails]: Error while trying to open the file 'logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
 		return None
 	return logging.getLogger(__name__)
@@ -517,11 +548,10 @@ def _configure_logging():
 # email_provider
 def _read_configuration():
 	try:
-		with open('configuration.json') as conf_file:
-			conf_dict = json.load(conf_file)
+		conf_dict = config_file.read('configuration.json')
 		provider = email_provider.create_provider(conf_dict)
 		analysis_mode = (conf_dict.get('email_sync') or {}).get('analysisMode', 'attachment')
-	except Exception:
+	except Exception as e:
 		log.error("Error while trying to open the file 'configuration.json': {}".format(traceback.format_exc()))
 		return None
 	return provider, analysis_mode

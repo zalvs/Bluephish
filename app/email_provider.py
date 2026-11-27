@@ -14,8 +14,8 @@ log = logging.getLogger(__name__)
 # Overall time budget (in seconds) for a whole IMAP operation: connect, login,
 # select, search, and - for list_unread() - fetching up to IMAP_MAX_MESSAGES
 # full messages in a loop. imaplib.IMAP4_SSL's constructor performs the TCP
-# connect and TLS handshake with no timeout of its own on Python 3.8 (the
-# runtime used by this image), so a socket-level timeout set after the fact
+# connect and TLS handshake with no timeout of its own (it was so on Python
+# 3.8, the image's runtime until 11/2026, and still is without timeout=), so a socket-level timeout set after the fact
 # would not cover a stall during connection. eventlet.Timeout instead bounds
 # the whole call regardless of which blocking operation it is stuck in (the
 # app already runs eventlet-monkeypatched, so this raises inside the greenlet
@@ -82,22 +82,18 @@ def normalize_order(order):
 def decode_header_field(raw_value):
 	if raw_value is None:
 		return ''
-	return ''.join(_decode_fragment(data, charset) for data, charset in email.header.decode_header(raw_value))
-
-
-# Um pedaço de cabeçalho vira texto. Com charset declarado ele é usado; se o
-# charset não existe ou os bytes não batem com ele, nada se perde: os bytes saem
-# como UTF-8 com os caracteres inválidos trocados. Sem charset, o pedaço já é texto
-# ou são bytes puros, tratados do mesmo jeito
-def _decode_fragment(data, charset):
-	if charset is not None:
-		try:
-			return data.decode(charset)
-		except (LookupError, UnicodeDecodeError):
-			return data.decode(errors = 'replace')
-	if isinstance(data, str):
-		return data
-	return data.decode(errors = 'replace')
+	decoded_elements = []
+	for decode_elem in email.header.decode_header(raw_value):
+		if decode_elem[1] is not None:
+			try:
+				decoded_elements.append(decode_elem[0].decode(decode_elem[1]))
+			except (LookupError, UnicodeDecodeError):
+				decoded_elements.append(decode_elem[0].decode(errors = 'replace'))
+		elif isinstance(decode_elem[0], str):
+			decoded_elements.append(decode_elem[0])
+		else:
+			decoded_elements.append(decode_elem[0].decode(errors = 'replace'))
+	return ''.join(decoded_elements)
 
 
 def received_at(raw_date):

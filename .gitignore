@@ -3,8 +3,19 @@ __pycache__/
 
 # Local docker secrets and overrides
 docker/.env
+# A chave mestra do cofre de segredos (setup.sh a gera). Nunca no repositório,
+# e nunca no mesmo backup que docker/vol/
+docker/secrets/
 docker/docker-compose.override.yml
 docker/vol/
+
+# TheHive e hive-ai-agent saíram do compose, e os arquivos de configuração deles
+# saíram do repositório. Quem continua rodando o TheHive ao lado (num
+# docker-compose.override.yml) mantém a cópia dele aqui, com a chave de sessão
+# que o setup.sh gerou — é estado daquela instalação e não pode voltar a ser
+# versionado por um `git add` distraído.
+docker/thehive/
+docker/hive_ai_agent_conf/
 
 # graphify (github.com/Graphify-Labs/graphify): regenerated locally with
 # `graphify extract . --code-only && graphify cluster-only . --no-label`
@@ -13,9 +24,8 @@ graphify-out/
 # Transcrições das sessões do Claude Code, arquivadas junto do projeto.
 # Guardam saída de ferramenta: arquivos de configuração, cabeçalhos de e-mail
 # analisados, respostas de API. São registro de trabalho, não código-fonte, e
-# não pertencem ao histórico do repositório — nem aqui, que é privado. Privado
-# hoje não é privado sempre: repositório vira público, ganha colaborador, é
-# forkado, e o log de sessão vai junto sem ninguém reler o que havia nele.
+# não pertencem ao histórico do repositório: o log de sessão iria junto em todo
+# clone e fork sem ninguém reler o que havia nele.
 .claude/history/
 .claude/worktrees/
 

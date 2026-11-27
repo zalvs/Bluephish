@@ -119,7 +119,7 @@ def _labels(domain):
 
 
 def _is_ascii(text):
-	# str.isascii() só existe a partir do 3.7; a imagem roda 3.8, mas a forma
+	# str.isascii() existe desde o 3.7 (a imagem roda 3.14), mas a forma
 	# explícita também documenta o que está sendo checado
 	try:
 		(text or '').encode('ascii')

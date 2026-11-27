@@ -13,7 +13,7 @@ repository is the reference for what it does today.
 | | ThePhish | Bluephish |
 |---|---|---|
 | **Who starts an analysis** | The analyst picks an email in the web interface and starts it | Manual (the analyst picks) **or** fully automatic, through a scheduler |
-| **What it needs to run** | TheHive, Cortex and MISP | Only itself: one container. TheHive and MISP are optional extras |
+| **What it needs to run** | TheHive, Cortex and MISP | Only its own stack (vhost, frontend, API and PostgreSQL), started by `setup.sh`. TheHive and MISP are optional extras |
 | **Where the analyzers run** | In Cortex, a separate service | Inside Bluephish: built-in analyzers, vendors you add yourself, and local YARA rules |
 | **Where the result is recorded** | A case in TheHive, exported to MISP when malicious | Any combination of disk, TheHive, Jira and generic connectors for any REST API, or none of them |
 | **How the verdict is formed** | From the verdicts of the analyzers | The analyzers, an LLM's social-engineering assessment, SPF/DKIM/DMARC sender authentication and a weighted score, each in a fixed order that can only raise a verdict |

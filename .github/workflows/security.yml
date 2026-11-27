@@ -1,0 +1,128 @@
+# Esteira de segurança: segredos, SAST, SCA, IaC e SBOM do código.
+#
+# O que bloqueia e o que só relata está em docs/devsecops.md. Regra geral: bloqueia
+# o que é novo; o que já existia entra numa linha de base com prazo, para o gate
+# poder nascer verde sem esconder a dívida.
+#
+# Ferramentas fixadas: ações por SHA de commit, imagens por digest, pacotes do pip
+# por versão. Nenhuma depende de token: nada aqui escreve no repositório.
+name: Security
+
+on:
+  push:
+    branches: ["main", "agent/**"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    # Toda segunda, 06:00 UTC: vulnerabilidade nova aparece sem commit nenhum
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  secrets:
+    name: Segredos (gitleaks, histórico inteiro)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks
+        # v8.24.3 por digest. Achados triados ficam em .gitleaksignore, com o motivo
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo --entrypoint sh \
+            zricethezav/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055 \
+            -c 'git config --global --add safe.directory /repo && gitleaks git --redact --no-banner --exit-code 1 /repo'
+
+  sast:
+    name: SAST (Bandit e Semgrep)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: "Bandit (gate: severidade e confiança altas)"
+        run: |
+          pip install bandit==1.8.6
+          bandit -q -r app -x 'app/test_*.py' -lll -iii
+      - name: Bandit (relatório completo)
+        if: always()
+        run: bandit -q -r app -x 'app/test_*.py' -f txt -o bandit.txt --exit-zero
+      - name: "Semgrep (gate: regras do projeto em .semgrep/)"
+        # Offline, sem conta e sem métrica: as regras moram no repositório
+        run: |
+          docker run --rm --network none -e SEMGREP_ENABLE_VERSION_CHECK=0 -v "$PWD:/src" -w /src \
+            semgrep/semgrep@sha256:6bd07d7b166b097e1384f41b94a62d8c8a26a4fff8713992c296e053310da01f \
+            semgrep scan --metrics=off --config .semgrep/ --error --exclude 'test_*.py' app
+      - name: "Semgrep (relatório: pacotes python e flask do registro)"
+        # Ainda sem linha de base medida no CI; vira gate depois da triagem
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            semgrep/semgrep@sha256:6bd07d7b166b097e1384f41b94a62d8c8a26a4fff8713992c296e053310da01f \
+            semgrep scan --metrics=off --config p/python --config p/flask --exclude 'test_*.py' \
+            --text --output semgrep-registry.txt app
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sast
+          path: |
+            bandit.txt
+            semgrep-registry.txt
+          retention-days: 14
+
+  sca-iac:
+    name: SCA, IaC e segredos no código (Trivy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: "Trivy fs (gate: ALTA e CRÍTICA fora da linha de base)"
+        # Dependências de app/requirements.txt, Dockerfiles e segredos no texto.
+        # A linha de base com prazo está em .trivyignore.yaml
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            aquasec/trivy@sha256:fc10faf341a1d8fa8256c5ff1a6662ef74dd38b65034c8ce42346cf958a02d5d \
+            fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL \
+            --ignorefile .trivyignore.yaml --exit-code 1 /src
+      - name: Trivy fs (relatório completo, toda severidade)
+        if: always()
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            aquasec/trivy@sha256:fc10faf341a1d8fa8256c5ff1a6662ef74dd38b65034c8ce42346cf958a02d5d \
+            fs --scanners vuln,misconfig,secret --exit-code 0 --format table --output /src/trivy-fs.txt /src
+      - name: hadolint (gate)
+        run: |
+          for file in $(git ls-files '*Dockerfile'); do
+            echo "== $file"
+            docker run --rm -i -v "$PWD/.hadolint.yaml:/.config/hadolint.yaml:ro" \
+              hadolint/hadolint@sha256:30a8fd2e785ab6176eed53f74769e04f125afb2f74a6c52aef7d463583b6d45e \
+              hadolint --config /.config/hadolint.yaml - < "$file"
+          done
+      - name: SBOM do código (Syft, CycloneDX)
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -v "$PWD:/out" \
+            anchore/syft@sha256:a29957b223c67ee0503018d9228e74495903b0c6290f9bc6d74d1501680fef85 \
+            dir:/src -o cyclonedx-json=/out/sbom-source.cdx.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sca-iac
+          path: |
+            trivy-fs.txt
+            sbom-source.cdx.json
+          retention-days: 30

@@ -1,0 +1,6 @@
+# DL3008 (fixar versão no apt-get install) fica de fora: no Debian a versão some do
+# espelho a cada atualização de segurança e o build quebraria. A base é fixada pela tag
+# da imagem, e o Trivy acompanha os pacotes do sistema.
+ignored:
+  - DL3008
+failure-threshold: warning

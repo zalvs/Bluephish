@@ -30,14 +30,48 @@ function csrf_needed(method){
 	return ["POST", "PUT", "PATCH", "DELETE"].indexOf((method || "GET").toUpperCase()) !== -1;
 }
 
+// Every address this page asks for starts at the root. The code is written with
+// relative ones ("api/cases", "login"), which resolve against the folder of the
+// current page: harmless while the panel lived at "/", and a request for
+// /config/api/cases the moment a screen has a path of its own. Normalised in one
+// place — the fetch wrapper below — rather than at each of the ~110 call sites,
+// so a call written tomorrow in the old style still works.
+function absolute_url(url){
+	return /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(url) ? url : "/" + url;
+}
+
+// Back to the sign-in screen. By default it carries the screen the analyst was
+// on, so signing in again lands there instead of on the first screen; the server
+// accepts that only if it is a page of this panel. `forget_place` is for a
+// deliberate sign-out, where returning to the same screen would be a surprise.
+function go_to_login(reason, forget_place, from_peer){
+	// The session cookie is shared by every tab, so when one tab ends it (sign-out,
+	// idle, revoked) the others are signed out too. Telling them now beats waiting
+	// for each one's next request to find out; they would only learn it by a 401.
+	if (!from_peer){ broadcast_sign_out(reason, forget_place); }
+	let params = [];
+	if (reason){ params.push("reason=" + encodeURIComponent(reason)); }
+	let here = window.location.pathname;
+	if (!forget_place && here !== "/"){ params.push("next=" + encodeURIComponent(here)); }
+	window.location.href = "/login" + (params.length ? "?" + params.join("&") : "");
+}
+
 // A 401 means the session expired (idle/absolute timeout) or was revoked after a
-// password change: send the analyst back to the login page
-function handle_unauthorized(status){
-	if (status === 401){
-		window.location.href = "login";
-		return true;
-	}
-	return false;
+// password change: send the analyst back to the login page. The reason is the
+// server's (auth.LOGIN_REASONS), read from the body — never guessed from a clock
+// on this side, which would say "inactivity" to someone whose session a password
+// change revoked. It also travels to the other tabs with the sign-out broadcast
+const LOGIN_REASONS = {idle: 1, expired: 1, password: 1, tab: 1};
+let leaving_for_login = false;
+
+function handle_unauthorized(response){
+	if (response.status !== 401 || leaving_for_login){ return response.status === 401; }
+	leaving_for_login = true;
+	response.clone().json().catch(function(){ return null; }).then(function(body){
+		let reason = body && LOGIN_REASONS[body.reason] ? body.reason : undefined;
+		go_to_login(reason);
+	});
+	return true;
 }
 
 (function(){
@@ -47,11 +81,14 @@ function handle_unauthorized(status){
 		let method = options.method || "GET";
 		let headers = new Headers(options.headers || {});
 		headers.set("X-Requested-With", "XMLHttpRequest");
+		// The server renews the idle clock only for a request that says a person is
+		// there; the timers below send the same request and must not (see "Activity")
+		if (recently_active()){ headers.set("X-User-Activity", "1"); }
 		if (csrf_needed(method)){ headers.set("X-CSRFToken", csrf_token()); }
 		options.headers = headers;
 		options.credentials = options.credentials || "same-origin";
-		return original_fetch(resource, options).then(function(response){
-			handle_unauthorized(response.status);
+		return original_fetch(typeof resource === "string" ? absolute_url(resource) : resource, options).then(function(response){
+			handle_unauthorized(response);
 			return response;
 		});
 	};
@@ -93,6 +130,70 @@ function post_json(url, payload, method){
 			.catch(function(){ return {ok: r.ok, status: r.status, data: null}; });
 	}).catch(function(){ return {ok: false, status: 0, data: null}; });
 }
+
+/* ========================================================================== */
+/* Atividade e saída entre abas                                               */
+/* ========================================================================== */
+
+/* O painel pode estar aberto em várias abas, todas com o mesmo cookie de
+ * sessão. Duas regras decorrem disso:
+ *
+ *  - Inativa é a sessão, não a aba. Um gesto em qualquer aba conta para todas;
+ *    por isso o instante do último gesto vai para o localStorage, e cada aba
+ *    consulta o maior entre o seu e o das irmãs. Sem gesto em nenhuma, as
+ *    requisições automáticas (sinal de vida, leituras periódicas) seguem sem o
+ *    cabeçalho de atividade e o servidor deixa a sessão envelhecer — vencida,
+ *    ela cai em todas as abas, porque o cookie é um só.
+ *  - Sair é sair de todas. O servidor já revoga a sessão para as outras abas; o
+ *    sinal abaixo só evita que cada uma descubra isso na própria hora, até
+ *    30 s depois, com o conteúdo de uma sessão encerrada ainda na tela. */
+
+const ACTIVITY_KEY = "bluephish.activity";
+const SIGN_OUT_KEY = "bluephish.signout";
+// Um pedido feito até este tempo depois de um gesto conta como feito por uma
+// pessoa. Maior que o intervalo do sinal de vida (30 s), para que um gesto
+// seja visto pelo sinal seguinte
+const ACTIVITY_WINDOW_MS = 60000;
+// Gestos em rajada (o mouse andando) gravam uma vez por intervalo, não a cada pixel
+const ACTIVITY_THROTTLE_MS = 5000;
+
+let last_activity = Date.now();
+
+function note_activity(){
+	let now = Date.now();
+	if (now - last_activity < ACTIVITY_THROTTLE_MS){ return; }
+	last_activity = now;
+	try { window.localStorage.setItem(ACTIVITY_KEY, String(now)); } catch (e) { /* private mode */ }
+}
+
+function recently_active(){
+	let latest = last_activity;
+	try {
+		latest = Math.max(latest, Number(window.localStorage.getItem(ACTIVITY_KEY)) || 0);
+	} catch (e) { /* private mode */ }
+	return Date.now() - latest < ACTIVITY_WINDOW_MS;
+}
+
+["pointerdown", "pointermove", "keydown", "wheel", "touchstart"].forEach(function(name){
+	window.addEventListener(name, note_activity, {capture: true, passive: true});
+});
+
+function broadcast_sign_out(reason, forget_place){
+	try {
+		window.localStorage.setItem(SIGN_OUT_KEY, JSON.stringify({
+			reason: reason || null, forget: !!forget_place, at: Date.now()
+		}));
+		window.localStorage.removeItem(SIGN_OUT_KEY);
+	} catch (e) { /* private mode: the next request of each tab finds out */ }
+}
+
+window.addEventListener("storage", function(event){
+	if (event.key !== SIGN_OUT_KEY || !event.newValue){ return; }
+	let signal = null;
+	try { signal = JSON.parse(event.newValue); } catch (e) { return; }
+	if (!signal){ return; }
+	go_to_login(signal.reason, signal.forget, true);
+});
 
 /* ========================================================================== */
 /* Sessão presa à aba                                                         */
@@ -208,9 +309,9 @@ function claim_tab_token(){
 // Nenhuma aba é dona desta sessão: a que abriu foi fechada e o cookie ficou
 function end_orphan_session(){
 	fetch("api/auth/logout", {method: "POST"}).then(function(){
-		window.location.href = "login?reason=tab";
+		go_to_login("tab");
 	}).catch(function(){
-		window.location.href = "login?reason=tab";
+		go_to_login("tab");
 	});
 }
 
@@ -218,7 +319,80 @@ function tab_heartbeat(){
 	if (!tab_token){ return; }
 	// Um 401 aqui já é tratado pelo envelope do fetch, que devolve para o login
 	fetch("api/auth/heartbeat", {method: "POST", headers: {"X-Session-Tab": tab_token}})
-		.catch(function(){ /* rede fora: o próximo sinal resolve */ });
+		.then(function(response){ return response.ok ? response.json() : null; })
+		.then(update_idle_clock)
+		.catch(function(){ idle_asking = false; /* rede fora: o próximo sinal resolve */ });
+}
+
+/* Auto logoff. Quem decide é o servidor (auth._session_violation); este bloco só
+ * avisa antes. O tempo que falta vem na resposta de cada sinal de vida, e não de
+ * um relógio desta aba: a inatividade é uma só para todas as abas, e um relógio
+ * próprio avisaria quem está trabalhando em outra. Entre um sinal e outro a aba
+ * conta sozinha a partir do último número que recebeu. Chegando a zero, pergunta
+ * ao servidor de novo antes de sair: outra aba pode ter renovado a sessão. A
+ * resposta 401 que encerra tudo traz o motivo, e é ele que a tela de login mostra.
+ * As perguntas extras (zero, gesto com o aviso na tela) saem no máximo uma a cada
+ * IDLE_ASK_INTERVAL_MS: um servidor que responde erro, ou "0 s" no limite do
+ * segundo, não vira uma rajada de sinais de vida por aba. */
+const IDLE_ASK_INTERVAL_MS = 5000;
+let idle_deadline = 0;
+let idle_warn_ms = 60000;
+let idle_warning_since = 0;
+let idle_asking = false;
+let idle_last_ask = 0;
+// 'idle' se adia com um gesto; 'absolute' (a duração máxima) não se adia com nada
+let idle_ends_by = "idle";
+
+function update_idle_clock(data){
+	idle_asking = false;
+	if (!data || typeof data.secondsLeft !== "number"){ return; }
+	idle_deadline = Date.now() + data.secondsLeft * 1000;
+	idle_warn_ms = (data.warnSeconds || 60) * 1000;
+	idle_ends_by = data.endsBy === "absolute" ? "absolute" : "idle";
+	for (let node of $$("#idleWarning [data-ends-by]")){
+		show(node, node.dataset.endsBy === idle_ends_by);
+	}
+	show($("idleStayBtn"), idle_ends_by === "idle");
+	tick_idle();
+}
+
+// `now` pula o intervalo: é a pessoa clicando em continuar, não o relógio
+function ask_idle_clock(now){
+	if (idle_asking){ return; }
+	if (!now && Date.now() - idle_last_ask < IDLE_ASK_INTERVAL_MS){ return; }
+	idle_asking = true;
+	idle_last_ask = Date.now();
+	tab_heartbeat();
+}
+
+function tick_idle(){
+	if (!idle_deadline){ return; }
+	let left = idle_deadline - Date.now();
+	let warning = $("idleWarning");
+	let warn = left <= idle_warn_ms;
+	if (warn && !idle_warning_since){
+		idle_warning_since = Date.now();
+		show(warning, true);
+		// Só quando um gesto adia o fim: quem está digitando no fim da duração
+		// máxima não perde o foco para um botão que não adiaria nada
+		if (idle_ends_by === "idle"){ $("idleStayBtn").focus(); }
+	} else if (!warn && idle_warning_since){
+		idle_warning_since = 0;
+		show(warning, false);
+	}
+	if (!warn){ return; }
+	let seconds = Math.max(0, Math.ceil(left / 1000));
+	$("idleWarningCount").textContent = Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+	// Mexer no painel com o aviso na tela é o mesmo que clicar em continuar: o
+	// próximo sinal de vida sairia tarde demais se faltam menos de 30 s
+	if (idle_ends_by === "idle" && last_activity > idle_warning_since){ ask_idle_clock(); }
+	if (left <= 0){ ask_idle_clock(); }
+}
+
+function stay_signed_in(){
+	last_activity = 0;
+	note_activity();
+	ask_idle_clock(true);
 }
 
 /* ========================================================================== */
@@ -242,7 +416,9 @@ function el(tag, options, children){
 	if (options.className){ node.className = options.className; }
 	if (options.text != null){ node.textContent = options.text; }
 	if (options.title){ node.title = options.title; }
-	if (options.style){ node.setAttribute("style", options.style); }
+	// Pelo CSSOM, não por setAttribute: a CSP (style-src sem 'unsafe-inline')
+	// recusa o atributo style, mas não a propriedade
+	if (options.style){ node.style.cssText = options.style; }
 	if (options.dataset){
 		for (let key of Object.keys(options.dataset)){ node.dataset[key] = options.dataset[key]; }
 	}
@@ -582,12 +758,53 @@ function ask(options, on_confirm){
 let current_identity = null;
 let current_view = "inbox";
 
+// The address of each screen (/config/ia, /integr/tickets, /done/<case>) — see
+// "Addresses" below. The tab each of the two tabbed screens is on, and the case
+// the archive has open, are what the path is built from.
+let current_config_tab = "auto";
+let current_integr_tab = "analisadores";
+let url_case_ref = null;
+// The e-mail an address names in the monitored mailbox, until the listing has it
+let url_inbox_uid = null;
+
+// O que o perfil de acesso (ou o cargo) libera, vindo de /api/auth/me. Esconder
+// é conveniência; quem recusa é o servidor (access_profiles.py)
+function can_see(item){
+	return Boolean(current_identity) && Array.isArray(current_identity.pages) && current_identity.pages.indexOf(item) !== -1;
+}
+
+// A primeira tela do menu que esta conta pode abrir: para onde ir quando a
+// pedida não abre (um perfil sem a Caixa de entrada, por exemplo)
+function first_visible_view(){
+	for (let item of $$(".nav-item[data-arg]")){
+		if (can_see(item.dataset.arg)){ return item.dataset.arg; }
+	}
+	return "account";
+}
+
+function first_visible_tab(kind){
+	for (let button of $$("#" + kind + "Tabs .tab")){
+		if (can_see(kind + "." + button.dataset.arg)){ return button.dataset.arg; }
+	}
+	return null;
+}
+
 function show_view(view){
-	if (view === "config" && !(current_identity && current_identity.canChangeSettings)){ return; }
-	if (view === "integr" && !(current_identity && current_identity.canChangeSettings)){ return; }
-	if (view === "users" && !(current_identity && current_identity.canManageUsers)){ return; }
-	if (view === "audit" && !(current_identity && current_identity.canChangeSettings)){ return; }
+	if (current_identity && !can_see(view)){ return; }
+	let previous_view = current_view;
 	current_view = view;
+	// A case belongs to the address only while the archive is on screen: leaving
+	// it and coming back by the menu is the archive, not that case
+	if (view !== "done" && view !== "queues"){ url_case_ref = null; }
+	if (view !== "inbox"){ url_inbox_uid = null; }
+	// The case detail is one component shared by the archive and the work desk, so
+	// without this it stays on screen, decision buttons and all, under a list that
+	// has nothing selected. An analyst who left an e-mail open in one tab of the
+	// panel would then judge it as if it were the case they just picked.
+	if (view !== previous_view){
+		close_case();
+		url_case_ref = null;
+	}
 	// A section may belong to several views ("done queues"): the case detail is
 	// one component on the archive and on the work desk
 	for (let section of $$("[data-view]")){
@@ -598,9 +815,9 @@ function show_view(view){
 	}
 	show($("profileMenu"), false);
 	if (view === "users"){ load_users(); }
-	// Os analisadores são carregados junto com a aba Plataforma, e não só quando a
-	// aba Analisadores abre: o card da Plataforma resume quantos estão habilitados,
-	// e um resumo que só aparece depois de visitar outra aba não é resumo.
+	// Os analisadores são carregados aqui, ao abrir a tela, e não só no clique da
+	// aba: Analisadores é a aba em que Integrações abre, e ela já vem visível no
+	// HTML — nenhum show_integr_tab() roda antes para buscá-los.
 	if (view === "integr"){
 		load_email_config();
 		if (analyzer_registry.length === 0){ load_analyzers(); }
@@ -612,6 +829,12 @@ function show_view(view){
 	// The TheHive-backed screens are fetched on first open and then reused; the
 	// refresh button on each header forces a new read
 	if (view === "exec" && insights_payload == null){ load_insights(); }
+	// O panorama relê as fontes a cada abertura: o estado de cada uma (coletando,
+	// falhou) muda sem a tela saber
+	if (view === "intel"){
+		if (intel_payload == null){ load_intel(); }
+		load_intel_sources();
+	}
 	if (view === "done" && case_rows.length === 0){ load_cases(); }
 	// A fila é recarregada a cada abertura, e não só na primeira: ela responde
 	// "o que ainda espera decisão", e essa resposta muda com o trabalho de
@@ -631,23 +854,227 @@ function show_view(view){
 	if (view === "audit"){ load_audit(); }
 	sync_case_assistant();
 	sync_audit_assistant();
+	sync_url();
 }
 
 function show_config_tab(tab){
-	if (current_view !== "config"){ show_view("config"); }
+	// Opening the screen and choosing its tab are one step for the history: the
+	// address is announced once, with the tab, not once per half
+	url_hold++;
+	try {
+		if (current_view !== "config"){ show_view("config"); }
+	} finally {
+		url_hold--;
+	}
+	if (!can_see("config." + tab)){
+		let fallback = first_visible_tab("config");
+		if (!fallback){ return; }
+		tab = fallback;
+	}
+	current_config_tab = tab;
 	for (let panel of $$("[data-config-tab]")){
 		show(panel, panel.dataset.configTab === tab);
 	}
+	if (tab === "certificados"){ load_cert_config(); }
 	for (let button of $$("#configTabs .tab")){
 		button.classList.toggle("active", button.dataset.arg === tab);
 	}
+	sync_url();
+}
+
+/* ========================================================================== */
+/* Addresses                                                                  */
+/* ========================================================================== */
+
+// Each screen has a path of its own, so one can be bookmarked, sent to a
+// colleague, and reopened after the session expired. The server owns the table:
+// which paths exist and what role each needs (page_routes.py), and it answers
+// 404 or 403 itself. This side only builds the path from what is on screen and,
+// the other way round, shows what a path names. The screens it recognises are the
+// ones in the DOM (data-view, data-config-tab, data-integr-tab), so there is no
+// second list here to drift out of step with the server's.
+
+// Off until the identity is known. The role decides which screens exist for this
+// person, and show_view refuses the privileged ones until it has the identity —
+// a path resolved before that would bounce every administrator to the first
+// screen.
+let router_ready = false;
+// While above zero the screen is being changed on behalf of an address, or by a
+// call that announces the final state itself, so nothing is pushed in between
+let url_hold = 0;
+
+// A mailbox id the address can carry as it is. Anything else (a provider id with a
+// slash or a percent) stays out of the path: it would not survive the round trip
+// through the server's page table, so that e-mail simply opens without a link
+const ADDRESSABLE_UID = /^[A-Za-z0-9._-]{1,100}$/;
+
+function path_for_state(){
+	if (current_view === "config"){ return "/config/" + encodeURIComponent(current_config_tab); }
+	if (current_view === "integr"){ return "/integr/" + encodeURIComponent(current_integr_tab); }
+	if ((current_view === "done" || current_view === "queues") && url_case_ref != null){
+		return "/" + current_view + "/" + encodeURIComponent(url_case_ref);
+	}
+	if (current_view === "inbox"){
+		let uid = queue_selected != null ? queue_selected : url_inbox_uid;
+		if (uid != null && ADDRESSABLE_UID.test(String(uid))){ return "/inbox/" + uid; }
+	}
+	return "/" + current_view;
+}
+
+// Make the address say what is on screen. A step the analyst took adds a history
+// entry (Back returns to the screen they left); `replace` corrects the entry they
+// are on without adding one — used for the first screen and for a path the role
+// does not allow.
+function sync_url(replace){
+	if (!router_ready || url_hold > 0){ return; }
+	let path = path_for_state();
+	let here = window.location.pathname;
+	// "/" is the landing screen's own address, not a different screen
+	if (path === here || (here === "/" && path === "/exec")){ return; }
+	try {
+		if (replace){ window.history.replaceState(null, "", path); }
+		else { window.history.pushState(null, "", path); }
+	} catch (e) { /* a sandboxed frame may refuse; the screens still work */ }
+}
+
+function parse_location(){
+	let parts = window.location.pathname.split("/").filter(Boolean);
+	try {
+		parts = parts.map(decodeURIComponent);
+	} catch (e) {
+		return {view: "exec", sub: null};
+	}
+	return {view: parts[0] || "exec", sub: parts[1] || null};
+}
+
+function known_view(view){
+	for (let section of $$("[data-view]")){
+		if (section.dataset.view.split(" ").indexOf(view) !== -1){ return true; }
+	}
+	return false;
+}
+
+// A tab this person can see: the SSO and audit-storage tabs of Configurações are
+// hidden for an administrator, and an address must not open what the menu hides
+function tab_available(tabs_id, tab){
+	if (!tab){ return false; }
+	for (let button of $$("#" + tabs_id + " .tab")){
+		if (button.dataset.arg === tab){ return !button.classList.contains("hidden"); }
+	}
+	return false;
+}
+
+// Show what a path names. Used for the first screen and for Back/Forward, so it
+// never adds a history entry of its own.
+function show_route(route){
+	let view = known_view(route.view) ? route.view : "exec";
+	url_hold++;
+	try {
+		if (view === "config"){
+			show_config_tab(tab_available("configTabs", route.sub) ? route.sub : current_config_tab);
+		} else {
+			show_view(view);
+			if (view === "integr" && tab_available("integrTabs", route.sub)){ show_integr_tab(route.sub); }
+		}
+		if (current_view === "done" || current_view === "queues"){
+			// Named at once, before the case is fetched: the address already says
+			// which case it is, and the normalisation that follows must not strip it
+			if (route.sub == null){ close_case(); }
+			url_case_ref = route.sub;
+		}
+		if (current_view === "inbox"){
+			// Plain /inbox (Back from an open e-mail) closes it, so the screen says
+			// what the address says
+			if (route.sub == null && queue_selected != null){ close_queue_item(); }
+			url_inbox_uid = route.sub;
+		}
+	} finally {
+		url_hold--;
+	}
+	if ((current_view === "done" || current_view === "queues") && url_case_ref != null){ open_case_by_ref(url_case_ref); }
+	open_pending_inbox_item();
+}
+
+// Open the e-mail the address names, once the listing that holds it has landed.
+// The mailbox arrives over the websocket after the page, so an address opened
+// cold usually asks before the listing exists; the snapshot calls this again.
+function open_pending_inbox_item(){
+	if (current_view !== "inbox" || url_inbox_uid == null || !queue_listed){ return; }
+	let wanted = String(url_inbox_uid);
+	url_inbox_uid = null;
+	if (queue_selected === wanted){ return; }
+	let present = queue.some(function(mail){ return mail.mailUID === wanted; });
+	if (!present){
+		// Analysed by someone else, or moved out of the folder: say so, and let the
+		// address stop claiming it
+		toast("O e-mail " + wanted + " não está mais na caixa monitorada.", "bad");
+		sync_url(true);
+		return;
+	}
+	// The address already names it, so opening it adds no history entry
+	url_hold++;
+	try { open_queue_item(wanted); } finally { url_hold--; }
+}
+
+// The archive lists only a window of recent cases, so a case from a link may not
+// be in it: the server finds it by its reference, whatever its age
+function open_case_by_ref(ref){
+	let wanted = String(ref);
+	let surface = current_view;
+	// The lookup can outlive the screen that asked for it: Back and Forward are
+	// quick, the search reads the whole history. An answer for a case the address
+	// no longer names must not open it, nor announce it.
+	function still_wanted(){
+		return current_view === surface && String(url_case_ref) === wanted;
+	}
+	// The address already names this case, so opening it adds no history entry
+	function open(row){
+		if (!still_wanted()){ return; }
+		url_hold++;
+		try { if (surface === "queues"){ open_desk(row); } else { open_case(row); } } finally { url_hold--; }
+	}
+	for (let row of case_rows){
+		if (String(row.ref) === wanted){ open(row); return; }
+	}
+	get_json("api/cases?ref=" + encodeURIComponent(wanted) + "&limit=1").then(function(payload){
+		if (!still_wanted()){ return; }
+		let row = payload && !payload.error && payload.cases && payload.cases[0];
+		if (row){ open(row); return; }
+		// "Not found" is a statement about the history, and the server only makes
+		// it when it read all of it. A destination that did not answer, the ceiling
+		// on how many cases are read, or an error each mean "could not tell" — and
+		// the link stays as it is, so a reload can try again
+		let conclusive = !!payload && !payload.error && !payload.partial && !payload.truncated;
+		if (conclusive){
+			toast("Caso " + wanted + " não encontrado.", "bad");
+			url_case_ref = null;
+			sync_url(true);
+			return;
+		}
+		toast("Não foi possível consultar o caso " + wanted + " agora."
+			+ (payload && payload.notice ? " " + payload.notice : ""), "bad");
+	});
+}
+
+function router_start(){
+	// A tela pedida pelo endereço pode não abrir para este perfil: vai para a
+	// primeira que abre, em vez de deixar a tela vazia
+	let route = parse_location();
+	if (route && route.view && !can_see(route.view)){ route = {view: first_visible_view(), sub: null}; }
+	show_route(route);
+	router_ready = true;
+	sync_url(true);
+	window.addEventListener("popstate", function(){
+		show_route(parse_location());
+		sync_url(true);
+	});
 }
 
 // Fetch the identity of the caller and reveal only the controls the role allows
 function load_identity(){
 	get_json("api/auth/me").then(function(identity){
 		if (!identity){
-			window.location.href = "login";
+			go_to_login();
 			return;
 		}
 		current_identity = identity;
@@ -659,46 +1086,46 @@ function load_identity(){
 		// sem ele. O painel diz desde quando, que é o que dá para conferir
 		$("accountMfaSince").textContent = identity.mfaConfirmedAt
 			? "configurada em " + identity.mfaConfirmedAt : "";
-		show($("navConfig"), identity.canChangeSettings);
-		show($("navIntegr"), identity.canChangeSettings);
-		show($("navUsers"), identity.canManageUsers);
-		show($("navAudit"), identity.canChangeSettings);
-		// Quem entra no painel é decisão de global_admin: a aba de SSO segue a
-		// mesma régua da tela de Usuários, não a das outras configurações
-		show($("configTabSso"), identity.canManageUsers);
-		show($("configTabAudit"), identity.canManageUsers);
-		show($("navAdminGroup"), identity.canChangeSettings || identity.canManageUsers);
-		// Bloquear altera um sistema de terceiro, então segue a mesma régua da
-		// whitelist e das Integrações: só admin. Um botão visível que responde 403
+		// O menu, as abas e os botões seguem o que o perfil de acesso (ou o cargo)
+		// libera — `pages`, que o servidor monta (access_profiles.visible)
+		for (let item of $$(".nav-item[data-arg]")){ show(item, can_see(item.dataset.arg)); }
+		for (let button of $$("#configTabs .tab")){ show(button, can_see("config." + button.dataset.arg)); }
+		for (let button of $$("#integrTabs .tab")){ show(button, can_see("integr." + button.dataset.arg)); }
+		show($("navAdminGroup"), can_see("users") || can_see("integr") || can_see("audit") || can_see("config"));
+		// Bloquear altera um sistema de terceiro. Um botão visível que responde 403
 		// é pior do que botão nenhum — ele sugere que a ação existe para quem olha.
-		show($("caseBlockBtn"), identity.canChangeSettings);
-		show($("phishBlockBtn"), identity.canChangeSettings);
-		// Only load the configuration the user is allowed to read
-		if (identity.canChangeSettings){
+		show($("caseBlockBtn"), can_see("action.block"));
+		show($("phishBlockBtn"), can_see("action.block"));
+		// Só pede a configuração que esta conta pode ler: cada leitura é de uma aba
+		if (can_see("config.auto")){
 			load_scheduler_config();
-			load_llm_config();
-			load_email_config();
-			// Os destinos de registro não são pedidos aqui: a aba Integrações os
-			// carrega quando abre, e é de lá que sai a linha de resumo do painel
-			load_verdict_config();
-			load_smtp_config();
-			load_case_config();
-			load_evidence_config();
-			load_departments_config();
-			load_inbox_poll_config();
-			load_whitelist();
 			window.setInterval(load_scheduler_config, 30000);
 		}
-		// /sso-config exige global_admin: só quem pode lê-lo é que o pede
-		if (identity.canManageUsers){ load_sso_config(); load_audit_log_config(); }
+		if (can_see("config.ia")){ load_llm_config(); load_verdict_config(); }
+		if (can_see("action.intel_sources")){ load_intel_summary_config(); }
+		// Os destinos de registro não são pedidos aqui: a aba Integrações os
+		// carrega quando abre, e é de lá que sai a linha de resumo do painel
+		if (can_see("config.email")){ load_email_config(); }
+		if (can_see("config.email") || can_see("config.notificacao")){ load_smtp_config(); }
+		if (can_see("config.caso")){ load_case_config(); load_evidence_config(); }
+		if (can_see("config.departamentos")){ load_departments_config(); }
+		if (can_see("config.auto") || can_see("inbox")){ load_inbox_poll_config(); }
+		if (can_see("config.whitelist")){ load_whitelist(); }
+		if (can_see("config.sso")){ load_sso_config(); }
+		if (can_see("config.auditoria")){ load_audit_log_config(); }
+		if (can_see("config.seguranca")){ load_security_config(); }
+		// Only now: the role is known, so every screen this person may open is
+		// open to the path they came in on
+		router_start();
 	});
 }
 
 function do_logout(){
+	// Sair de propósito não leva `next`: voltar à mesma tela seria uma surpresa
 	fetch("api/auth/logout", {method: "POST"}).then(function(){
-		window.location.href = "login";
+		go_to_login(null, true);
 	}).catch(function(){
-		window.location.href = "login";
+		go_to_login(null, true);
 	});
 }
 
@@ -739,7 +1166,7 @@ socket.on("autoAnalysis", function(data){
 		show($("runCard"), true);
 		$("runTitle").textContent = "Ciclo automático em andamento";
 	}
-	if (current_identity && current_identity.canChangeSettings){ load_scheduler_config(); }
+	if (can_see("config.auto")){ load_scheduler_config(); }
 });
 
 /* ========================================================================== */
@@ -1124,8 +1551,8 @@ function short_date(mail){
 		let moment = new Date(mail.receivedAt);
 		let today = new Date();
 		let same_day = moment.toDateString() === today.toDateString();
-		let clock = moment.toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"});
-		return same_day ? clock : moment.toLocaleDateString("pt-BR", {day: "2-digit", month: "2-digit"}) + " " + clock;
+		let clock = moment.toLocaleTimeString(ui_locale(), {hour: "2-digit", minute: "2-digit"});
+		return same_day ? clock : moment.toLocaleDateString(ui_locale(), {day: "2-digit", month: "2-digit"}) + " " + clock;
 	}
 	let value = mail && mail.date;
 	if (!value){ return ""; }
@@ -1238,12 +1665,16 @@ let preview_rendering_uid = null; // in flight, so a slow answer for an email th
                                   // analyst left is dropped, not shown
 let preview_images_uid = null;    // remote images being fetched for this email
 let preview_frame_expanded = false;
+let preview_urls_visible = false; // "Mostrar URLs": desligado a cada e-mail aberto
 
 // Base stylesheet injected into the sandboxed document. The email is drawn on
 // white whatever theme the console is in, because "as delivered" means as the
 // recipient saw it and every mail client on earth is white here. The rest gives
 // the sanitizer's marks something to look like.
-const PREVIEW_FRAME_CSS = [
+// Função e não constante: o texto do marcador de imagem bloqueada depende do
+// idioma, que só é conhecido depois de o i18n.js iniciar
+function preview_frame_css(){
+	return [
 	"html{background:#fff}",
 	"body{margin:0;padding:18px;background:#fff;color:#16181d;",
 	"font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;",
@@ -1252,29 +1683,47 @@ const PREVIEW_FRAME_CSS = [
 	"table{max-width:100%}",
 	/* Links do not navigate, so they must not look like they would */
 	"a{color:#0b57d0;text-decoration:underline;cursor:default}",
-	/* The destination, printed next to the text.
+	/* The destination, printed next to the text — only while "Mostrar URLs" is on.
+	 * Por padrão a mensagem aparece como a caixa de e-mail a mostraria: o botão é
+	 * quem decide se o destino de cada link é impresso ao lado dele.
 	 *
 	 * It carries its own background and its own colour rather than inheriting:
 	 * the sender chose what is behind it, and the first version of this put dark
 	 * red text on a red call-to-action button, which is the one place in the
 	 * message where reading the real URL matters most. inline-block also keeps
 	 * the parent's underline and weight from bleeding into it. */
-	".bp-link::after{content:attr(data-url);display:inline-block;margin-left:5px;",
+	"body.show-urls .bp-link::after{content:attr(data-url);display:inline-block;margin-left:5px;",
 	"padding:1px 5px;border-radius:3px;background:#fff;border:1px solid #d7dae0;",
 	"font:400 11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#3c4043;",
 	"text-decoration:none;word-break:break-all;max-width:100%;vertical-align:middle}",
 	/* The text names one site and the destination is another */
-	".bp-mismatch{background:#fdecea;box-shadow:0 0 0 1px #e8a5a0;border-radius:3px}",
-	".bp-mismatch::after{background:#fff;border-color:#dd8e86;color:#a8342a;font-weight:600}",
+	"body.show-urls .bp-mismatch{background:#fdecea;box-shadow:0 0 0 1px #e8a5a0;border-radius:3px}",
+	"body.show-urls .bp-mismatch::after{background:#fff;border-color:#dd8e86;color:#a8342a;font-weight:600}",
 	/* O que fica no lugar de uma imagem que não pôde ser trazida. Diz o host e o
 	 * motivo em vez de deixar um buraco: um retângulo vazio não se distingue de
 	 * um e-mail que não tinha imagem nenhuma ali */
 	".bp-blocked,.bp-missing{display:inline-block;padding:5px 9px;border-radius:5px;",
 	"border:1px dashed #b9bec7;background:#f3f4f6;color:#5f6368;",
 	"font:11px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:100%}",
-	".bp-blocked::before{content:'imagem remota não carregada · '}",
+	".bp-blocked::before{content:'" + t("imagem remota não carregada ·").replace(/['"\\\n<>{};]/g, "") + " '}",
 	".bp-missing{border-style:dotted}"
 ].join("");
+}
+
+/* O documento do iframe. `urls_visible` liga o destino impresso ao lado de cada
+ * link (CSS `body.show-urls`): é uma classe no <body> do srcdoc, e não script —
+ * o frame é sandbox sem allow-scripts e herda a CSP desta página. */
+function frame_document(html, urls_visible){
+	return "<!doctype html><html><head><meta charset=\"utf-8\">"
+		+ "<style>" + preview_frame_css() + "</style></head><body"
+		+ (urls_visible ? " class=\"show-urls\"" : "") + ">"
+		+ html + "</body></html>";
+}
+
+function sync_urls_button(button, visible){
+	button.setAttribute("aria-pressed", visible ? "true" : "false");
+	button.textContent = visible ? "Ocultar URLs" : "Mostrar URLs";
+}
 
 function open_queue_item(uid){
 	queue_selected = uid;
@@ -1287,6 +1736,8 @@ function open_queue_item(uid){
 	// which is a thing to ask for, not a thing to land in
 	reset_preview_visual();
 	render_preview(mail);
+	// The address names the e-mail the preview has open
+	sync_url();
 
 	// Two reasons to ask the server for the body. The loader has not reached this
 	// email yet, so the row is an envelope — the click fetches it ahead of the
@@ -1348,6 +1799,8 @@ function reset_preview_visual(){
 	preview_rendering_uid = null;
 	preview_images_uid = null;
 	preview_frame_expanded = false;
+	preview_urls_visible = false;
+	sync_urls_button($("previewUrlsBtn"), false);
 	$("previewFrame").removeAttribute("srcdoc");
 	$("previewFrameShell").classList.remove("expanded");
 	$("previewExpandBtn").textContent = "Expandir";
@@ -1454,9 +1907,7 @@ function render_preview_visual(payload){
 		// fetched from, inherits this page's CSP, and never touches the network.
 		// Assigned as a property — an attribute would be markup an attacker's
 		// content is being written into
-		frame.srcdoc = "<!doctype html><html><head><meta charset=\"utf-8\">"
-			+ "<style>" + PREVIEW_FRAME_CSS + "</style></head><body>"
-			+ payload.html + "</body></html>";
+		frame.srcdoc = frame_document(payload.html, preview_urls_visible);
 		show($("previewFrameShell"), true);
 		show($("previewVisualEmpty"), false);
 	} else {
@@ -1583,6 +2034,14 @@ function render_preview_attachments(list, box){
  * without same-origin, so nothing here can measure it — and asking for
  * `allow-same-origin` to save a click would hand the attacker's markup this
  * page's origin. */
+function toggle_preview_urls(){
+	preview_urls_visible = !preview_urls_visible;
+	sync_urls_button($("previewUrlsBtn"), preview_urls_visible);
+	if (preview_rendered && preview_rendered.html){
+		$("previewFrame").srcdoc = frame_document(preview_rendered.html, preview_urls_visible);
+	}
+}
+
 function toggle_preview_frame(){
 	preview_frame_expanded = !preview_frame_expanded;
 	$("previewFrameShell").classList.toggle("expanded", preview_frame_expanded);
@@ -1727,7 +2186,8 @@ function apply_inbox_snapshot(state){
 	});
 	queue_listed = true;
 	queue_checked = queue_checked.filter(function(uid){ return present[uid]; });
-	if (queue_selected && !present[queue_selected]){ queue_selected = null; }
+	let selection_left = !!queue_selected && !present[queue_selected];
+	if (selection_left){ queue_selected = null; }
 	// The order the SERVER built this listing in — not what the analyst asked to
 	// see. render_queue() reconciles the two. Overwriting the preference here is
 	// what used to make a click on the filter snap back when a poll tick landed
@@ -1743,6 +2203,8 @@ function apply_inbox_snapshot(state){
 	if (state.loader){ inbox_loader_state = state.loader; }
 	render_queue();
 	render_phish_inbox_subjects();
+	if (selection_left){ sync_url(true); }
+	open_pending_inbox_item();
 
 	// The open preview follows the refreshed entry: a tick that arrives while an
 	// email is open must not leave the panel showing a body the list no longer
@@ -1758,7 +2220,7 @@ function apply_inbox_snapshot(state){
 function update_inbox_poll_status(state){
 	let node = $("inboxPollStatus");
 	if (!node){ return; }
-	let clock = state.at ? new Date(state.at).toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "—";
+	let clock = state.at ? new Date(state.at).toLocaleTimeString(ui_locale(), {hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "—";
 	if (!state.enabled){
 		node.textContent = "consulta automática desligada · última leitura às " + clock;
 	} else if (state.result){
@@ -1839,6 +2301,7 @@ function list_emails(){
 		}
 		queue_checked = [];
 		queue_selected = null;
+		sync_url(true);
 		apply_inbox_snapshot(state);
 		update_inbox_poll_status(state);
 		if ((state.emails || []).length === 0){
@@ -1883,7 +2346,10 @@ function verdict_summary(verdict){
 		return "O e-mail foi classificado como SEGURO. O caso foi encerrado e a resposta ao denunciante foi enviada.";
 	}
 	if (verdict === "Malicious"){
-		return "O e-mail foi classificado como MALICIOSO. O caso foi encerrado, exportado para o MISP e a resposta ao denunciante foi enviada.";
+		// Nada aqui sobre o que cada destino fez com o veredito (resolver o caso
+		// no TheHive, exportar para o MISP, gravar em disco): esta resposta não
+		// traz o resultado dos destinos, e o log acima mostra cada um pelo nome
+		return "O e-mail foi classificado como MALICIOSO. O caso foi encerrado e a resposta ao denunciante foi enviada.";
 	}
 	if (verdict === "Suspicious"){
 		return "O e-mail foi classificado como SUSPEITO. O caso ficou aberto para investigação — revise o resultado registrado antes de dar o veredito final.";
@@ -1927,21 +2393,29 @@ function drop_from_queue(uids){
 	queue = queue.filter(function(m){ return uids.indexOf(m.mailUID) === -1; });
 	queue_checked = queue_checked.filter(function(uid){ return uids.indexOf(uid) === -1; });
 	if (uids.indexOf(queue_selected) !== -1){
-		queue_selected = null;
-		// An in-flight body for an email that has just been analyzed has nowhere
-		// left to land, and its answer must not reopen the panel
-		inbox_loading_uid = null;
-		show($("previewBodyProgress"), false);
-		show($("previewHeaderCard"), false);
-		show($("previewBodyCard"), false);
-		show($("analyzeOneBtn"), false);
-		// Drops the rendered document with it: leaving an analyzed email's
-		// markup loaded in the frame would keep it on screen behind a hidden
-		// card, and it is the one thing here nobody wrote
-		reset_preview_visual();
-		$("detailTitle").textContent = "Nenhum e-mail aberto";
-		$("detailSub").textContent = "selecione um item da lista";
+		close_queue_item();
+		sync_url(true);
 	}
+	render_queue();
+}
+
+// Back to the empty preview: nothing open, nothing to analyze
+function close_queue_item(){
+	queue_selected = null;
+	// An in-flight body for an email that has just been analyzed has nowhere
+	// left to land, and its answer must not reopen the panel
+	inbox_loading_uid = null;
+	show($("previewBodyProgress"), false);
+	show($("previewHeaderCard"), false);
+	show($("previewBodyCard"), false);
+	show($("analyzeOneBtn"), false);
+	// Drops the rendered document with it: leaving an analyzed email's
+	// markup loaded in the frame would keep it on screen behind a hidden
+	// card, and it is the one thing here nobody wrote
+	reset_preview_visual();
+	$("detailTitle").textContent = "Nenhum e-mail aberto";
+	$("detailSub").textContent = "selecione um item da lista";
+	show($("inboxIntro"), true);
 	render_queue();
 }
 
@@ -2260,7 +2734,7 @@ function describe_llm_model_caps(id){
 }
 
 function update_llm_model_caps(){
-	for (let id of ["llmModel", "llmAgentAnalystB", "llmAgentReviewer"]){
+	for (let id of ["llmModel", "llmAgentAnalystB", "llmAgentReviewer", "intelSummaryModel"]){
 		let hint = $(id + "Caps");
 		if (hint){ hint.textContent = describe_llm_model_caps($(id).value.trim()); }
 	}
@@ -2722,7 +3196,7 @@ function render_volume_recent(entries){
 				el("span", {className: "alert-entry-pattern", text: entry.pattern}),
 				el("span", {className: "card-code", style: "flex:0 0 auto",
 					text: entry.count + " em " + duration_text(entry.windowMinutes)
-						+ (isNaN(when) ? "" : " · " + when.toLocaleString("pt-BR", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}))})
+						+ (isNaN(when) ? "" : " · " + when.toLocaleString(ui_locale(), {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}))})
 			]),
 			el("div", {className: "alert-entry-channels"}, channels)
 		]);
@@ -2822,11 +3296,7 @@ function update_case_status(state){
 	if (document.activeElement !== $("caseTlpSelect")){ $("caseTlpSelect").value = state.tlp; }
 	if (document.activeElement !== $("casePapSelect")){ $("casePapSelect").value = state.pap; }
 	if (document.activeElement !== $("caseTagsInput")){ $("caseTagsInput").value = state.tags.join(", "); }
-	if (document.activeElement !== $("caseMispIdInput")){ $("caseMispIdInput").value = state.mispId; }
-	// The Integrações card shows the same value read-only
-	$("mispIdInput").value = state.mispId;
 	set_status("caseStatus", "Casos criados com TLP " + state.tlp + ", PAP " + state.pap + " e tags: " + state.tags.join(", ") + ".");
-	set_pill("mispPill", state.mispId ? "configurado" : "não usado", state.mispId ? "ok" : "");
 }
 
 function load_case_config(){
@@ -2843,8 +3313,9 @@ function save_case_config(){
 	post_form("case-config", {
 		tlp: $("caseTlpSelect").value,
 		pap: $("casePapSelect").value,
-		tags: tags,
-		mispId: $("caseMispIdInput").value.trim()
+		// O nome da exportação MISP não vai neste formulário: é um campo do
+		// destino TheHive, e o servidor não toca no que este envio não traz
+		tags: tags
 	}).then(function(result){
 		$("caseSaveBtn").disabled = false;
 		if (result.ok && result.data){
@@ -2930,7 +3401,7 @@ function update_audit_log_config(state){
 	$("auditLogMb").min = limits.minMegabytes;
 	$("auditLogMb").max = limits.maxMegabytes;
 	$("auditLogDaysHint").textContent = "de " + limits.minRetentionDays + " a " + limits.maxRetentionDays + " dias";
-	$("auditLogMbHint").textContent = "de " + limits.minMegabytes + " a " + limits.maxMegabytes.toLocaleString("pt-BR") + " MB";
+	$("auditLogMbHint").textContent = "de " + limits.minMegabytes + " a " + limits.maxMegabytes.toLocaleString(ui_locale()) + " MB";
 	$("auditLogFolderHint").textContent = "não pode ser " + (state.reservedFolders || []).join(", ");
 
 	// O uso de agora, e se a promessa de retenção está sendo cumprida
@@ -2940,7 +3411,7 @@ function update_audit_log_config(state){
 	if (usage){
 		box.appendChild(el("p", {className: "audit-usage-line"}, [
 			el("strong", {text: format_megabytes(usage.bytes)}),
-			document.createTextNode(" de " + state.maxMegabytes.toLocaleString("pt-BR") + " MB em "
+			document.createTextNode(" de " + state.maxMegabytes.toLocaleString(ui_locale()) + " MB em "
 				+ usage.files + (usage.files === 1 ? " arquivo" : " arquivos")
 				+ " · registro mais antigo: " + (usage.oldest ? audit_short_date(usage.oldest) : "—"))
 		]));
@@ -3024,6 +3495,235 @@ function test_audit_log_config(){
 			toast(state.syslog.protocol === "udp"
 				? "Registro de teste enviado. UDP não confirma entrega: confira no SIEM."
 				: "Registro de teste entregue ao servidor syslog.", "ok");
+		}
+	});
+}
+
+/* ========================================================================== */
+/* Settings — security (auto logoff)                                          */
+/* ========================================================================== */
+
+function update_security_config(state){
+	if (!state || !state.session){
+		set_status("securityStatus", "Não foi possível ler a configuração de segurança.", "bad");
+		return;
+	}
+	$("securityIdleMinutes").value = state.session.idleMinutes;
+	$("securityAbsoluteHours").value = state.session.absoluteHours;
+	$("securityWarnSeconds").value = state.session.warnSeconds;
+	security_current = state.session;
+	set_status("securityStatus", "Sai após " + state.session.idleMinutes + " min sem uso, e em " + state.session.absoluteHours
+		+ " h de qualquer jeito. Avisa " + state.session.warnSeconds + " s antes.");
+	if (state.protection){ update_protection_config(state); }
+}
+
+/* Limite por IP, banimento e lista de liberados (abuse_guard no servidor) */
+
+let security_you = null;
+
+function update_protection_config(state){
+	let protection = state.protection;
+	set_switch("securityRateEnabled", protection.rateLimit.enabled);
+	$("securityPerMinute").value = protection.rateLimit.perMinute;
+	set_switch("securityBanEnabled", protection.ban.enabled);
+	$("securityMaxFailures").value = protection.ban.maxFailures;
+	$("securityWindowMinutes").value = protection.ban.windowMinutes;
+	$("securityBanMinutes").value = protection.ban.banMinutes;
+	$("securityAllowlist").value = protection.allowlist.join("\n");
+
+	security_you = state.you || null;
+	let you = security_you;
+	$("securityYourAddress").textContent = you
+		? "Seu endereço, como o servidor o vê: " + you.ip + (you.allowed ? " (liberado)" : "")
+		: "";
+	$("securityAllowMeBtn").disabled = !you || !you.countable || you.allowed;
+	// O servidor não conta um endereço que é todo mundo ao mesmo tempo (o
+	// gateway do Docker, ou um proxy que não informa o cliente). Nesse caso o
+	// banimento existe na tela e não age sobre ninguém — isso precisa ser dito
+	let not_countable = Boolean(you) && !you.countable;
+	// E o caso contrário, que é o perigoso: um proxy que o servidor não conhece
+	// faz todo mundo ter o IP dele, e o primeiro banimento tranca todos
+	let untrusted_proxy = Boolean(you) && you.countable && you.forwardedIgnored;
+	show($("securityNotCountable"), not_countable || untrusted_proxy);
+	$("securityNotCountableText").textContent = not_countable
+		? "O servidor vê " + you.ip + ", que não é o endereço de uma pessoa (gateway do Docker ou proxy sem X-Forwarded-For). "
+			+ "Endereços assim nunca são limitados nem banidos — senão a primeira rajada de senhas erradas trancaria todo mundo. "
+			+ "Para o banimento valer, configure BLUEPHISH_TRUSTED_PROXIES com o proxy à frente da aplicação."
+		: untrusted_proxy
+			? "Sua requisição chegou de " + you.ip + " com X-Forwarded-For, mas esse endereço não está em BLUEPHISH_TRUSTED_PROXIES, "
+				+ "e o cabeçalho foi ignorado. Se " + you.ip + " é o proxy à frente da aplicação, todas as pessoas aparecem com esse IP: "
+				+ "o limite é dividido entre elas e um banimento tranca todas de uma vez. Liste o proxy em BLUEPHISH_TRUSTED_PROXIES."
+			: "";
+
+	let rate = protection.rateLimit, ban = protection.ban;
+	set_status("protectionStatus", (rate.enabled ? "Até " + rate.perMinute + " requisições por minuto por IP. " : "Sem limite por IP. ")
+		+ (ban.enabled ? "Bane por " + ban.banMinutes + " min depois de " + ban.maxFailures + " falhas em " + ban.windowMinutes + " min." : "Banimento desligado."));
+	render_security_bans(state.bans || []);
+	if (state.captcha){ update_captcha_config(state); }
+	render_vault_status(state.vault || null);
+}
+
+function render_vault_status(vault){
+	let facts = $("vaultFacts");
+	facts.replaceChildren();
+	if (!vault){
+		show($("vaultWarning"), true);
+		$("vaultWarningText").textContent = "Não foi possível ler o estado do cofre.";
+		return;
+	}
+	facts.appendChild(el("span", {className: "pill " + (vault.keyPresent ? "ok" : "bad"),
+		text: vault.keyPresent ? "chave mestra " + vault.keyId : "sem chave mestra"}));
+	facts.appendChild(el("span", {className: "pill", text: vault.sealed + " cifrado(s)"}));
+	if (vault.plaintext){ facts.appendChild(el("span", {className: "pill warn", text: vault.plaintext + " em texto"})); }
+	if (vault.unreadable){ facts.appendChild(el("span", {className: "pill bad", text: vault.unreadable + " não abrem"})); }
+	let warning = "";
+	if (vault.keyError){
+		warning = vault.keyError;
+	} else if (!vault.keyPresent){
+		warning = "Não há chave mestra em " + vault.keyFile + ": os segredos seguem em texto no configuration.json. "
+			+ "Rode o setup.sh (ele gera docker/secrets/master.key) e reinicie o contêiner.";
+	} else if (vault.unreadable){
+		warning = "Há segredo cifrado que não abre com a chave atual — a chave mestra foi trocada, ou o banco veio de outra instalação. "
+			+ "Enquanto isso, a configuração não é gravada, para não apagar esses segredos. Volte a chave anterior ou informe os segredos de novo.";
+	}
+	show($("vaultWarning"), Boolean(warning));
+	$("vaultWarningText").textContent = warning;
+}
+
+function update_captcha_config(state){
+	let config = state.captcha;
+	set_switch("captchaEnabled", config.enabled);
+	$("captchaSiteKey").value = config.siteKey;
+	$("captchaSecret").value = "";
+	$("captchaSecretHint").textContent = config.hasSecret
+		? "definida — em branco mantém a atual" : "nenhuma gravada";
+	$("captchaMinScore").value = config.minScore;
+	show($("captchaEnvOff"), Boolean(state.captchaDisabledByEnvironment));
+	set_status("captchaStatus", config.enabled
+		? "Cobrado no login por senha, nota mínima " + config.minScore + "."
+		: "Desligado.");
+}
+
+function save_captcha_config(){
+	let form = {
+		captchaEnabled: switch_on("captchaEnabled") ? "true" : "false",
+		siteKey: $("captchaSiteKey").value.trim(),
+		secret: $("captchaSecret").value.trim(),
+		minScore: $("captchaMinScore").value.trim()
+	};
+	$("captchaSaveBtn").disabled = true;
+	post_form("security-config/captcha", form).then(function(result){
+		$("captchaSaveBtn").disabled = false;
+		if (result.ok && result.data && !result.data.error){
+			update_protection_config(result.data);
+			toast("reCAPTCHA salvo.", "ok");
+		} else {
+			set_status("captchaStatus", (result.data && result.data.error) || "Configuração inválida: revise os campos e tente de novo.", "bad");
+		}
+	});
+}
+
+const BAN_KIND_LABEL = {login: "senha errada", mfa: "código do segundo fator", password: "senha atual na troca", rate: "excesso de requisições", captcha: "reprovado no reCAPTCHA"};
+
+function render_security_bans(bans){
+	let container = $("securityBansRows");
+	container.replaceChildren();
+	if (!bans.length){
+		container.appendChild(el("span", {className: "field-hint", text: "Nenhum endereço banido agora."}));
+		return;
+	}
+	for (let ban of bans){
+		container.appendChild(el("div", {className: "row", style: "gap:10px;flex-wrap:wrap"}, [
+			el("span", {className: "mono grow", text: ban.ip}),
+			el("span", {className: "pill bad", text: "mais " + Math.ceil(ban.secondsLeft / 60) + " min"}),
+			el("span", {className: "field-hint", text: ban.failures + " falhas, a última: " + (BAN_KIND_LABEL[ban.kind] || ban.kind)}),
+			el("button", {className: "btn quiet sm", text: "Desbloquear", attrs: {type: "button"},
+				onClick: function(){ unban_address(ban.ip); }})
+		]));
+	}
+}
+
+function allowlist_my_address(){
+	if (!security_you || !security_you.countable){ return; }
+	let lines = $("securityAllowlist").value.split("\n").map(function(line){ return line.trim(); }).filter(Boolean);
+	if (lines.indexOf(security_you.ip) === -1){ lines.push(security_you.ip); }
+	$("securityAllowlist").value = lines.join("\n");
+	set_status("protectionStatus", "Seu endereço entrou na lista. Salve para valer.");
+}
+
+function save_protection_config(){
+	let form = {
+		rateLimitEnabled: switch_on("securityRateEnabled") ? "true" : "false",
+		perMinute: $("securityPerMinute").value.trim(),
+		banEnabled: switch_on("securityBanEnabled") ? "true" : "false",
+		maxFailures: $("securityMaxFailures").value.trim(),
+		windowMinutes: $("securityWindowMinutes").value.trim(),
+		banMinutes: $("securityBanMinutes").value.trim(),
+		allowlist: $("securityAllowlist").value
+	};
+	$("protectionSaveBtn").disabled = true;
+	post_form("security-config/protection", form).then(function(result){
+		$("protectionSaveBtn").disabled = false;
+		if (result.ok && result.data && !result.data.error){
+			update_protection_config(result.data);
+			toast("Proteção contra abuso salva.", "ok");
+		} else {
+			set_status("protectionStatus", (result.data && result.data.error) || "Configuração inválida: revise os campos e tente de novo.", "bad");
+		}
+	});
+}
+
+function unban_address(ip){
+	post_form("security-config/unban", {ip: ip}).then(function(result){
+		if (result.ok && result.data && !result.data.error){
+			update_protection_config(result.data);
+			toast(ip + " desbloqueado.", "ok");
+		} else {
+			toast((result.data && result.data.error) || "Não foi possível desbloquear.", "bad");
+		}
+	});
+}
+
+let security_current = null;
+
+function load_security_config(){
+	get_json("security-config").then(update_security_config);
+}
+
+function save_security_config(){
+	let form = {
+		idleMinutes: $("securityIdleMinutes").value.trim(),
+		absoluteHours: $("securityAbsoluteHours").value.trim(),
+		warnSeconds: $("securityWarnSeconds").value.trim()
+	};
+	// Um prazo menor vale na próxima requisição de toda sessão aberta, e quem já
+	// passou dele cai sem o aviso de antes — inclusive quem está salvando. Isso
+	// precisa ser dito antes, não descoberto depois
+	let current = security_current;
+	if (current && (parseInt(form.idleMinutes, 10) < current.idleMinutes || parseInt(form.absoluteHours, 10) < current.absoluteHours)){
+		ask({
+			title: "Encurtar a sessão?",
+			body: "Toda sessão aberta passa a valer pelos novos prazos na próxima requisição. "
+				+ "Quem já passou deles é desconectado na hora, sem aviso — inclusive você, se for o caso.",
+			confirmLabel: "Encurtar",
+			danger: true
+		}, function(){ submit_security_config(form); });
+		return;
+	}
+	submit_security_config(form);
+}
+
+function submit_security_config(form){
+	$("securitySaveBtn").disabled = true;
+	post_form("security-config", form).then(function(result){
+		$("securitySaveBtn").disabled = false;
+		if (result.ok && result.data && !result.data.error){
+			update_security_config(result.data);
+			toast("Configuração de segurança salva.", "ok");
+			// O tempo da própria sessão mudou junto: o próximo sinal traz o novo
+			ask_idle_clock();
+		} else {
+			set_status("securityStatus", (result.data && result.data.error) || "Configuração inválida: revise os campos e tente de novo.", "bad");
 		}
 	});
 }
@@ -3710,7 +4410,7 @@ function wl_test_url_pattern(){
 
 function wl_test_line(ok, text, detail, tone){
 	let mark = icon(ok ? CHECK_ICON : CROSS_ICON, 11);
-	mark.setAttribute("style", "flex:0 0 11px;color:var(--" + (tone || (ok ? "ok" : "t4")) + ")");
+	mark.style.cssText = "flex:0 0 11px;color:var(--" + (tone || (ok ? "ok" : "t4")) + ")";
 	return el("div", {className: "row", style: "gap:8px;align-items:center;min-width:0"}, [
 		mark,
 		el("span", {className: "mono truncate", text: text, title: text,
@@ -3892,7 +4592,7 @@ function load_whitelist(){
 		render_whitelist();
 	});
 	// O contador de propostas pendentes aparece na aba antes de ela ser aberta
-	if (current_identity && current_identity.canChangeSettings){ load_verdict_memory(); }
+	if (can_see("config.whitelist")){ load_verdict_memory(); }
 }
 
 function whitelist_show_type(type){
@@ -3941,8 +4641,20 @@ function load_verdict_memory(){
 	});
 }
 
+// Remetente e indicador são propostas de regra, não liberações: o estado delas é
+// o da decisão do admin
+function memory_is_proposal(memory){
+	return memory.scope === "sender" || memory.scope === "indicator";
+}
+
+// "domain:d1a2b3c4.cloudfront.net" -> ["domain", "d1a2b3c4.cloudfront.net"]
+function memory_indicator(memory){
+	let at = memory.key.indexOf(":");
+	return [memory.key.slice(0, at), memory.key.slice(at + 1)];
+}
+
 function memory_state(memory){
-	if (memory.scope === "sender"){
+	if (memory_is_proposal(memory)){
 		return {pending: ["proposta pendente", "warn"], accepted: ["virou regra", "ok"], dismissed: ["recusada", ""]}[memory.proposalStatus]
 			|| [memory.proposalStatus, ""];
 	}
@@ -3955,25 +4667,29 @@ function memory_state(memory){
 function render_verdict_memory(){
 	let box = $("wlMemoryRows");
 	box.replaceChildren();
-	let pending = memory_rows.filter(function(m){ return m.scope === "sender" && m.proposalStatus === "pending"; }).length;
+	let pending = memory_rows.filter(function(m){ return memory_is_proposal(m) && m.proposalStatus === "pending"; }).length;
 	$("wlMemoryPending").textContent = pending ? String(pending) : "";
 	set_status("wlMemoryStatus", memory_rows.length === 0
 		? "Nenhuma liberação aprendida" + (memory_show_inactive ? "." : " em vigor.")
-		: memory_rows.length + " liberação(ões)" + (pending ? " · " + pending + " proposta(s) de remetente aguardando decisão" : ""),
+		: memory_rows.length + " liberação(ões)" + (pending ? " · " + pending + " proposta(s) aguardando decisão" : ""),
 		pending ? "bad" : null);
 	for (let memory of memory_rows){
 		let state = memory_state(memory);
 		let sender = memory.scope === "sender";
-		let inactive = sender ? memory.proposalStatus !== "pending" : (!memory.active || memory.suspended);
+		let indicator = memory.scope === "indicator";
+		let proposal = sender || indicator;
+		let inactive = proposal ? memory.proposalStatus !== "pending" : (!memory.active || memory.suspended);
 		let actions = el("div", {className: "memory-actions"});
-		if (sender && memory.proposalStatus === "pending"){
+		if (proposal && memory.proposalStatus === "pending"){
 			let create = el("button", {className: "btn xs", type: "button", text: "Criar regra"});
 			create.onclick = function(){ memory_create_rule(memory); };
 			let dismiss = el("button", {className: "btn xs secondary", type: "button", text: "Recusar"});
-			dismiss.onclick = function(){ memory_mutation(memory, "dismiss", "Recusar a proposta de " + memory.key); };
+			dismiss.onclick = function(){
+				memory_mutation(memory, "dismiss", "Recusar a proposta de " + (indicator ? memory_indicator(memory)[1] : memory.key));
+			};
 			actions.appendChild(create);
 			actions.appendChild(dismiss);
-		} else if (!sender && memory.active){
+		} else if (!proposal && memory.active){
 			let revoke = el("button", {className: "btn xs danger", type: "button", text: "Revogar"});
 			revoke.onclick = function(){ memory_mutation(memory, "revoke", "Revogar a liberação da mensagem de " + (memory.recordRef || "um caso")); };
 			actions.appendChild(revoke);
@@ -3981,15 +4697,18 @@ function render_verdict_memory(){
 		box.appendChild(el("div", {className: "memory-row" + (inactive ? " inactive" : "")}, [
 			el("div", {className: "col", style: "gap:4px;min-width:0"}, [
 				el("div", {className: "row", style: "gap:8px;flex-wrap:wrap"}, [
-					el("span", {className: "pill", text: sender ? "REMETENTE" : "MENSAGEM IDÊNTICA"}),
+					el("span", {className: "pill", text: sender ? "REMETENTE" : (indicator ? "INDICADOR" : "MENSAGEM IDÊNTICA")}),
 					el("span", {className: "pill " + state[1], text: state[0]})
 				]),
 				// A chave de conteúdo é um resumo: mostrá-lo não diz nada a ninguém.
 				// O que identifica a mensagem é o caso de onde a lição saiu
-				el("span", {className: "memory-key" + (sender ? " mono" : ""),
-					text: sender ? memory.key : "Cópias exatas da mensagem do caso " + (memory.recordRef || "(registro não guardado)")}),
+				el("span", {className: "memory-key" + (proposal ? " mono" : ""),
+					text: sender ? memory.key : (indicator ? memory_indicator(memory)[1]
+						: "Cópias exatas da mensagem do caso " + (memory.recordRef || "(registro não guardado)"))}),
 				el("span", {className: "memory-meta", text: "por " + memory.by + " · " + format_iso(memory.at)
-					+ (sender ? "" : " · " + memory.hits + " análise(s) rebaixada(s)"
+					+ (indicator ? " · caso " + (memory.recordRef || "—") + " · consultado em "
+						+ memory.hits + " análise(s)" : "")
+					+ (proposal ? "" : " · " + memory.hits + " análise(s) rebaixada(s)"
 						+ (memory.lastHitAt ? ", a última em " + format_iso(memory.lastHitAt) : "")
 						+ (memory.expiresAt ? " · expira em " + format_iso(memory.expiresAt).split(" ")[0] : ""))})
 			]),
@@ -4002,7 +4721,8 @@ function render_verdict_memory(){
 function memory_mutation(memory, action, title){
 	ask({
 		title: title,
-		sub: action === "revoke" ? "a próxima cópia desta mensagem volta a passar pelo pipeline sem desconto" : "o remetente não vira regra",
+		sub: action === "revoke" ? "a próxima cópia desta mensagem volta a passar pelo pipeline sem desconto"
+			: (memory.scope === "indicator" ? "o host não vira regra, e a IA deixa de receber esta decisão" : "o remetente não vira regra"),
 		body: "Motivo registrado na decisão original: " + (memory.reason || "—"),
 		confirmLabel: action === "revoke" ? "Revogar" : "Recusar",
 		danger: action === "revoke"
@@ -4020,10 +4740,12 @@ function memory_mutation(memory, action, title){
 }
 
 // A proposta vira regra pelo compositor de sempre, com Simular à mão: o servidor
-// só fecha a proposta se a regra salva for exatamente o remetente proposto
+// só fecha a proposta se a regra salva for exatamente o remetente (ou o host, ou
+// o IP) proposto
 function memory_create_rule(memory){
-	whitelist_show_type("sender");
-	$("wlValue").value = memory.key;
+	let indicator = memory.scope === "indicator" ? memory_indicator(memory) : null;
+	whitelist_show_type(indicator ? indicator[0] : "sender");
+	$("wlValue").value = indicator ? indicator[1] : memory.key;
 	$("wlReason").value = "Proposta a partir do falso positivo corrigido por " + memory.by
 		+ " (caso " + (memory.recordRef || "—") + "): " + (memory.reason || "");
 	wl_memory_proposal = memory.id;
@@ -4147,7 +4869,9 @@ function wl_show_suppressions(rule){
 }
 
 function whitelist_export(){
-	let link = el("a", {attrs: {href: "api/whitelist/export", download: "whitelist.json"}});
+	// Root-relative, like every address: this element is not a fetch, so the
+	// wrapper that normalises those never sees it
+	let link = el("a", {attrs: {href: "/api/whitelist/export", download: "whitelist.json"}});
 	document.body.appendChild(link);
 	link.click();
 	link.remove();
@@ -4189,7 +4913,336 @@ function whitelist_migrate(){
 
 const ROLE_LABEL = {analyst: "analyst", admin: "admin", global_admin: "global_admin"};
 
+/* Certificados (cert_store.py e acme_client.py no servidor) */
+
+const CERT_SOURCE_LABEL = {selfsigned: "autoassinado", pem: "enviado (PEM)", pfx: "enviado (PFX)",
+	letsencrypt: "Let's Encrypt", "internal-ca": "CA interna"};
+const CERT_TITLE = {vhost: "Vhost — o que o navegador vê", internal: "Interno — frontend ↔ API"};
+
+function load_cert_config(){
+	get_json("cert-config").then(update_cert_config);
+}
+
+function update_cert_config(state){
+	let rows = $("certRows");
+	rows.replaceChildren();
+	if (!state || !Array.isArray(state.certificates)){
+		rows.appendChild(el("span", {className: "field-hint", text: "Não foi possível ler os certificados."}));
+		return;
+	}
+	for (let cert of state.certificates){
+		let pills = [];
+		if (!cert.present){
+			pills.push(el("span", {className: "pill bad", text: "ausente"}));
+		} else {
+			let tone = cert.daysLeft < 15 ? "bad" : cert.daysLeft < 30 ? "warn" : "ok";
+			pills.push(el("span", {className: "pill " + tone, text: "vence em " + cert.daysLeft + " dia(s)"}));
+			pills.push(el("span", {className: "pill", text: CERT_SOURCE_LABEL[cert.source] || cert.source || "origem desconhecida"}));
+			if (cert.selfSigned){ pills.push(el("span", {className: "pill warn", text: "autoassinado"})); }
+		}
+		let details = cert.present
+			? cert.subject + " · " + (cert.names || []).join(", ") + " · emissor " + cert.issuer + " · válido até " + cert.notAfter
+				+ " · SHA-256 " + (cert.fingerprint || "").substring(0, 16) + "…"
+			: "O certificado é gerado na subida da API.";
+		let actions = [];
+		if (cert.id === "internal"){
+			actions.push(el("button", {className: "btn quiet sm", text: "Reemitir", attrs: {type: "button"},
+				onClick: function(){ reissue_internal_cert(false); }}));
+			actions.push(el("button", {className: "btn danger sm", text: "Trocar a CA interna", attrs: {type: "button"},
+				onClick: function(){ reissue_internal_cert(true); }}));
+		}
+		rows.appendChild(el("div", {className: "col", style: "gap:4px"}, [
+			el("div", {className: "row", style: "gap:8px;flex-wrap:wrap"}, [el("span", {className: "card-title grow", text: CERT_TITLE[cert.id] || cert.id})].concat(pills)),
+			el("span", {className: "field-hint mono", text: details}),
+			actions.length ? el("div", {className: "row", style: "gap:7px"}, actions) : null
+		].filter(Boolean)));
+	}
+	let le = state.letsencrypt || {};
+	$("certLeDomains").value = (le.domains || []).join(", ");
+	$("certLeEmail").value = le.email || "";
+	set_switch("certLeStaging", le.staging !== false);
+	set_switch("certLeRenew", le.autoRenew !== false);
+	set_status("certLeStatus", le.lastError ? "Última tentativa falhou: " + le.lastError
+		: (le.lastAttempt ? "Última emissão em " + le.lastAttempt + "." : ""), le.lastError ? "bad" : "");
+}
+
+function send_cert_form(url, fields, status_id, button_id){
+	let body = new FormData();
+	for (let name of Object.keys(fields)){
+		if (fields[name] !== null && fields[name] !== undefined){ body.append(name, fields[name]); }
+	}
+	$(button_id).disabled = true;
+	set_status(status_id, "Enviando…");
+	fetch(url, {method: "POST", body: body}).then(function(r){
+		return r.json().catch(function(){ return null; }).then(function(data){ return {ok: r.ok, data: data}; });
+	}).then(function(result){
+		$(button_id).disabled = false;
+		// Um certificado de CA trocado por um autoassinado: o servidor pede
+		// confirmação e diz por quê (o HSTS que os navegadores já guardaram)
+		if (result.data && result.data.confirm && !fields.confirm){
+			set_status(status_id, "");
+			ask({title: "Trocar um certificado de CA por um autoassinado?", body: result.data.error,
+				confirmLabel: "Trocar mesmo assim", danger: true}, function(){
+				send_cert_form(url, Object.assign({}, fields, {confirm: "true"}), status_id, button_id);
+			});
+			return;
+		}
+		if (!result.ok || !result.data || result.data.error){
+			set_status(status_id, (result.data && result.data.error) || "Não foi possível gravar o certificado.", "bad");
+			return;
+		}
+		set_status(status_id, "Gravado. O vhost recarrega em até 30 s.", "ok");
+		toast("Certificado gravado.", "ok");
+		update_cert_config(result.data);
+	}).catch(function(){
+		$(button_id).disabled = false;
+		set_status(status_id, "Não foi possível falar com o servidor.", "bad");
+	});
+}
+
+function first_file(id){
+	let input = $(id);
+	return input.files && input.files.length ? input.files[0] : null;
+}
+
+function upload_cert_pem(){
+	if (!first_file("certPemFile") || !first_file("certKeyFile")){
+		set_status("certPemStatus", "Escolha o certificado e a chave privada.", "bad");
+		return;
+	}
+	send_cert_form("cert-config/pem", {certificate: first_file("certPemFile"), key: first_file("certKeyFile"),
+		chain: first_file("certChainFile"), password: $("certPemPassword").value}, "certPemStatus", "certPemBtn");
+}
+
+function upload_cert_pfx(){
+	if (!first_file("certPfxFile")){
+		set_status("certPfxStatus", "Escolha o arquivo PFX.", "bad");
+		return;
+	}
+	send_cert_form("cert-config/pfx", {pfx: first_file("certPfxFile"), password: $("certPfxPassword").value},
+		"certPfxStatus", "certPfxBtn");
+}
+
+function generate_cert_self_signed(){
+	send_cert_form("cert-config/selfsigned", {names: $("certSelfNames").value}, "certSelfStatus", "certSelfBtn");
+}
+
+function reissue_internal_cert(rotate_ca){
+	ask({
+		title: rotate_ca ? "Trocar a CA interna?" : "Reemitir o certificado interno?",
+		body: (rotate_ca ? "Uma CA nova é gerada, e o frontend passa a confiar só nela quando reler o arquivo. " : "")
+			+ "A API lê o certificado interno ao subir: a troca vale depois de reiniciar o contêiner da API.",
+		confirmLabel: rotate_ca ? "Trocar a CA" : "Reemitir",
+		danger: rotate_ca
+	}, function(){
+		post_form("cert-config/internal", {rotateCa: rotate_ca ? "true" : "false"}).then(function(result){
+			if (result.ok && result.data && !result.data.error){
+				update_cert_config(result.data);
+				toast("Certificado interno reemitido. Reinicie o contêiner da API para valer.", "ok");
+			} else {
+				toast((result.data && result.data.error) || "Não foi possível reemitir.", "bad");
+			}
+		});
+	});
+}
+
+function letsencrypt_form(){
+	return {domains: $("certLeDomains").value, email: $("certLeEmail").value.trim(),
+		staging: switch_on("certLeStaging") ? "true" : "false", autoRenew: switch_on("certLeRenew") ? "true" : "false"};
+}
+
+function save_letsencrypt_config(){
+	post_form("cert-config/letsencrypt", letsencrypt_form()).then(function(result){
+		if (result.ok && result.data && !result.data.error){
+			update_cert_config(result.data);
+			toast("Configuração da Let's Encrypt salva.", "ok");
+		} else {
+			set_status("certLeStatus", (result.data && result.data.error) || "Configuração inválida.", "bad");
+		}
+	});
+}
+
+function issue_letsencrypt_cert(){
+	let production = !switch_on("certLeStaging");
+	ask({
+		title: production ? "Emitir na produção da Let's Encrypt?" : "Emitir no ambiente de teste?",
+		body: production ? "A produção limita as emissões por semana. Confira antes, no staging, que a porta 80 chega a este servidor."
+			: "Ensaio: faz o pedido inteiro no ambiente de teste e confere o resultado, sem instalar nada.",
+		confirmLabel: "Emitir"
+	}, function(){
+		$("certLeIssueBtn").disabled = true;
+		set_status("certLeStatus", "Pedindo à Let's Encrypt… pode levar um minuto.");
+		post_form("cert-config/letsencrypt", letsencrypt_form()).then(function(saved){
+			if (!saved.ok || !saved.data || saved.data.error){
+				$("certLeIssueBtn").disabled = false;
+				set_status("certLeStatus", (saved.data && saved.data.error) || "Configuração inválida.", "bad");
+				return;
+			}
+			post_form("cert-config/letsencrypt/issue", {}).then(function(result){
+				$("certLeIssueBtn").disabled = false;
+				if (result.ok && result.data && !result.data.error && result.data.stagingOk){
+					update_cert_config(result.data);
+					set_status("certLeStatus", "O ensaio no staging deu certo, e nada foi instalado. Desligue o staging para emitir na produção.", "ok");
+				} else if (result.ok && result.data && !result.data.error){
+					update_cert_config(result.data);
+					toast("Certificado emitido. O vhost recarrega em até 30 s.", "ok");
+				} else {
+					set_status("certLeStatus", (result.data && result.data.error) || "A emissão falhou.", "bad");
+				}
+			});
+		});
+	});
+}
+
+/* Perfis de acesso (access_profiles.py no servidor) */
+
+let profiles_state = {catalogue: [], roleDefaults: {}, profiles: []};
+let profile_editing = null;
+
+function load_profiles(){
+	return get_json("api/profiles").then(function(state){
+		if (!state || !Array.isArray(state.profiles)){
+			set_status("usersStatus", "Não foi possível carregar os perfis de acesso.", "bad");
+			return;
+		}
+		profiles_state = state;
+		render_profiles();
+	});
+}
+
+function render_profiles(){
+	let container = $("profilesRows");
+	container.replaceChildren();
+	if (!profiles_state.profiles.length){
+		container.appendChild(el("div", {className: "profile-row"}, [
+			el("span", {className: "field-hint", text: "Nenhum perfil criado: toda conta vê o que o cargo dá."})
+		]));
+		return;
+	}
+	for (let profile of profiles_state.profiles){
+		container.appendChild(el("div", {className: "profile-row"}, [
+			el("div", {className: "grow col", style: "gap:2px;min-width:0"}, [
+				el("span", {text: profile.name, style: "font-weight:500"}),
+				el("span", {className: "field-hint truncate", text: profile.description || (profile.items.length + " item(ns) liberado(s)")})
+			]),
+			el("span", {className: "pill", text: profile.items.length + " item(ns)"}),
+			el("span", {className: "pill", text: profile.users + " conta(s)"}),
+			el("button", {className: "btn quiet sm", text: "Editar", attrs: {type: "button"},
+				onClick: function(){ open_profile_modal(profile); }}),
+			el("button", {className: "btn danger sm", text: "Apagar", attrs: {type: "button"},
+				onClick: function(){ remove_profile(profile); }})
+		]));
+	}
+}
+
+function open_profile_modal(profile){
+	profile_editing = profile && profile.id ? profile : null;
+	$("profileModalTitle").textContent = profile_editing ? "Editar perfil" : "Novo perfil";
+	$("profileName").value = profile_editing ? profile_editing.name : "";
+	$("profileDescription").value = profile_editing ? profile_editing.description : "";
+	$("profileFromRole").value = "";
+	set_status("profileModalStatus", "");
+	render_profile_checks(profile_editing ? profile_editing.items : []);
+	open_modal("profileModal");
+	window.setTimeout(function(){ $("profileName").focus(); }, 30);
+}
+
+const PROFILE_GROUPS = ["Telas", "Configurações", "Integrações", "Ações"];
+
+function render_profile_checks(selected){
+	let container = $("profileChecks");
+	container.replaceChildren();
+	for (let group of PROFILE_GROUPS){
+		let entries = profiles_state.catalogue.filter(function(entry){ return entry.group === group; });
+		if (!entries.length){ continue; }
+		let column = el("div", {className: "profile-group"}, [el("span", {className: "field-label", text: group.toUpperCase()})]);
+		for (let entry of entries){
+			let box = el("input", {attrs: {type: "checkbox"}});
+			box.value = entry.id;
+			box.checked = selected.indexOf(entry.id) !== -1;
+			// O cargo que dava este item até aqui, para quem monta o perfil saber
+			// quando está dando mais do que o cargo daria
+			column.appendChild(el("label", {className: "profile-check"}, [
+				box, el("span", {text: entry.label}), el("span", {className: "field-hint mono", text: entry.role})
+			]));
+		}
+		container.appendChild(column);
+	}
+}
+
+function profile_from_role(){
+	let role = $("profileFromRole").value;
+	if (!role){ return; }
+	render_profile_checks(profiles_state.roleDefaults[role] || []);
+}
+
+function save_profile(){
+	let items = [];
+	for (let box of $$("#profileChecks input[type=checkbox]")){ if (box.checked){ items.push(box.value); } }
+	let body = {name: $("profileName").value.trim(), description: $("profileDescription").value.trim(), items: items};
+	if (!body.name){
+		set_status("profileModalStatus", "Dê um nome ao perfil.", "bad");
+		return;
+	}
+	$("profileSaveBtn").disabled = true;
+	post_json(profile_editing ? "api/profiles/" + profile_editing.id : "api/profiles", body).then(function(result){
+		$("profileSaveBtn").disabled = false;
+		if (!result.ok || !result.data || result.data.error){
+			set_status("profileModalStatus", (result.data && result.data.error) || "Não foi possível salvar o perfil.", "bad");
+			return;
+		}
+		profiles_state = result.data;
+		close_modal();
+		toast("Perfil " + body.name + " salvo.", "ok");
+		load_users();
+	});
+}
+
+function remove_profile(profile){
+	ask({
+		title: "Apagar o perfil " + profile.name + "?",
+		body: "Um perfil em uso não pode ser apagado: troque antes o perfil das contas que o usam.",
+		confirmLabel: "Apagar",
+		danger: true
+	}, function(){
+		fetch("api/profiles/" + profile.id, {method: "DELETE"}).then(function(r){
+			return r.json().then(function(data){ return {ok: r.ok, data: data}; });
+		}).then(function(result){
+			if (!result.ok || result.data.error){
+				toast((result.data && result.data.error) || "Não foi possível apagar o perfil.", "bad");
+				return;
+			}
+			profiles_state = result.data;
+			render_profiles();
+			toast("Perfil apagado.", "ok");
+		});
+	});
+}
+
+function set_user_profile(user_id, profile_id){
+	users_mutation(post_json("api/users/" + user_id + "/profile", {profileId: profile_id || null}), "Perfil da conta atualizado.");
+}
+
+function profile_select(user){
+	let select = el("select", {className: "select"});
+	let by_role = el("option", {text: "pelo cargo"});
+	by_role.value = "";
+	select.appendChild(by_role);
+	for (let profile of profiles_state.profiles){
+		let option = el("option", {text: profile.name});
+		option.value = String(profile.id);
+		if (user.profileId === profile.id){ option.selected = true; }
+		select.appendChild(option);
+	}
+	select.onchange = function(){ set_user_profile(user.id, select.value ? parseInt(select.value, 10) : null); };
+	return el("span", {className: "select-wrap"}, [select]);
+}
+
 function load_users(){
+	load_profiles().then(render_users);
+}
+
+function render_users(){
 	get_json("api/users").then(function(users){
 		let container = $("usersRows");
 		container.replaceChildren();
@@ -4199,6 +5252,10 @@ function load_users(){
 		}
 
 		for (let user of users){
+			// A própria conta não se exclui nem muda de cargo — o servidor recusa
+			// os dois (auth.api_delete_user, auth.api_set_role). A linha não
+			// oferece o que seria recusado
+			let is_self = Boolean(current_identity) && current_identity.id === user.id;
 			let select = el("select", {className: "select"});
 			for (let role of ["analyst", "admin", "global_admin"]){
 				let option = el("option", {text: ROLE_LABEL[role]});
@@ -4207,6 +5264,10 @@ function load_users(){
 				select.appendChild(option);
 			}
 			select.onchange = function(){ set_user_role(user.id, select.value); };
+			if (is_self){
+				select.disabled = true;
+				select.title = "O próprio cargo só muda pelas mãos de outro global_admin.";
+			}
 
 			let actions = [];
 			if (user.locked){
@@ -4227,8 +5288,10 @@ function load_users(){
 				actions.push(el("button", {className: "btn quiet", text: "Resetar MFA", attrs: {type: "button"},
 					onClick: function(){ reset_user_mfa(user.id, user.username); }}));
 			}
-			actions.push(el("button", {className: "btn danger", text: "Excluir", attrs: {type: "button"},
-				onClick: function(){ delete_user(user.id, user.username); }}));
+			if (!is_self){
+				actions.push(el("button", {className: "btn danger", text: "Excluir", attrs: {type: "button"},
+					onClick: function(){ delete_user(user.id, user.username); }}));
+			}
 
 			container.appendChild(el("div", {className: "tbl-row cols-users"}, [
 				el("div", {className: "row", style: "gap:10px;min-width:0"}, [
@@ -4239,6 +5302,7 @@ function load_users(){
 					user.authSource === "sso" ? el("span", {className: "pill", text: "SSO"}) : null
 				].filter(Boolean)),
 				el("span", {className: "select-wrap"}, [select]),
+				profile_select(user),
 				// Bloqueio e segundo fator dividem a coluna: as duas coisas são
 				// "em que estado esta conta está". O MFA pendente é dito em voz
 				// alta porque uma conta sem ele é uma conta que ainda não
@@ -4378,27 +5442,22 @@ function change_own_password(){
 				set_status("accountStatus", (result.data && result.data.error) || "A operação falhou.", "bad");
 				// Errar a senha atual vezes demais trava a conta e encerra a sessão
 				if (result.data && result.data.reauthenticate){
-					window.setTimeout(function(){ window.location.href = "login"; }, 2500);
+					window.setTimeout(go_to_login, 2500);
 				}
 				return;
 			}
 			set_status("accountStatus", "Senha alterada. Encerrando a sessão…", "ok");
-			window.setTimeout(function(){ window.location.href = "login"; }, 1200);
+			window.setTimeout(go_to_login, 1200);
 		});
 }
 
 /* ========================================================================== */
-/* AI chat                                                                    */
+/* Rótulos e sugestões das conversas com a IA                                 */
+/*                                                                            */
+/* Compartilhados pelo assistente ao lado do caso e pelo assistente da        */
+/* Auditoria, que desenham as mesmas bolhas (a aba "Chat AI" deixou de       */
+/* existir; só estas duas constantes ficaram).                                */
 /* ========================================================================== */
-
-// State of the AI chat: the loaded case reference and the conversation history
-// (sent back to the server so the LLM keeps the conversational context)
-let chat_case_ref = null;
-let chat_history = [];
-// Whether this conversation has already told the analyst that the case carries
-// prompt injection markers. Once per loaded case: repeated on every turn, the
-// warning turns into furniture and stops being read
-let chat_injection_warned = false;
 
 const CHAT_ROLE_LABEL = {user: "ANALISTA", assistant: "IA", warn: "ALERTA", info: "CONTEXTO"};
 
@@ -4407,145 +5466,6 @@ const CHAT_SUGGESTIONS = [
 	"Resuma as táticas de engenharia social.",
 	"Que ações de remediação você recomenda?"
 ];
-
-function chat_append(role, text){
-	let bubble = el("div", {className: "bubble"}, [
-		el("span", {className: "bubble-role", text: CHAT_ROLE_LABEL[role] || "CONTEXTO"}),
-		el("p", {className: "bubble-text", text: text})
-	]);
-	$("chatThread").appendChild(el("div", {className: "chat-row " + role}, [bubble]));
-	$("chatMessages").scrollTop = $("chatMessages").scrollHeight;
-	return bubble.lastChild;
-}
-
-function chat_set_busy(busy){
-	$("chatLoadBtn").disabled = busy;
-	$("chatSendBtn").disabled = busy || chat_case_ref == null;
-	$("chatQuestionInput").disabled = busy || chat_case_ref == null;
-}
-
-function render_chat_suggestions(){
-	let dock = $("chatSuggestions");
-	dock.replaceChildren();
-	if (chat_case_ref == null){ return; }
-	for (let text of CHAT_SUGGESTIONS){
-		dock.appendChild(el("button", {className: "chip", text: text, attrs: {type: "button"},
-			onClick: function(){ $("chatQuestionInput").value = text; chat_send(); }}));
-	}
-}
-
-function chat_scope_rows(rows){
-	let container = $("chatScopeRows");
-	container.replaceChildren();
-	for (let [label, value] of rows){
-		container.appendChild(el("div", {className: "row baseline", style: "gap:10px"}, [
-			el("span", {text: label, style: "font-size:var(--fs-micro);color:var(--t4);flex:0 0 auto"}),
-			el("span", {className: "mono truncate push", text: value, style: "font-size:var(--fs-micro);color:var(--t1);text-align:right"})
-		]));
-	}
-}
-
-// GET api/chat/load/<ref> — loads the analyzed email (body, IOCs, verdict) of the
-// case on the server so the following questions are answered with that context
-function chat_load_context(){
-	let case_ref = $("chatCaseInput").value.trim();
-	if (case_ref === ""){
-		set_status("chatContextStatus", "Informe o número ou o id do caso.", "bad");
-		return;
-	}
-	chat_set_busy(true);
-	set_status("chatContextStatus", "Carregando o contexto do caso…");
-
-	get_json("api/chat/load/" + encodeURIComponent(case_ref)).then(function(response){
-		chat_set_busy(false);
-		if (response == null || response.error){
-			chat_case_ref = null;
-			chat_set_busy(false);
-			$("chatScopeRows").replaceChildren();
-			set_status("chatContextStatus", (response && response.error) || "Não foi possível carregar o contexto do caso.", "bad");
-			return;
-		}
-		chat_case_ref = case_ref;
-		chat_history = [];
-		$("chatThread").replaceChildren();
-		chat_set_busy(false);
-
-		$("chatTitle").textContent = "Chat AI · " + response.label;
-		$("chatSubtitle").textContent = response.title;
-		show($("chatLockPill"), true);
-		show($("chatClearBtn"), true);
-		$("chatScopeDot").className = "dot ok";
-		let verdict = VERDICT_LABEL[response.verdict] || response.verdict;
-		chat_scope_rows([
-			["Registro", response.label],
-			["Veredito", verdict],
-			["Observáveis", String(response.observableCount)],
-			["Corpo do e-mail", response.hasBody ? "disponível" : "indisponível"]
-		]);
-		set_status("chatContextStatus", response.label + " carregado.", "ok");
-		chat_append("info", "Contexto carregado: " + response.label + " — \"" + response.title
-			+ "\" (" + verdict + ", " + response.observableCount + " observáveis). Pergunte o que quiser sobre este e-mail.");
-		render_chat_suggestions();
-		$("chatQuestionInput").focus();
-	});
-}
-
-function chat_clear_context(){
-	chat_case_ref = null;
-	chat_history = [];
-	chat_injection_warned = false;
-	$("chatThread").replaceChildren();
-	$("chatScopeRows").replaceChildren();
-	$("chatScopeDot").className = "dot";
-	$("chatTitle").textContent = "Chat AI";
-	$("chatSubtitle").textContent = "carregue um caso para começar";
-	show($("chatLockPill"), false);
-	show($("chatClearBtn"), false);
-	set_status("chatContextStatus", "Nenhum caso carregado.");
-	render_chat_suggestions();
-	chat_set_busy(false);
-}
-
-// POST api/chat/message
-function chat_send(){
-	let question = $("chatQuestionInput").value.trim();
-	if (question === "" || chat_case_ref == null || $("chatSendBtn").disabled){ return; }
-	$("chatQuestionInput").value = "";
-	chat_append("user", question);
-	let thinking = chat_append("assistant", "Pensando…");
-	chat_set_busy(true);
-
-	post_form("api/chat/message", {
-		caseRef: chat_case_ref,
-		question: question,
-		history: JSON.stringify(chat_history)
-	}).then(function(result){
-		chat_set_busy(false);
-		let response = result.ok ? result.data : null;
-		if (response == null || response.error){
-			thinking.textContent = "Erro: " + ((response && response.error)
-				|| "a IA não respondeu. Verifique as configurações do modelo e tente de novo.");
-		} else {
-			thinking.textContent = response.answer;
-			/* The case tried to steer the model. The analyst is reading an answer
-			 * about an e-mail written to manipulate whoever analyses it, so the
-			 * warning belongs next to the answer and not only in the server log.
-			 * Said once per conversation: a banner on every turn stops being read. */
-			if ((response.injectionDetected || []).length && !chat_injection_warned){
-				chat_injection_warned = true;
-				chat_append("warn", "Atenção: este caso contém marcadores de prompt injection ("
-					+ response.injectionDetected.join(", ") + "). O e-mail tenta manipular a análise; "
-					+ "leia as respostas da IA com esse contexto.");
-			}
-			chat_history.push({role: "user", content: question});
-			chat_history.push({role: "assistant", content: response.answer});
-			// Keep only the most recent exchanges to bound the context size
-			if (chat_history.length > 12){ chat_history = chat_history.slice(-12); }
-		}
-		$("chatMessages").scrollTop = $("chatMessages").scrollHeight;
-		$("chatQuestionInput").focus();
-	});
-}
 
 /* ========================================================================== */
 /* Auditoria                                                                  */
@@ -4703,7 +5623,7 @@ function audit_day_label(date){
 	let today = new Date();
 	let yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
 	let same = function(a, b){ return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); };
-	let full = date.toLocaleDateString("pt-BR", {weekday: "long", day: "2-digit", month: "long", year: "numeric"});
+	let full = date.toLocaleDateString(ui_locale(), {weekday: "long", day: "2-digit", month: "long", year: "numeric"});
 	if (same(date, today)){ return "Hoje · " + full; }
 	if (same(date, yesterday)){ return "Ontem · " + full; }
 	return full.charAt(0).toUpperCase() + full.slice(1);
@@ -4711,7 +5631,7 @@ function audit_day_label(date){
 
 function audit_short_date(text){
 	let date = audit_parse_at(text);
-	return date ? date.toLocaleString("pt-BR", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) : (text || "—");
+	return date ? date.toLocaleString(ui_locale(), {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) : (text || "—");
 }
 
 function audit_params(include_page){
@@ -4797,7 +5717,7 @@ function render_audit_filters(){
 
 	let select = $("auditEvent");
 	let events = (audit_state.facets.events || []).slice().sort(function(a, b){
-		return audit_event_label(a.event).localeCompare(audit_event_label(b.event), "pt-BR");
+		return audit_event_label(a.event).localeCompare(audit_event_label(b.event), ui_locale());
 	});
 	select.replaceChildren(el("option", {text: "Todos os eventos", attrs: {value: ""}}));
 	let present = false;
@@ -4830,7 +5750,7 @@ function render_audit_filters(){
 
 function audit_period_text(){
 	let filters = audit_state.filters;
-	let day = function(value){ let date = audit_parse_at(value + " 00:00:00"); return date ? date.toLocaleDateString("pt-BR") : value; };
+	let day = function(value){ let date = audit_parse_at(value + " 00:00:00"); return date ? date.toLocaleDateString(ui_locale()) : value; };
 	if (filters.from && filters.to){ return "de " + day(filters.from) + " a " + day(filters.to); }
 	if (filters.from){ return "desde " + day(filters.from); }
 	if (filters.to){ return "até " + day(filters.to); }
@@ -4846,7 +5766,7 @@ function render_audit_summary(){
 	let period = audit_period_text();
 	$("auditSub").textContent = audit_state.loaded
 		? (audit_state.has_log
-			? audit_state.window_total.toLocaleString("pt-BR") + " registros · " + period
+			? audit_state.window_total.toLocaleString(ui_locale()) + " registros · " + period
 				+ (audit_state.oldest ? " · trilha desde " + audit_short_date(audit_state.oldest) : "")
 			: "a trilha ainda está vazia")
 		: "carregando…";
@@ -4860,10 +5780,10 @@ function render_audit_summary(){
 	if (filters.q){ parts.push(["contém", filters.q]); }
 
 	let line = el("p", {className: "audit-summary-line"});
-	line.appendChild(el("strong", {text: audit_state.total.toLocaleString("pt-BR")}));
+	line.appendChild(el("strong", {text: audit_state.total.toLocaleString(ui_locale())}));
 	line.appendChild(document.createTextNode(audit_state.total === 1 ? " registro" : " registros"));
 	if (parts.length){
-		line.appendChild(document.createTextNode(" de " + audit_state.window_total.toLocaleString("pt-BR") + " no período, com "));
+		line.appendChild(document.createTextNode(" de " + audit_state.window_total.toLocaleString(ui_locale()) + " no período, com "));
 		parts.forEach(function(part, index){
 			if (index > 0){ line.appendChild(document.createTextNode(index === parts.length - 1 ? " e " : ", ")); }
 			line.appendChild(document.createTextNode(part[0] + " "));
@@ -5040,7 +5960,7 @@ function render_audit_pager(){
 	let first = total ? audit_state.offset + 1 : 0;
 	let last = Math.min(audit_state.offset + AUDIT_PAGE_SIZE, total);
 	$("auditPagerLabel").textContent = total
-		? first.toLocaleString("pt-BR") + "–" + last.toLocaleString("pt-BR") + " de " + total.toLocaleString("pt-BR") + " · mais novos primeiro"
+		? first.toLocaleString(ui_locale()) + "–" + last.toLocaleString(ui_locale()) + " de " + total.toLocaleString(ui_locale()) + " · mais novos primeiro"
 		: "";
 	$("auditPrevBtn").disabled = audit_state.offset === 0;
 	$("auditNextBtn").disabled = audit_state.offset + AUDIT_PAGE_SIZE >= total;
@@ -5117,9 +6037,9 @@ function audit_clear_filters(){
 function audit_export(){
 	let button = $("auditExportBtn");
 	button.disabled = true;
-	window.location.href = "api/audit/export?" + audit_params(false);
+	window.location.href = "/api/audit/export?" + audit_params(false);
 	window.setTimeout(function(){ button.disabled = false; }, 1500);
-	toast("Exportando " + audit_state.total.toLocaleString("pt-BR") + " registros em CSV.");
+	toast("Exportando " + audit_state.total.toLocaleString(ui_locale()) + " registros em CSV.");
 }
 
 // --- Assistente -----------------------------------------------------------------
@@ -5177,15 +6097,15 @@ function render_audit_ai_scope(){
 	let context = audit_ai.context;
 	if (!context){ return; }
 	let window_text = audit_short_date(context.since + ":00") + " → " + audit_short_date(context.until + ":00");
-	$("auditAiSub").textContent = "últimos " + context.days + " dias · " + context.total.toLocaleString("pt-BR") + " registros";
+	$("auditAiSub").textContent = "últimos " + context.days + " dias · " + context.total.toLocaleString(ui_locale()) + " registros";
 	box.appendChild(el("div", {className: "audit-ai-facts"}, [
 		el("span", {className: "mono", text: window_text}),
 		context.model ? el("span", {className: "mono truncate", text: context.model, title: "Modelo configurado em Configurações → IA"}) : null
 	].filter(Boolean)));
 	if (context.included < context.total){
 		box.appendChild(el("p", {className: "audit-ai-note",
-			text: "A semana não cabe inteira no modelo: ele lê " + context.included.toLocaleString("pt-BR") + " dos "
-				+ context.total.toLocaleString("pt-BR") + " registros — todas as falhas e recusas primeiro, depois os mais recentes. As contagens que ele usa valem para a semana inteira."}));
+			text: "A semana não cabe inteira no modelo: ele lê " + context.included.toLocaleString(ui_locale()) + " dos "
+				+ context.total.toLocaleString(ui_locale()) + " registros — todas as falhas e recusas primeiro, depois os mais recentes. As contagens que ele usa valem para a semana inteira."}));
 	}
 	if (audit_ai.history.length){
 		box.appendChild(el("button", {className: "btn quiet xs", text: "Nova conversa", attrs: {type: "button"}, onClick: audit_ai_reset}));
@@ -5219,7 +6139,7 @@ function load_audit_ai_context(){
 			} else if (context.total === 0){
 				audit_ai_append("info", "Não há registros nos últimos " + context.days + " dias. Posso responder assim que a trilha tiver movimento.");
 			} else {
-				audit_ai_append("info", "Estou lendo " + context.total.toLocaleString("pt-BR") + " registros dos últimos "
+				audit_ai_append("info", "Estou lendo " + context.total.toLocaleString(ui_locale()) + " registros dos últimos "
 					+ context.days + " dias. Pergunte sobre logins, falhas, alterações de configuração, bloqueios ou quem fez o quê.");
 			}
 		}
@@ -5320,6 +6240,12 @@ const OBSERVABLE_LABEL = {
 };
 
 function show_integr_tab(tab){
+	if (!can_see("integr." + tab)){
+		let fallback = first_visible_tab("integr");
+		if (!fallback){ return; }
+		tab = fallback;
+	}
+	current_integr_tab = tab;
 	for (let panel of $$("[data-integr-tab]")){
 		show(panel, panel.dataset.integrTab === tab);
 	}
@@ -5337,6 +6263,7 @@ function show_integr_tab(tab){
 	// para comparar: a lista é toda do usuário, e uma lista vazia é
 	// indistinguível de "ainda não carreguei"
 	if (tab === "tickets"){ load_connectors(); }
+	sync_url();
 }
 
 function load_analyzers(){
@@ -5351,12 +6278,14 @@ function load_analyzers(){
 		analyzer_registry = payload.registry || [];
 		analyzer_config = payload.config || {};
 		analyzer_families = payload.families || {};
+		feed_status = payload.feedStatus || {};
 		custom_defs = payload.custom || [];
 		custom_limit = payload.customLimit || custom_limit;
 		custom_levels = payload.levels || custom_levels;
 		custom_observables = payload.customObservables || custom_observables;
 		observable_hint = payload.observableHint || observable_hint;
 		render_analyzer_cards();
+		poll_feeds(0);
 	});
 }
 
@@ -5394,6 +6323,7 @@ function render_analyzer_cards(){
 
 	let enabled = 0;
 	let shown = 0;
+	let feed_specs = [];
 	for (let spec of analyzer_registry){
 		let entry = analyzer_config[spec.id] || {};
 		if (entry.enabled){ enabled++; }
@@ -5401,6 +6331,9 @@ function render_analyzer_cards(){
 		// what you see, it does not change how many analyzers are actually on
 		if (!analyzer_matches(spec, analyzer_query)){ continue; }
 		shown++;
+		// Os feeds públicos têm grupo e card próprios (render_feed_cards): não pedem
+		// chave nem limiar, e o que interessa neles é a cópia local e a licença
+		if (spec.family === "feed"){ feed_specs.push(spec); continue; }
 
 		// A configured-but-off analyzer reads differently from one never touched
 		let configured = spec.credentials.every(function(field){
@@ -5445,6 +6378,8 @@ function render_analyzer_cards(){
 		]));
 	}
 
+	render_feed_cards(feed_specs);
+
 	// A filter that matches nothing must say so, not leave an empty grid that
 	// reads as "there are no analyzers"
 	if (shown === 0){
@@ -5464,6 +6399,178 @@ function render_analyzer_cards(){
 	$("analyzersPipelineNote").textContent = enabled === 0
 		? "Nenhum analisador habilitado. Sem nenhum, o veredito sai apenas da avaliação de engenharia social do LLM."
 		: enabled + " habilitado(s) — é o que o pipeline roda em cada análise.";
+}
+
+/* ========================================================================== */
+/* Feeds públicos — listas baixadas para o servidor, consultadas offline       */
+/* ========================================================================== */
+/*
+ * O card mostra o que importa de uma cópia local: se existe, quantas entradas
+ * tem, quando foi confirmada como atual e o que deu errado. Sem dado, o campo
+ * diz "—", nunca um número de exemplo. A licença fica no próprio card porque
+ * "gratuito" não quer dizer "livre para qualquer uso", e quem liga a lista é
+ * quem responde por isso.
+ */
+
+let feed_status = {};
+let feed_poll_timer = null;
+const FEED_POLL_MS = 3000;
+const FEED_POLL_LIMIT = 200;
+
+function feed_state(spec, entry){
+	let state = feed_status[spec.id] || {};
+	if (!entry.enabled){ return {tone: "", label: "desligado"}; }
+	if (state.refreshing){ return {tone: "warn", label: "baixando…"}; }
+	if (state.status === "fresh"){ return {tone: "ok", label: "atualizado"}; }
+	if (state.status === "stale"){ return {tone: "warn", label: "desatualizado"}; }
+	return state.error ? {tone: "bad", label: "falhou"} : {tone: "warn", label: "sem dados"};
+}
+
+function render_feed_cards(specs){
+	show($("feedsGroup"), specs.length > 0);
+	let container = $("feedCards");
+	container.replaceChildren();
+	for (let spec of specs){
+		let entry = analyzer_config[spec.id] || {};
+		let state = feed_status[spec.id] || {};
+		let pill = feed_state(spec, entry);
+		let count = state.count == null ? "—" : Number(state.count).toLocaleString(ui_locale());
+		let checked = state.checkedAt ? format_date(state.checkedAt * 1000) : "—";
+
+		let license = [
+			el("span", {className: "field-label", text: "LICENÇA"}),
+			el("p", {className: "card-note", text: spec.license.note})
+		];
+		let terms = el("a", {text: "ver os termos", attrs: {href: spec.license.url, target: "_blank",
+			rel: "noopener noreferrer"}});
+		license.push(terms);
+
+		let buttons = [
+			el("button", {className: "btn sm", text: entry.enabled ? "Desativar" : "Ativar",
+				attrs: {type: "button"}, onClick: function(){ toggle_feed(spec); }})
+		];
+		if (entry.enabled){
+			// Propriedade, não atributo: el() usa setAttribute, e setAttribute("disabled", null)
+			// grava a string "null" e desabilita o botão para sempre
+			let refresh_btn = el("button", {className: "btn sm", text: "Atualizar agora",
+				attrs: {type: "button"}, onClick: function(){ refresh_feed_now(spec); }});
+			refresh_btn.disabled = !!state.refreshing;
+			buttons.unshift(refresh_btn);
+		}
+
+		container.appendChild(el("div", {className: "card"}, [
+			el("div", {className: "row top"}, [
+				el("div", {className: "grow col", style: "gap:2px"}, [
+					el("div", {className: "title-line"}, [
+						el("span", {className: "card-title", text: spec.name}),
+						info_tip(spec.description)
+					]),
+					el("span", {className: "card-code", text: spec.kind})
+				]),
+				el("span", {className: "pill " + pill.tone, text: pill.label})
+			]),
+			// Licença que o projeto não deixa clara: o aviso fica no card, não só no texto
+			spec.license.class !== "free"
+				? el("div", {className: "row"}, [el("span", {className: "pill warn", text: "confirmar licença"})])
+				: null,
+			el("div", {className: "col", style: "gap:3px"}, license),
+			el("div", {className: "row", style: "gap:14px;flex-wrap:wrap"}, [
+				el("span", {className: "card-code", text: "indicadores"}),
+				el("span", {className: "mono", text: count}),
+				el("span", {className: "card-code", text: "verificado"}),
+				el("span", {className: "mono", text: checked})
+			]),
+			state.error && entry.enabled
+				? el("span", {className: "field-hint", style: "color:var(--bad)", text: state.error})
+				: null,
+			el("div", {className: "card-foot"}, [el("span", {className: "grow"})].concat(buttons))
+		]));
+	}
+	$("feedsRecommendedBtn").disabled = specs.every(function(spec){
+		return !spec.feed.recommended || (analyzer_config[spec.id] || {}).enabled;
+	});
+}
+
+// A cópia é baixada em segundo plano; consulta o estado até ninguém estar baixando
+function poll_feeds(attempt){
+	window.clearTimeout(feed_poll_timer);
+	let busy = Object.keys(feed_status).some(function(id){ return feed_status[id].refreshing; });
+	if (!busy || attempt > FEED_POLL_LIMIT){ return; }
+	feed_poll_timer = window.setTimeout(function(){
+		get_json("api/feeds").then(function(payload){
+			if (payload && payload.feedStatus){
+				feed_status = payload.feedStatus;
+				render_analyzer_cards();
+			}
+			poll_feeds(attempt + 1);
+		});
+	}, FEED_POLL_MS);
+}
+
+// O servidor responde antes de a tarefa em segundo plano começar, então o estado
+// que ele devolve ainda diz "parado". Marcar aqui evita a tela mostrar "sem dados"
+// por três segundos e o polling desistir antes do primeiro byte
+function mark_feed_refreshing(ids){
+	for (let id of ids){
+		feed_status[id] = Object.assign({}, feed_status[id], {refreshing: true});
+	}
+}
+
+function toggle_feed(spec){
+	let turning_on = !(analyzer_config[spec.id] || {}).enabled;
+	post_json("api/analyzers/" + encodeURIComponent(spec.id), {enabled: turning_on}).then(function(result){
+		if (!result.ok){
+			toast((result.data && result.data.error) || "Não foi possível salvar.", "bad");
+			return;
+		}
+		analyzer_config = result.data.config || analyzer_config;
+		feed_status = result.data.feedStatus || feed_status;
+		if (turning_on && (feed_status[spec.id] || {}).status !== "fresh"){ mark_feed_refreshing([spec.id]); }
+		render_analyzer_cards();
+		poll_feeds(0);
+	});
+}
+
+function refresh_feed_now(spec){
+	post_json("api/feeds/" + encodeURIComponent(spec.id) + "/refresh", {}).then(function(result){
+		if (!result.ok){
+			toast((result.data && result.data.error) || "Não foi possível atualizar.", "bad");
+			return;
+		}
+		feed_status = result.data.feedStatus || feed_status;
+		mark_feed_refreshing([spec.id]);
+		render_analyzer_cards();
+		poll_feeds(0);
+	});
+}
+
+// Nada é baixado sem este clique, e a confirmação diz o que e de onde
+function enable_recommended_feeds(){
+	let pack = analyzer_registry.filter(function(spec){
+		return spec.family === "feed" && spec.feed.recommended && !(analyzer_config[spec.id] || {}).enabled;
+	});
+	if (pack.length === 0){ return; }
+	let lines = pack.map(function(spec){ return "• " + spec.name + " — " + spec.feed.host; });
+	ask({
+		title: "Ativar o pacote recomendado",
+		sub: "Serão baixadas estas listas gratuitas:",
+		body: lines.join("\n"),
+		confirmLabel: "Ativar e baixar"
+	}, function(){
+		post_json("api/feeds/recommended", {}).then(function(result){
+			if (!result.ok){
+				toast((result.data && result.data.error) || "Não foi possível ativar o pacote.", "bad");
+				return;
+			}
+			analyzer_config = result.data.config || analyzer_config;
+			feed_status = result.data.feedStatus || feed_status;
+			mark_feed_refreshing((result.data.enabled || []).filter(function(id){
+				return (feed_status[id] || {}).status !== "fresh";
+			}));
+			render_analyzer_cards();
+			poll_feeds(0);
+		});
+	});
 }
 
 /* ========================================================================== */
@@ -6357,7 +7464,7 @@ function preview_connector(){
 // Num conector genérico quem escolheu o endpoint foi o usuário, e não há como
 // saber se ele é de leitura — então o aviso vem antes, e é explícito.
 function test_connector(){
-	if (!window.confirm("Este teste envia a requisição de verdade e vai criar um registro real na ferramenta de destino. Continuar?")){
+	if (!window.confirm(t("Este teste envia a requisição de verdade e vai criar um registro real na ferramenta de destino. Continuar?"))){
 		return;
 	}
 	set_status("connectorModalStatus", "disparando…");
@@ -7390,7 +8497,7 @@ function verdict_label(verdict){
 function format_date(ms){
 	if (!ms){ return "—"; }
 	let date = new Date(ms);
-	return date.toLocaleDateString("pt-BR") + " " + date.toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"});
+	return date.toLocaleDateString(ui_locale()) + " " + date.toLocaleTimeString(ui_locale(), {hour: "2-digit", minute: "2-digit"});
 }
 
 function format_day(iso){
@@ -7464,6 +8571,9 @@ function reload_insights(){
 
 function load_insights(){
 	$("execSub").textContent = "consultando informações…";
+	// O card do panorama externo segue o mesmo período e não espera os insights:
+	// uma fonte de fora não depende do histórico de casos responder
+	load_exec_intel();
 	get_json("api/insights?range=" + encodeURIComponent(insights_range)).then(function(payload){
 		if (payload == null || payload.error){
 			insights_payload = null;
@@ -7865,7 +8975,7 @@ function render_phish_live_stamp(){
 	let stamp = $("phishSubjectsStamp");
 	if (!stamp){ return; }
 	if (!phish_live_at){ stamp.textContent = ""; return; }
-	let time = phish_live_at.toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+	let time = phish_live_at.toLocaleTimeString(ui_locale(), {hour: "2-digit", minute: "2-digit", second: "2-digit"});
 	stamp.classList.toggle("stale", phish_live_failed);
 	stamp.textContent = phish_live_failed
 		? "releitura falhou · dados de " + time
@@ -8512,7 +9622,7 @@ function render_case_list(container, rows, on_click, notice, selected_ref){
 		let node = el("div", {className: "mail-row" + (selected ? " selected" : "")}, [
 			el("div", {className: "rail-mark"}),
 			el("div", {className: "row", style: "gap:8px;width:100%"}, [
-				el("span", {className: "dot " + verdict_tone(row.verdict)}),
+				el("span", {className: "vdot " + verdict_tone(row.verdict), title: verdict_label(row.verdict)}),
 				el("span", {className: "mail-from truncate grow", text: row.sender || "(remetente não registrado)"}),
 				el("span", {className: "pill " + verdict_tone(row.verdict), text: verdict_label(row.verdict),
 					title: row.originalVerdict ? "A análise classificou como " + verdict_label(row.originalVerdict)
@@ -8657,6 +9767,9 @@ function open_desk(row){
 	case_surface = "queues";
 	selected_desk_case = row;
 	render_case_list($("deskRows"), desk_rows, open_desk, "", row.ref);
+	// The address names the case the work desk has open
+	url_case_ref = row.ref;
+	sync_url();
 	open_case(row, true);
 }
 
@@ -8695,6 +9808,7 @@ const TRAIL_STAGE_LABEL = {
 	score: "SCORE",
 	whitelist: "WHITELIST",
 	memory: "MEMÓRIA DE VEREDITO",
+	precedent: "PRECEDENTE DA EQUIPE",
 	coverage: "COBERTURA"
 };
 const COUNCIL_ROLE_LABEL = {analyst: "analista", skeptic: "cético", reviewer: "revisor"};
@@ -8708,10 +9822,39 @@ function format_iso(iso){
 // work desk). The detail is shared; what a decision reloads afterwards is not
 let case_surface = "done";
 
+// Back to the empty detail: nothing is open, so nothing can be decided. Anything
+// still in flight for the old case finds `selected_case` null and drops its answer.
+function close_case(){
+	if (!selected_case && !selected_desk_case){ return; }
+	selected_case = null;
+	selected_desk_case = null;
+	case_detail = null;
+	case_obs_expanded = false;
+	case_scope_payload = null;
+	close_case_reclassify();
+	reset_case_mail("");
+	assistant_ref = null;
+	$("caseTitle").textContent = "Nenhum caso aberto";
+	$("caseSub").textContent = "selecione um item da lista";
+	for (let id of ["caseVerdictPill", "caseWasPill", "caseChatBtn", "caseReanalyzeBtn", "caseReanalyzed",
+		"caseDecisionBar", "caseReclassBanner", "caseReclassUnavailable", "caseMetrics", "caseScopeCard",
+		"caseLlmCard", "caseObsCard", "caseBodyCard", "caseActions"]){
+		show($(id), false);
+	}
+	show($("caseIntro"), true);
+	// The lists keep their rows between visits; only the highlight of the closed one goes
+	if (case_rows.length > 0){ render_case_list($("doneRows"), case_rows, open_case, "", null); }
+	if (desk_rows.length > 0){ render_case_list($("deskRows"), desk_rows, open_desk, "", null); }
+	sync_case_assistant();
+}
+
 function open_case(row, from_desk){
 	if (!from_desk){
 		case_surface = "done";
 		render_case_list($("doneRows"), case_rows, open_case, "", row.ref);
+		// The address names the case the archive has open
+		url_case_ref = row.ref;
+		sync_url();
 	}
 	selected_case = row;
 	case_detail = null;
@@ -9033,6 +10176,14 @@ function render_case_llm(llm, summary){
 	}
 }
 
+function format_points(value){
+	return value == null ? "—" : value.toLocaleString(ui_locale(), {minimumFractionDigits: 1, maximumFractionDigits: 1});
+}
+
+/* A conta do score, na ordem em que o servidor a faz: cada fator põe pontos, os
+ * pontos somam a média ponderada, e só então entram o piso do veredito e o teto
+ * do contexto. Sem essas linhas o número não tinha como ser conferido — a tela
+ * mostrava `peso × fator` de oito fatores e nada que somasse. */
 function render_case_score(score){
 	show($("caseScoreBlock"), !!score);
 	if (!score){ return; }
@@ -9042,8 +10193,30 @@ function render_case_score(score){
 	for (let factor of score.factors || []){
 		factors.appendChild(el("div", {className: "score-factor"}, [
 			el("span", {}, [el("strong", {text: factor.label}), el("span", {text: factor.reason ? " — " + factor.reason : ""})]),
-			el("span", {className: "mono", text: factor.contribution.toFixed(2),
-				title: "Contribuição deste fator para a média ponderada (peso × fator × participação)"})
+			el("span", {className: "mono", text: format_points(factor.points) + " pts",
+				title: "Pontos que este fator pôs no score: peso × fator × participação ÷ soma dos pesos × 100"})
+		]));
+	}
+	if (score.raw == null){
+		// Registro de antes de o cálculo guardar a média e o piso: dizer, não inventar
+		factors.appendChild(el("div", {className: "score-factor"}, [
+			el("span", {text: "Esta análise foi gravada antes de guardar a conta completa; os pontos por fator não estão disponíveis."}),
+			el("span")
+		]));
+		return;
+	}
+	let totals = [["Média ponderada", format_points(score.raw)]];
+	if (score.floor > score.raw){
+		totals.push(["Piso do veredito (sobe o score até aqui)", format_points(score.floor)]);
+	}
+	if (score.ceiling != null){
+		totals.push(["Teto de contexto (só contexto, sem evidência de condenação)", format_points(score.ceiling)]);
+	}
+	totals.push(["Score final", format_points(score.score)]);
+	for (let [label, value] of totals){
+		factors.appendChild(el("div", {className: "score-factor score-total"}, [
+			el("strong", {text: label}),
+			el("span", {className: "mono", text: value})
 		]));
 	}
 }
@@ -9083,13 +10256,16 @@ function render_case_reclassification(decision, loaded){
 	}
 	// O que a decisão ensinou às análises seguintes, quando ensinou
 	for (let memory of (loaded && case_detail && case_detail.learned) || []){
+		let proposal_state = {pending: "aguardando um admin", accepted: "aceita", dismissed: "recusada"}[memory.proposalStatus] || memory.proposalStatus;
 		let text = memory.scope === "sender"
-			? "Remetente " + memory.key + ": proposta de whitelist " + ({pending: "aguardando um admin", accepted: "aceita", dismissed: "recusada"}[memory.proposalStatus] || memory.proposalStatus)
+			? "Remetente " + memory.key + ": proposta de whitelist " + proposal_state
+			: memory.scope === "indicator"
+			? "Precedente " + memory_indicator(memory)[1] + ": a IA o considera · proposta de whitelist " + proposal_state
 			: "Mensagem idêntica liberada" + (memory.active ? "" : " (revogada)") + " · " + memory.hits + " análise(s) rebaixada(s) desde então";
 		outcomes.appendChild(el("span", {className: "status " + (memory.active ? "ok" : ""), text: text}));
 	}
 	// Undoing is an admin decision; the route refuses anybody else regardless
-	show($("caseRevertBtn"), loaded && !!(current_identity && current_identity.canChangeSettings));
+	show($("caseRevertBtn"), loaded && can_see("action.reclassify_revert"));
 }
 
 // The decisions the server offers for this record. Offered, not granted: the
@@ -9171,6 +10347,7 @@ function start_case_reclassify(mode, target){
 
 	show($("caseMemoryRow"), to_safe);
 	set_case_memory_scope("case");
+	render_case_indicators(to_safe ? (case_detail.flaggedIndicators || []) : []);
 
 	sync_reclass_reason();
 	show($("caseDecisionBar"), false);
@@ -9185,6 +10362,42 @@ function close_case_reclassify(){
 	show($("caseReclassForm"), false);
 	if (selected_case){ show($("caseActions"), true); }
 	if (selected_case && case_detail){ render_case_decisions(case_detail); }
+}
+
+/* --- hosts verificados: o que vira precedente -------------------------------- */
+
+// Chaves marcadas ("domain:host", "ip:rede"). Começa vazio a cada abertura: o
+// precedente é a palavra da analista sobre um host, e só ela sabe qual conferiu
+let case_indicator_keys = [];
+
+function render_case_indicators(indicators){
+	case_indicator_keys = [];
+	let list = $("caseIndicatorList");
+	list.replaceChildren();
+	show($("caseIndicatorRow"), indicators.length > 0);
+	for (let item of indicators){
+		let check = el("div", {className: "check", attrs: {role: "checkbox", "aria-checked": "false", tabindex: "0"}},
+			[icon(CHECK_ICON, 9)]);
+		let toggle = function(){
+			let at = case_indicator_keys.indexOf(item.key);
+			if (at === -1){ case_indicator_keys.push(item.key); } else { case_indicator_keys.splice(at, 1); }
+			let on = at === -1;
+			check.classList.toggle("on", on);
+			check.setAttribute("aria-checked", on ? "true" : "false");
+		};
+		check.onclick = toggle;
+		check.onkeydown = function(event){
+			if (event.key === "Enter" || event.key === " "){ event.preventDefault(); toggle(); }
+		};
+		let label = el("span", {className: "check-label mono", text: item.value});
+		label.onclick = toggle;
+		list.appendChild(el("div", {className: "row", style: "gap:8px;flex-wrap:wrap"}, [
+			check, label,
+			el("span", {className: "pill " + (item.level === "malicious" ? "bad" : "warn"),
+				text: item.level === "malicious" ? "malicioso" : "suspeito"}),
+			el("span", {className: "field-hint", text: (item.analyzers || []).join(", ")})
+		]));
+	}
 }
 
 function set_case_errata(on){
@@ -9245,6 +10458,7 @@ function submit_case_reclassify(){
 		if (case_reclass_target === "Safe"){
 			params.notifyReporter = case_errata_on ? "1" : "";
 			params.memoryScope = case_memory_scope;
+			params.indicators = case_indicator_keys.join(",");
 		}
 	}
 	post_form(url, params).then(function(result){
@@ -9274,7 +10488,9 @@ function submit_case_reclassify(){
 			: done + " Registrado em " + (decision.outcomes || []).map(function(o){ return o.destination; }).join(", ") + ".",
 			failed.length ? "bad" : "ok");
 		let from_desk = case_surface === "queues";
-		open_case(row, from_desk);
+		// The decision was recorded either way; but a case the analyst has since left
+		// must not be pulled back onto a screen that is not showing it
+		if (selected_case === row){ open_case(row, from_desk); }
 		if (case_rows.length > 0 || !from_desk){ load_cases(); }
 		// Decidido, o caso sai da fila: a lista é relida e não editada na mão,
 		// porque outra pessoa pode ter decidido outros enquanto isto estava aberto
@@ -9372,6 +10588,7 @@ function toggle_case_scope(){
 let case_mail_mode = "visual";
 let case_mail_payload = null;
 let case_mail_expanded = false;
+let case_mail_urls_visible = false;
 
 function set_case_mail_mode(mode){
 	case_mail_mode = mode === "text" ? "text" : "visual";
@@ -9386,6 +10603,8 @@ function set_case_mail_mode(mode){
 
 function reset_case_mail(message){
 	case_mail_payload = null;
+	case_mail_urls_visible = false;
+	sync_urls_button($("caseMailUrlsBtn"), false);
 	$("caseMailFrame").removeAttribute("srcdoc");
 	show($("caseMailFrameShell"), false);
 	show($("caseMailInert"), false);
@@ -9434,9 +10653,7 @@ function render_case_mail(payload){
 	if (payload.html){
 		// srcdoc atribuído como propriedade, num iframe sandbox sem allow-*: o
 		// documento não tem origem, não roda script e herda a CSP desta página
-		$("caseMailFrame").srcdoc = "<!doctype html><html><head><meta charset=\"utf-8\">"
-			+ "<style>" + PREVIEW_FRAME_CSS + "</style></head><body>"
-			+ payload.html + "</body></html>";
+		$("caseMailFrame").srcdoc = frame_document(payload.html, case_mail_urls_visible);
 		show($("caseMailFrameShell"), true);
 		show($("caseMailEmpty"), false);
 	} else {
@@ -9447,6 +10664,14 @@ function render_case_mail(payload){
 		show($("caseMailEmpty"), true);
 	}
 	render_preview_attachments(payload.attachments || [], $("caseMailAttachments"));
+}
+
+function toggle_case_mail_urls(){
+	case_mail_urls_visible = !case_mail_urls_visible;
+	sync_urls_button($("caseMailUrlsBtn"), case_mail_urls_visible);
+	if (case_mail_payload && case_mail_payload.html){
+		$("caseMailFrame").srcdoc = frame_document(case_mail_payload.html, case_mail_urls_visible);
+	}
 }
 
 function toggle_case_mail_frame(){
@@ -9500,8 +10725,9 @@ function reanalyze_case(){
 
 /* --- assistant beside the case ----------------------------------------------
  *
- * O Chat AI, com o contexto do caso aberto carregado sozinho. Mesmas rotas e
- * mesmas proteções de prompt do Chat AI; uma conversa por caso, zerada quando
+ * A conversa com a IA, com o contexto do caso aberto carregado sozinho (rotas
+ * /api/chat/*, com as proteções de prompt de build_chat_system_prompt). É o
+ * único ponto de entrada do chat por caso; uma conversa por caso, zerada quando
  * outro caso é aberto — a resposta sobre um caso lida ao lado de outro é o erro
  * que este painel não pode cometer. */
 
@@ -9848,12 +11074,19 @@ function load_phish(){
 			// Clicking a confirmed phishing row opens it in the analyzed-emails
 			// screen, which already owns the detail panel
 			render_case_list($("phishRows"), phish_rows, function(row){
-				show_view("done");
-				cases_verdict = "Malicious";
-				cases_range = insights_range;
-				sync_case_chips();
-				load_cases();
-				open_case(row);
+				// Two steps, one history entry: the address is announced once, with the case
+				url_hold++;
+				try {
+					show_view("done");
+					cases_verdict = "Malicious";
+					cases_range = insights_range;
+					sync_case_chips();
+					load_cases();
+					open_case(row);
+				} finally {
+					url_hold--;
+				}
+				sync_url();
 			}, payload.notice);
 		});
 }
@@ -9997,6 +11230,7 @@ const HANDLERS = {
 	clear_queue_query: clear_queue_query,
 	set_preview_mode: set_preview_mode,
 	toggle_preview_frame: toggle_preview_frame,
+	toggle_preview_urls: toggle_preview_urls,
 	toggle_select_all: toggle_select_all,
 	clear_selection: clear_selection,
 	analyze_current: analyze_current,
@@ -10037,16 +11271,21 @@ const HANDLERS = {
 	open_user_modal: open_user_modal,
 	create_user: create_user,
 	change_own_password: change_own_password,
-	chat_load_context: chat_load_context,
-	chat_clear_context: chat_clear_context,
-	chat_send: chat_send,
 	set_insights_range: set_insights_range,
 	reload_insights: reload_insights,
+	// Panorama externo (panorama.js)
+	open_intel: open_intel,
+	reload_intel: reload_intel,
+	generate_intel_summary: generate_intel_summary,
+	clear_intel_filter: clear_intel_filter,
+	enable_intel_recommended: enable_intel_recommended,
+	save_intel_summary_config: save_intel_summary_config,
 	set_case_verdict: set_case_verdict,
 	set_case_range: set_case_range,
 	filter_cases_debounced: filter_cases_debounced,
 	filter_analyzers_debounced: filter_analyzers_debounced,
 	clear_analyzer_filter: clear_analyzer_filter,
+	enable_recommended_feeds: enable_recommended_feeds,
 	filter_scoring_debounced: filter_scoring_debounced,
 	save_scoring: save_scoring,
 	reset_scoring_weights: reset_scoring_weights,
@@ -10077,6 +11316,7 @@ const HANDLERS = {
 	set_case_memory_scope: set_case_memory_scope,
 	set_case_mail_mode: set_case_mail_mode,
 	toggle_case_mail_frame: toggle_case_mail_frame,
+	toggle_case_mail_urls: toggle_case_mail_urls,
 	toggle_case_scope: toggle_case_scope,
 	set_desk_range: set_desk_range,
 	filter_desk_debounced: filter_desk_debounced,
@@ -10112,7 +11352,20 @@ const HANDLERS = {
 	audit_page: audit_page,
 	audit_ai_send: audit_ai_send,
 	save_audit_log_config: save_audit_log_config,
-	test_audit_log_config: test_audit_log_config
+	test_audit_log_config: test_audit_log_config,
+	save_security_config: save_security_config,
+	save_protection_config: save_protection_config,
+	open_profile_modal: open_profile_modal,
+	upload_cert_pem: upload_cert_pem,
+	upload_cert_pfx: upload_cert_pfx,
+	generate_cert_self_signed: generate_cert_self_signed,
+	save_letsencrypt_config: save_letsencrypt_config,
+	issue_letsencrypt_cert: issue_letsencrypt_cert,
+	save_profile: save_profile,
+	profile_from_role: profile_from_role,
+	save_captcha_config: save_captcha_config,
+	allowlist_my_address: allowlist_my_address,
+	stay_signed_in: stay_signed_in
 };
 
 function dispatch(element, action, event){
@@ -10132,7 +11385,15 @@ document.addEventListener("click", function(event){
 		if (!event.target.closest(".profile")){ show($("profileMenu"), false); }
 		return;
 	}
-	if (element.tagName === "A"){ event.preventDefault(); }
+	if (element.tagName === "A"){
+		// The menu and the tabs are real links, so the browser can open them in a
+		// new tab. Ctrl/Cmd/Shift/Alt-click and the middle button belong to it —
+		// handled here they would just change this tab's screen and open nothing.
+		// The new tab arrives through the server's own route for that address.
+		if (element.hasAttribute("href") && (event.button !== 0 || event.ctrlKey || event.metaKey
+			|| event.shiftKey || event.altKey)){ return; }
+		event.preventDefault();
+	}
 	dispatch(element, element.getAttribute("data-click"), event);
 });
 
@@ -10184,17 +11445,24 @@ document.addEventListener("keydown", function(event){
 	} catch (e) { /* private mode */ }
 	apply_theme(stored_theme === "light" ? "light" : "dark");
 	if (stored_sidebar === "closed"){ toggle_sidebar(); }
+	else if (stored_sidebar === null && window.matchMedia("(max-width: 1100px)").matches){
+		// Tela estreita e nenhuma escolha guardada: o menu abre recolhido para
+		// deixar espaço ao conteúdo. Não grava preferência — não foi uma decisão
+		// da pessoa, e abrir esta mesma conta numa tela larga deve achar o menu aberto
+		show($("sidebar"), false);
+		show($("rail"), true);
+	}
 	// O tamanho vem antes de qualquer medida de layout: aplicar depois faria a
 	// tela montar num tamanho e saltar para outro na frente de quem olha
 	load_scale();
 	wire_a11y_controls();
 
-	// The MISP name is edited under Configurações → Caso; the Integrações card
-	// only mirrors it
-	$("mispIdInput").readOnly = true;
-
 	show_config_tab("auto");
-	show_integr_tab("plataforma");
+	// Integrações não tem chamada equivalente: a aba em que ela abre (Analisadores)
+	// já vem visível e marcada no HTML. Chamar show_integr_tab() aqui buscaria os
+	// analisadores antes de a aba provar que é dona da sessão, e para uma conta
+	// de analista seria um pedido que o servidor recusa. Quem abre a tela é que
+	// dispara a carga (show_view)
 	// The saved preference has to be applied before the first listing lands,
 	// otherwise the queue renders in the server's direction and jumps once the
 	// chips catch up
@@ -10202,7 +11470,6 @@ document.addEventListener("keydown", function(event){
 	// The executive dashboard is the landing screen: it answers "what happened"
 	// before the analyst decides what to work on
 	show_view("exec");
-	chat_clear_context();
 	// O contador da mesa aparece no menu desde o início: quantos casos esperam
 	// decisão é a informação que faz alguém abrir a fila, não a que ela mostra
 	// depois de aberta
@@ -10217,6 +11484,8 @@ document.addEventListener("keydown", function(event){
 			return;
 		}
 		window.setInterval(tab_heartbeat, TAB_HEARTBEAT_MS);
+		window.setInterval(tick_idle, 1000);
+		tab_heartbeat();
 		// The configuration is only fetched for users allowed to see it, so an
 		// analyst never issues a request that would be rejected
 		load_identity();

@@ -44,7 +44,7 @@ estrutural e **perde** os nós de doutrina descritos abaixo.
 ### O que verificar, especificamente
 
 1. **A hyperedge `Traps that fail silently in this deployment`.** Armadilhas que já
-   causaram incidente neste deploy e falham *em silêncio*: CSP sem inline JS (§7.4),
+   causaram incidente neste deploy e falham *em silêncio*: CSP sem inline JS nem style="" (§4.5, §7.4),
    `eventlet.monkey_patch()` antes de qualquer import (§7.5) e todo módulo listado em
    `logging_conf.json` (§7.3). Se sua mudança toca qualquer uma dessas
    superfícies, leia a seção correspondente de `BLUEPHISH_ARCHITECTURE.md` antes de editar.
@@ -70,22 +70,23 @@ estrutural e **perde** os nós de doutrina descritos abaixo.
    `validate_destination()`, a revalidação no momento da chamada, a recusa de redirects,
    ou a conexão fixada no endereço validado (`pinned_http`). Um consumidor que volte a
    chamar `requests` direto reabre o DNS rebinding sem nenhum teste de unidade falhar —
-   só `test_ssrf_rebinding` pega — e só nos seis caminhos que ele exercita (`unshorten`,
+   só `test_ssrf_rebinding` pega — e só nos seis caminhos que ele exercita (o `feedUrl` do OpenPhish tem teste próprio, `test_openphish_feed_guard`, que não simula DNS) (`unshorten`,
    `email_render`, este só dentro da imagem, analisador customizado, conector, Jira e
    FortiGate). PAN-OS, Check Point, TheHive e `audit_store` ficam fora dele.
 
-   **A cadeia tem sete consumidores, não um**, e eles não liberam a rede interna do mesmo
+   **A cadeia tem oito consumidores, não um**, e eles não liberam a rede interna do mesmo
    jeito — mexer em `validate_destination()` mexe em todos:
 
    | Módulo | O que valida | Rede interna |
    |---|---|---|
    | `custom_analyzers` | endereço de analisador definido pelo analista | só com `allowInternal` na definição salva |
    | `connectors` | conector genérico — e os webhooks do alerta de volume, que passam por `connectors.deliver()` | só com `allowInternal` na definição salva |
-   | `tickets` | URL do TheHive e do Jira | liberada (vivem na rede do compose ou num Data Center); o Jira é revalidado e fixado a cada chamada (`_jira_call`) — o TheHive, hoje, só é validado ao salvar: o `thehive4py` chama `requests` direto, brecha conhecida a corrigir no código |
+   | `tickets` | URL do TheHive e do Jira | liberada (vivem na rede do compose ou num Data Center); o Jira e as leituras do TheHive feitas por nós (`thehive_query`, o `.eml` do chat) são revalidados e fixados a cada chamada (`_jira_call`, `thehive_call`); o que o `thehive4py` escreve (criar o caso) só é validado ao salvar: ele chama `requests` direto, brecha conhecida a corrigir no código |
    | `responders` | endereço de gerência dos firewalls (PAN-OS, FortiGate, Check Point) — o EOP não passa pela trava: fala só com hosts fixos da Microsoft | liberada |
    | `unshorten` | cada salto de uma cadeia de redirecionamento | **nunca** |
    | `email_render` | imagem remota do e-mail denunciado | **nunca** |
-   | `audit_store` | servidor syslog que recebe a cópia da trilha de auditoria | liberada (um SIEM mora nela); o handler recebe o IP validado, nunca o nome — regra que hoje tem uma brecha conhecida: `resolve_syslog()` entrega o `infos[0]` de um segundo `getaddrinfo`, feito logo após a trava e não julgado de novo; é para corrigir no código, não um comportamento aceito |
+   | `analyzers` (só o `feedUrl` do OpenPhish) | o endereço do feed, o único que um admin digita num analisador nativo | **nunca** — o feed é externo; os demais analisadores nativos chamam hosts fixos do fornecedor e ficam fora da trava |
+| `audit_store` | servidor syslog que recebe a cópia da trilha de auditoria | liberada (um SIEM mora nela); o handler recebe o IP validado, nunca o nome: `resolve_syslog()` faz um segundo `getaddrinfo` para escolher o IP e julga cada endereço dele pela mesma trava antes de entregar um — `test_audit_store` (`Syslog`) segura isso com dois lookups de respostas diferentes |
 
    O do `email_render` é o menos óbvio e o mais exposto — dispara num clique comum, sobre
    endereços que ninguém revisou, escritos por quem mandou o phishing, na caixa de entrada e
@@ -127,9 +128,17 @@ graphify update .
 
 ## Contexto mínimo do projeto
 
-Bluephish: análise automatizada de e-mails de phishing para SOC/CSIRT. Lê uma caixa
+ThePhish: análise automatizada de e-mails de phishing para SOC/CSIRT. Lê uma caixa
 monitorada, extrai observáveis, passa pelos analisadores de reputação, pede uma avaliação
-de engenharia social a um LLM e grava o veredito nos destinos habilitados — TheHive, Jira, disco e conectores genéricos, em qualquer combinação.
+de engenharia social a um LLM e grava o veredito nos destinos habilitados — disco (o padrão), Jira, TheHive e conectores genéricos, em qualquer combinação.
+
+A aplicação é a API (`docker/docker-compose.yml`, serviço `bluephish`) atrás de dois nginx
+(`vhost`, a única entrada, e `frontend`), com o banco PostgreSQL num contêiner próprio (`db`,
+rede interna `data`, só a API alcança). Sem `BLUEPHISH_DB_HOST` (testes, fora do compose) o banco
+é o SQLite de antes (`app/database.py`). TheHive e MISP são integrações opcionais, instaladas à parte
+([`docs/integracoes/thehive.md`](docs/integracoes/thehive.md)): o destino TheHive continua
+existindo no código, e as regras acima sobre as telas de histórico e sobre a cadeia SSRF
+continuam valendo para ele.
 
 Referência de arquitetura, RBAC, rotas e armadilhas conhecidas:
 [`BLUEPHISH_ARCHITECTURE.md`](BLUEPHISH_ARCHITECTURE.md). Instalação e operação:

@@ -5,7 +5,7 @@ cobrem os três desfechos que a metodologia precisa distinguir. Eles são copiad
 para dentro da imagem, então de dentro do container o caminho é `samples/`:
 
 ```
-docker compose exec thephish python3 manage.py score samples/newsletter.eml \
+docker compose exec bluephish python3 manage.py score samples/newsletter.eml \
     --analyzer virustotal=safe
 ```
 
@@ -22,15 +22,15 @@ argumento. Calibrar peso não custa cota de fornecedor nem uma análise real.
 O par que vale rodar lado a lado é o primeiro com o segundo:
 
 ```
-docker compose exec thephish python3 manage.py score samples/newsletter.eml --analyzer virustotal=safe
-docker compose exec thephish python3 manage.py score samples/phishing.eml  --analyzer virustotal=safe --llm High
+docker compose exec bluephish python3 manage.py score samples/newsletter.eml --analyzer virustotal=safe
+docker compose exec bluephish python3 manage.py score samples/phishing.eml  --analyzer virustotal=safe --llm High
 ```
 
 E o resguardo do §1.2, que é o mais fácil de quebrar sem perceber — remetente
 autenticado não é fechado como malicioso pelo conteúdo sozinho:
 
 ```
-docker compose exec thephish python3 manage.py score samples/newsletter.eml --llm Critical
+docker compose exec bluephish python3 manage.py score samples/newsletter.eml --llm Critical
 ```
 
 O score cai na faixa de phishing e o veredito para em `Suspicious`, não em

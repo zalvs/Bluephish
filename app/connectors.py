@@ -54,6 +54,7 @@ Forma do módulo
 import base64
 import datetime
 import json
+import config_file
 import re
 import traceback
 
@@ -549,8 +550,7 @@ def load_all(path = None, section = None):
 	"""
 	path = path or CONFIG_FILE
 	try:
-		with open(path) as conf_file:
-			stored = json.load(conf_file).get(section or CONFIG_SECTION, [])
+		stored = config_file.read(path).get(section or CONFIG_SECTION, [])
 	except Exception:
 		return []
 	if not isinstance(stored, list):
@@ -560,11 +560,9 @@ def load_all(path = None, section = None):
 
 def save_all(definitions, path = None, section = None):
 	path = path or CONFIG_FILE
-	with open(path) as conf_file:
-		conf_dict = json.load(conf_file)
+	conf_dict = config_file.read(path)
 	conf_dict[section or CONFIG_SECTION] = definitions
-	with open(path, 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, path)
 
 
 def find(definitions, connector_id):

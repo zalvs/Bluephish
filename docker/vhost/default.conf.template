@@ -1,0 +1,91 @@
+# vhost do BluePhish: TLS 1.2/1.3, cifras ECDHE+AEAD, HSTS de dois anos.
+#
+# Cabeçalhos: só os que a aplicação não manda. CSP, Referrer-Policy,
+# X-Frame-Options e X-Content-Type-Options vêm dela (BLUEPHISH_ARCHITECTURE.md §4.5)
+# e NÃO entram aqui: um segundo Content-Security-Policy seria somado ao da
+# aplicação (o navegador aplica os dois), e mataria a CSP própria da tela de login
+# com o reCAPTCHA; um Referrer-Policy no-referrer quebraria todo POST (§4.4).
+# O HSTS da aplicação é trocado pelo daqui (proxy_hide_header), para não sair dois.
+#
+# Atenção ao nginx: um add_header dentro de um location apaga os herdados do
+# server. Por isso todos ficam no server, e nenhum location tem add_header.
+#
+# Este arquivo é um template: a imagem oficial do nginx troca ${BLUEPHISH_HTTPS_PORT}
+# pelo valor do ambiente ao subir (envsubst só das variáveis definidas — as do
+# próprio nginx, como $host, ficam). É a porta pública do HTTPS, para o
+# redirecionamento da 80 não mandar para a 443 quem publicou outra.
+#
+# Só IPv4: um `listen [::]` num contêiner sem IPv6 impede o nginx de subir, e as
+# portas publicadas pelo compose são IPv4.
+
+map $http_upgrade $connection_upgrade {
+	default upgrade;
+	''      close;
+}
+
+server {
+	listen 80;
+	server_tokens off;
+
+	# Desafio HTTP-01 da Let's Encrypt (app/acme_client.py)
+	location /.well-known/acme-challenge/ {
+		root /var/www/acme;
+		default_type text/plain;
+		try_files $uri =404;
+	}
+
+	location / {
+		return 301 https://$host:${BLUEPHISH_HTTPS_PORT}$request_uri;
+	}
+}
+
+server {
+	listen 443 ssl;
+	http2 on;
+	server_tokens off;
+
+	ssl_certificate     /etc/nginx/certs/fullchain.pem;
+	ssl_certificate_key /etc/nginx/certs/privkey.pem;
+	ssl_protocols TLSv1.2 TLSv1.3;
+	ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+	ssl_prefer_server_ciphers off;
+	ssl_ecdh_curve X25519:prime256v1:secp384r1;
+	ssl_session_timeout 1d;
+	ssl_session_cache shared:BluePhishTLS:10m;
+	ssl_session_tickets off;
+
+	# Os .eml anexados para análise passam por aqui
+	client_max_body_size 30m;
+
+	proxy_hide_header Strict-Transport-Security;
+	add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+	add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()" always;
+	add_header Cross-Origin-Opener-Policy "same-origin" always;
+	add_header X-Permitted-Cross-Domain-Policies "none" always;
+
+	# A resolução do nome fica para a hora do pedido: o vhost sobe mesmo que o
+	# frontend ainda não tenha subido
+	resolver 127.0.0.11 valid=30s ipv6=off;
+	set $frontend http://frontend:8080;
+
+	location / {
+		proxy_pass $frontend;
+		proxy_http_version 1.1;
+		# O websocket do log da análise atravessa os dois saltos
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection $connection_upgrade;
+		# $http_host, não $host: o $host perde a porta, e com o painel fora da 443 a
+		# conferência de Referer do CSRF (https://{host}/) recusaria todo POST
+		proxy_set_header Host $http_host;
+		# O vhost é a borda: sobrescreve, nunca acrescenta. Acrescentar deixava o
+		# cliente escrever o próprio X-Forwarded-For, e quem chega pelo gateway do
+		# Docker (172.30.10.1, dentro da rede confiável) escolhia o IP que a API
+		# bane e limita (app/client_addr.py, app/abuse_guard.py). Com um balanceador
+		# à frente, use o módulo realip aqui (set_real_ip_from <balanceador>;
+		# real_ip_header X-Forwarded-For;) para que $remote_addr já seja o cliente
+		proxy_set_header X-Forwarded-For $remote_addr;
+		proxy_set_header X-Forwarded-Proto https;
+		proxy_read_timeout 3600s;
+		proxy_send_timeout 3600s;
+	}
+}

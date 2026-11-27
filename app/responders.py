@@ -44,6 +44,7 @@ entende o outro:
 
 import datetime
 import json
+import config_file
 import re
 import traceback
 import xml.etree.ElementTree as ElementTree
@@ -271,8 +272,7 @@ def load_config(path = CONFIG_FILE):
 	"""A configuração gravada, mesclada sobre os padrões."""
 	config = default_config()
 	try:
-		with open(path) as conf_file:
-			stored = json.load(conf_file).get(CONFIG_SECTION, {})
+		stored = config_file.read(path).get(CONFIG_SECTION, {})
 	except Exception:
 		return config
 	for responder_id, entry in (stored or {}).items():
@@ -285,11 +285,9 @@ def load_config(path = CONFIG_FILE):
 
 
 def save_config(config, path = CONFIG_FILE):
-	with open(path) as conf_file:
-		conf_dict = json.load(conf_file)
+	conf_dict = config_file.read(path)
 	conf_dict[CONFIG_SECTION] = config
-	with open(path, 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, path)
 
 
 def public_config(config):
@@ -521,6 +519,16 @@ def eop_entry_value(target_type, value):
 	return value
 
 
+def _refuse_redirect(response, service):
+	# O corpo do POST leva o segredo do aplicativo (token) ou o indicador a bloquear
+	# (comando), e `requests` só tira o Authorization quando o host muda. Um 3xx dos
+	# hosts fixos da Microsoft é falha a mostrar ao admin, nunca salto a seguir.
+	if 300 <= response.status_code < 400:
+		raise ResponderError('{0} respondeu com um redirecionamento (HTTP {1}); a chamada não o '
+			'segue.'.format(service, response.status_code))
+	return response
+
+
 def _entra_token(entry, scope):
 	"""Token de aplicação pelo fluxo client credentials.
 
@@ -529,7 +537,7 @@ def _entra_token(entry, scope):
 	credenciais da caixa monitorada e as do bloqueio jogaria fora o cache das duas
 	a cada chamada.
 	"""
-	response = requests.post(
+	response = _refuse_redirect(requests.post(
 		'https://login.microsoftonline.com/{0}/oauth2/v2.0/token'.format(entry.get('tenantId', '')),
 		data = {
 			'client_id': entry.get('clientId', ''),
@@ -537,7 +545,7 @@ def _entra_token(entry, scope):
 			'scope': scope,
 			'grant_type': 'client_credentials'
 		},
-		timeout = HTTP_TIMEOUT)
+		timeout = HTTP_TIMEOUT, allow_redirects = False), 'O Entra ID')
 	if response.status_code in (400, 401):
 		raise ResponderError('O Entra ID recusou as credenciais. Confira tenant id, client id e secret.')
 	response.raise_for_status()
@@ -558,7 +566,7 @@ def _eop_invoke(entry, cmdlet, parameters):
 			raise ResponderError('Credenciais do Exchange Online incompletas.')
 
 	token = _entra_token(entry, EXO_SCOPE)
-	response = requests.post(
+	response = _refuse_redirect(requests.post(
 		'https://outlook.office365.com/adminapi/beta/{0}/InvokeCommand'.format(
 			str(entry['organization']).strip()),
 		headers = {
@@ -568,7 +576,7 @@ def _eop_invoke(entry, cmdlet, parameters):
 			'X-ResponseFormat': 'json'
 		},
 		json = {'CmdletInput': {'CmdletName': cmdlet, 'Parameters': parameters}},
-		timeout = HTTP_TIMEOUT)
+		timeout = HTTP_TIMEOUT, allow_redirects = False), 'O Exchange Online')
 
 	if response.status_code in (401, 403):
 		raise ResponderError('O Exchange Online recusou o acesso (HTTP {0}). A permissão '

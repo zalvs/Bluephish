@@ -43,7 +43,9 @@ _real_getaddrinfo = socket.getaddrinfo
 class Listener(object):
 	"""Um servidor TCP que conta quem conectou e guarda o que chegou."""
 
-	def __init__(self):
+	def __init__(self, reply = None):
+		self.reply = reply or (b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n'
+			b'Content-Length: 2\r\nConnection: close\r\n\r\n{}')
 		self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self.server.bind(('127.0.0.1', 0))
@@ -70,8 +72,7 @@ class Listener(object):
 						break
 					data += chunk
 				self.requests.append(data.decode('latin-1'))
-				conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n'
-					b'Content-Length: 2\r\nConnection: close\r\n\r\n{}')
+				conn.sendall(self.reply)
 			except OSError:
 				pass
 			finally:
@@ -173,6 +174,31 @@ class RedeInternaLiberada(Base):
 			responders._fortigate_call(entry, 'GET', '/api/v2/monitor/system/status')
 		self.assertNobodyConnected()
 		self.assertRefused(caught.exception)
+
+
+class TheHive(Base):
+	"""O TheHive que o chat e o histórico consultam: rede interna liberada, metadados nunca."""
+
+	THEN = '0.0.0.0'
+
+	def test_consulta_do_historico(self):
+		with self.assertRaises(tickets.TicketError) as caught:
+			tickets.thehive_call('POST', self.url('https'), 'chave', '/api/v1/query', json = {'query': []})
+		self.assertNobodyConnected()
+		self.assertRefused(caught.exception)
+
+	def test_redirecionamento_nao_e_seguido(self):
+		# Um TheHive (ou quem responde no lugar dele) que manda a chave para outro
+		# lado: a resposta 302 chega ao chamador como está, e o destino do
+		# Location nunca recebe a requisição
+		target = Listener()
+		self.addCleanup(target.close)
+		self.listener.reply = ('HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{0}/x\r\n'
+			'Content-Length: 0\r\nConnection: close\r\n\r\n'.format(target.port)).encode()
+		self.dns.first = self.dns.then = '127.0.0.1'
+		response = tickets.thehive_call('GET', self.url('http'), 'chave', '/api/datastore/abc')
+		self.assertEqual(302, response.status_code)
+		self.assertEqual(0, target.accepted)
 
 
 class ConexaoFixadaNoEnderecoValidado(Base):

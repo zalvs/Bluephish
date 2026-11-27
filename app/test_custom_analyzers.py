@@ -76,7 +76,7 @@ class AddressesIsPrivateForgets(unittest.TestCase):
 	"""Ranges that are not the internet, but that `is_private` alone lets through.
 
 	The guard used to add up is_private, is_loopback, is_link_local and friends.
-	On Python 3.8 (the image) 100.64.0.0/10 is none of those, and an IPv4 address
+	On Python 3.8 (the image until 11/2026) 100.64.0.0/10 was none of those, and an IPv4 address
 	can travel inside an IPv6 one. The rule now is `is_global`, with the embedded
 	IPv4 judged as the IPv4 it is (BP-SEC-05).
 	"""

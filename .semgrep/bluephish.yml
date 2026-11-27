@@ -1,0 +1,63 @@
+# Regras do próprio projeto: bloqueiam o CI (severidade ERROR).
+# Cada uma prende uma regra da casa que um teste unitário não pega.
+rules:
+  - id: bluephish-tls-verify-desligado-no-codigo
+    message: >-
+      verify=False fixo no código desliga a validação TLS para todo mundo. A validação
+      só pode ser desligada por destino, pela configuração (o operador escolhe).
+    languages: [python]
+    severity: ERROR
+    pattern-either:
+      - pattern: requests.$M(..., verify=False, ...)
+      - pattern: $S.request(..., verify=False, ...)
+      - pattern: $S.$M(..., verify=False, ...)
+
+  - id: bluephish-yaml-load-inseguro
+    message: yaml.load sem SafeLoader executa construtores arbitrários. Use yaml.safe_load.
+    languages: [python]
+    severity: ERROR
+    patterns:
+      - pattern: yaml.load(...)
+      - pattern-not: yaml.load(..., Loader=yaml.SafeLoader, ...)
+      - pattern-not: yaml.load(..., Loader=yaml.CSafeLoader, ...)
+
+  - id: bluephish-desserializacao-insegura
+    message: pickle/marshal de dado externo é execução de código. Use JSON.
+    languages: [python]
+    severity: ERROR
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: marshal.loads(...)
+
+  - id: bluephish-shell-true
+    message: shell=True com qualquer parte vinda de e-mail ou configuração é injeção de comando. Passe a lista de argumentos.
+    languages: [python]
+    severity: ERROR
+    pattern: subprocess.$F(..., shell=True, ...)
+
+  - id: bluephish-eval-exec
+    message: eval/exec de texto é execução de código.
+    languages: [python]
+    severity: ERROR
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+
+  - id: bluephish-jwt-sem-algoritmo-fixo
+    message: >-
+      jwt.decode sem algorithms= deixa o token escolher o algoritmo (confusão de
+      algoritmo). Fixe a lista, como jwt_session faz com HS256.
+    languages: [python]
+    severity: ERROR
+    patterns:
+      - pattern: jwt.decode(...)
+      - pattern-not: jwt.decode(..., algorithms=$A, ...)
+
+  - id: bluephish-debug-ligado
+    message: debug=True expõe o console do Werkzeug (execução remota de código).
+    languages: [python]
+    severity: ERROR
+    pattern-either:
+      - pattern: $APP.run(..., debug=True, ...)
+      - pattern: $SIO.run($APP, ..., debug=True, ...)

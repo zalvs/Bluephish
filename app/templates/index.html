@@ -30,6 +30,10 @@
 
 	<div class="theme-dock" role="group" aria-label="Aparência">
 		<button class="icon-btn" id="themeToggle" type="button" title="Alternar tema" data-click="toggle_theme"></button>
+		<!-- Idioma: mostra para onde vai (EN quando está em português). Não é um
+		     data-click — o i18n.js trata o clique sozinho, e a tradução precisa
+		     funcionar mesmo que bluephish.js nem tenha carregado -->
+		<button class="icon-btn" id="langToggle" type="button" data-lang-toggle data-i18n-skip title="Switch to English" aria-label="Switch to English">EN</button>
 		<!-- Tamanho do texto. Fica aqui, colado no tema, porque as duas são a
 		     mesma decisão: como esta tela deve se parecer para quem está na frente
 		     dela. O valor multiplica todo rem da folha, então campo e botão crescem
@@ -50,18 +54,18 @@
 		<button class="icon-btn ghost" type="button" title="Abrir menu" data-click="toggle_sidebar">
 			<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"></path></svg>
 		</button>
-		<img src="{{ url_for('static', filename='assets/img/bluephish-logo.png', v=asset_version) }}" alt="bluephish" style="width:26px;height:26px;border-radius:6px;object-fit:cover;flex:0 0 26px">
+		<img src="{{ url_for('static', filename='assets/img/bluephish-logo.png', v=asset_version) }}" alt="bluephish" class="u-w-26 u-h-26 u-radius-6 u-fit-cover u-flex-0-0-26">
 	</div>
 
 	<!-- Sidebar ------------------------------------------------------------- -->
 	<aside class="sidebar" id="sidebar">
 		<div class="brand">
 			<img src="{{ url_for('static', filename='assets/img/bluephish-logo.png', v=asset_version) }}" alt="bluephish">
-			<div class="grow col" style="gap:1px">
+			<div class="grow col u-gap-1">
 				<span class="brand-name">BluePhish</span>
 				<span class="brand-sub mono">SOC · BluePhish 2.0</span>
 			</div>
-			<button class="icon-btn ghost" type="button" title="Fechar menu" data-click="toggle_sidebar" style="width:26px;height:26px;flex:0 0 26px">
+			<button class="icon-btn ghost u-w-26 u-h-26 u-flex-0-0-26" type="button" title="Fechar menu" data-click="toggle_sidebar">
 				<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 4L5.5 8l4 4"></path><path d="M12.5 3v10"></path></svg>
 			</button>
 		</div>
@@ -69,77 +73,80 @@
 		<nav class="nav">
 			<div class="nav-group">
 				<p class="nav-title mono">PRINCIPAL</p>
-				<button class="nav-item active" type="button" data-click="show_view" data-arg="exec">
+				<a class="nav-item active" href="/exec" data-click="show_view" data-arg="exec">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="5.6"></circle><path d="M8 9l3.1-3.1"></path></svg>
 					<span class="grow truncate">Visão Executiva</span>
 					<span class="nav-badge mono"></span>
-				</button>
+				</a>
+				<!-- O que a comunidade de segurança publicou sobre phishing no período,
+				     cruzado com os casos. Logo abaixo da executiva: é o mesmo período
+				     visto de fora para dentro (BLUEPHISH_ARCHITECTURE.md §4.8.2). -->
+				<a class="nav-item" href="/intel" data-click="show_view" data-arg="intel">
+					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M1.8 8h12.4"></path><path d="M8 1.8c1.8 1.7 2.7 3.8 2.7 6.2S9.8 12.5 8 14.2C6.2 12.5 5.3 10.4 5.3 8S6.2 3.5 8 1.8z"></path></svg>
+					<span class="grow truncate">Panorama externo</span>
+					<span class="nav-badge mono" id="navIntelBadge"></span>
+				</a>
 				<!-- O painel que era a guia "Phishing": a leitura agregada da coletânea.
 				     Fica logo abaixo da executiva porque é a mesma pergunta em outra
 				     altitude — o que está chegando —, e não a mesa onde se trabalha. -->
-				<button class="nav-item" type="button" data-click="show_view" data-arg="tactic">
+				<a class="nav-item" href="/tactic" data-click="show_view" data-arg="tactic">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6l5.2 2v4c0 3.1-2.2 5.8-5.2 7.2-3-1.4-5.2-4.1-5.2-7.2v-4z"></path><path d="M8 5.6v3M8 10.8v.4"></path></svg>
 					<span class="grow truncate">Visão Tática</span>
 					<span class="nav-badge mono" id="navTacticBadge"></span>
-				</button>
-				<button class="nav-item" type="button" data-click="show_view" data-arg="inbox">
+				</a>
+				<a class="nav-item" href="/inbox" data-click="show_view" data-arg="inbox">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.6"></rect><path d="M2.4 4.6L8 8.9l5.6-4.3"></path></svg>
 					<span class="grow truncate">Caixa de e-mail</span>
 					<span class="nav-badge mono" id="navInboxBadge"></span>
-				</button>
-				<button class="nav-item" type="button" data-click="show_view" data-arg="done">
+				</a>
+				<a class="nav-item" href="/done" data-click="show_view" data-arg="done">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M5.3 8.2l1.9 1.9 3.6-4"></path></svg>
 					<span class="grow truncate">E-mails analisados</span>
 					<span class="nav-badge mono" id="navDoneBadge"></span>
-				</button>
-				<button class="nav-item" type="button" data-click="show_view" data-arg="chat">
-					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.2 8.2c0 2.9-2.8 5.3-6.2 5.3-.75 0-1.47-.12-2.13-.33L2.9 14.4l.9-2.5A5.05 5.05 0 011.8 8.2C1.8 5.3 4.6 2.9 8 2.9s6.2 2.4 6.2 5.3z"></path><path d="M5.7 8.2h4.6"></path></svg>
-					<span class="grow truncate">Chat AI</span>
-					<span class="nav-badge mono"></span>
-				</button>
+				</a>
 				<!-- A mesa de trabalho. O contador é o que espera decisão humana, não o
 				     total da janela: uma fila que conta o que já foi resolvido não é fila. -->
-				<button class="nav-item" type="button" data-click="show_view" data-arg="queues">
+				<a class="nav-item" href="/queues" data-click="show_view" data-arg="queues">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 5.1L8 2.2l5.8 2.9L8 8z"></path><path d="M2.2 8.2L8 11.1l5.8-2.9"></path><path d="M2.2 11.2L8 14.1l5.8-2.9"></path></svg>
 					<span class="grow truncate">Filas de Trabalho</span>
 					<span class="nav-badge mono" id="navDeskBadge"></span>
-				</button>
+				</a>
 			</div>
 
 			<div class="nav-group hidden" id="navAdminGroup">
 				<p class="nav-title mono">ADMINISTRAÇÃO</p>
-				<button class="nav-item hidden" type="button" id="navUsers" data-click="show_view" data-arg="users">
+				<a class="nav-item hidden" id="navUsers" href="/users" data-click="show_view" data-arg="users">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.2" cy="5.2" r="2.4"></circle><path d="M1.8 13.4c0-2.4 1.9-3.9 4.4-3.9s4.4 1.5 4.4 3.9"></path><path d="M11 3.3a2.3 2.3 0 010 4.4M12.2 9.9c1.3.5 2.1 1.7 2.1 3.5"></path></svg>
 					<span class="grow truncate">Usuários</span>
 					<span class="nav-badge mono" id="navUsersBadge"></span>
-				</button>
-				<button class="nav-item hidden" type="button" id="navIntegr" data-click="show_view" data-arg="integr">
+				</a>
+				<a class="nav-item hidden" id="navIntegr" href="/integr" data-click="show_view" data-arg="integr">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1.6v3.8M10 1.6v3.8"></path><path d="M4.2 5.4h7.6v2.2a3.8 3.8 0 01-7.6 0z"></path><path d="M8 11.4v3"></path></svg>
 					<span class="grow truncate">Integrações</span>
 					<span class="nav-badge mono"></span>
-				</button>
+				</a>
 				<!-- A trilha de auditoria. Mesma régua de Configurações (admin): ela
 				     traz os IPs e as ações de todo mundo. O servidor recusa com 403
 				     quem não é admin — esconder o item é só usabilidade. -->
-				<button class="nav-item hidden" type="button" id="navAudit" data-click="show_view" data-arg="audit">
+				<a class="nav-item hidden" id="navAudit" href="/audit" data-click="show_view" data-arg="audit">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 1.8H4.4a1.3 1.3 0 00-1.3 1.3v9.8a1.3 1.3 0 001.3 1.3h3"></path><path d="M9.6 1.8l3.3 3.3v2.4"></path><path d="M5.6 5.6h3M5.6 8.2h2.2"></path><circle cx="11.2" cy="11.2" r="2.3"></circle><path d="M12.9 12.9l1.6 1.6"></path></svg>
 					<span class="grow truncate">Auditoria</span>
 					<span class="nav-badge mono" id="navAuditBadge"></span>
-				</button>
+				</a>
 			</div>
 
 			<div class="nav-group">
 				<p class="nav-title mono">SISTEMA</p>
-				<button class="nav-item hidden" type="button" id="navConfig" data-click="show_view" data-arg="config">
+				<a class="nav-item hidden" id="navConfig" href="/config" data-click="show_view" data-arg="config">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 5h11M2.4 11.4h11"></path><circle cx="6" cy="5" r="1.7"></circle><circle cx="10" cy="11.4" r="1.7"></circle></svg>
 					<span class="grow truncate">Configurações</span>
 					<span class="nav-badge mono"></span>
-				</button>
-				<button class="nav-item" type="button" data-click="show_view" data-arg="account">
+				</a>
+				<a class="nav-item" href="/account" data-click="show_view" data-arg="account">
 					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.6" r="2.7"></circle><path d="M2.6 13.8c0-2.7 2.4-4.4 5.4-4.4s5.4 1.7 5.4 4.4"></path></svg>
 					<span class="grow truncate">Minha conta</span>
 					<span class="nav-badge mono"></span>
-				</button>
+				</a>
 			</div>
 		</nav>
 
@@ -150,7 +157,7 @@
 				<button type="button" class="danger" data-click="do_logout">Sair da conta</button>
 			</div>
 			<div class="avatar mono" id="profileInitials">··</div>
-			<div class="grow col" style="gap:0;line-height:1.25">
+			<div class="grow col u-gap-0 u-lh-1_25">
 				<span class="profile-name truncate" id="profileName">—</span>
 				<span class="profile-role" id="profileRole">—</span>
 			</div>
@@ -158,12 +165,12 @@
 		</div>
 	</aside>
 
-	<main id="conteudo" class="grow row" style="min-width:0">
+	<main id="conteudo" class="grow row u-minw-0">
 
 	<!-- ===================== VISÃO EXECUTIVA ============================== -->
 	<section class="pane hidden" data-view="exec">
 		<div class="pane-head">
-			<div class="grow col" style="gap:2px">
+			<div class="grow col u-gap-2">
 				<h1 class="pane-title">Visão Executiva</h1>
 				<span class="pane-sub mono" id="execSub">carregando…</span>
 			</div>
@@ -186,7 +193,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.8v4M8 11.2v.4"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<span class="callout-title">Não foi possível carregar as informações</span>
 					<p class="card-note" id="execErrorText"></p>
 				</div>
@@ -197,13 +204,13 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="5.3"></circle><circle cx="8" cy="8" r="1.4"></circle><path d="M8 .9v2.4M8 12.7v2.4M.9 8h2.4M12.7 8h2.4"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
-					<div class="row" style="gap:8px;flex-wrap:wrap">
+				<div class="grow col u-gap-5">
+					<div class="row u-gap-8 u-wrap">
 						<span class="callout-title">Infraestrutura reaproveitada entre casos</span>
 						<span class="pill bad" id="execCampaignCount"></span>
 					</div>
 					<p class="card-note" id="execCampaignText"></p>
-					<div class="row" style="gap:6px;margin-top:3px">
+					<div class="row u-gap-6 u-mt-3">
 						<button class="btn sm" type="button" data-click="open_campaign">Ver casos com esse IOC</button>
 					</div>
 				</div>
@@ -212,7 +219,7 @@
 			<!-- KPIs -->
 			<div class="grid-auto narrow" id="execKpis"></div>
 
-			<div class="grid-auto" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+			<div class="grid-auto u-cols-repeat-auto-fit-minmax-320-1fr">
 				<!-- Volume por dia -->
 				<div class="card">
 					<div class="row baseline">
@@ -220,24 +227,24 @@
 						<span class="card-code" id="execVolumeRange">UTC</span>
 					</div>
 					<div class="chart" id="execVolume"></div>
-					<div class="row" style="gap:14px">
-						<span class="row legend-item" style="gap:6px"><span class="swatch threat"></span>Maliciosos / suspeitos</span>
-						<span class="row legend-item" style="gap:6px"><span class="swatch safe"></span>Legítimos</span>
+					<div class="row u-gap-14">
+						<span class="row legend-item u-gap-6"><span class="swatch threat"></span>Maliciosos / suspeitos</span>
+						<span class="row legend-item u-gap-6"><span class="swatch safe"></span>Legítimos</span>
 					</div>
 				</div>
 
 				<!-- Distribuição de vereditos -->
 				<div class="card">
 					<span class="card-title">Distribuição de vereditos</span>
-					<div class="col" style="gap:10px" id="execVerdicts"></div>
-					<div class="card-foot" style="justify-content:space-between">
-						<span style="font-size:var(--fs-micro);color:var(--t4)">Casos ainda abertos</span>
-						<span class="mono" id="execTotalCases" style="font-size:var(--fs-body);color:var(--t0)">—</span>
+					<div class="col u-gap-10" id="execVerdicts"></div>
+					<div class="card-foot u-justify-space-between">
+						<span class="u-fs-fs-micro u-c-t4">Casos ainda abertos</span>
+						<span class="mono u-fs-fs-body u-c-t0" id="execTotalCases">—</span>
 					</div>
 				</div>
 			</div>
 
-			<div class="grid-auto" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+			<div class="grid-auto u-cols-repeat-auto-fit-minmax-320-1fr">
 				<!-- Remetentes -->
 				<div class="card flush">
 					<div class="card-head">
@@ -252,22 +259,38 @@
 				     janela. O denominador é quantos casos o modelo de fato avaliou:
 				     LLM desligado não pode parecer "nada encontrado". -->
 				<div class="card">
-					<div class="row" style="gap:8px">
+					<div class="row u-gap-8">
 						<span class="card-title grow">Insights da IA</span>
 						<span class="card-code" id="execInsightsCode"></span>
 					</div>
-					<div class="col" style="gap:9px" id="execInsights"></div>
+					<div class="col u-gap-9" id="execInsights"></div>
 				</div>
 			</div>
 
-			<div class="grid-auto" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+			<!-- Panorama externo: o que as fontes de inteligência publicaram no mesmo
+			     período, cruzado com os casos. O card resume; clicar abre a tela
+			     própria (/intel), onde cada alegação leva à fonte. -->
+			<div class="card intel-teaser" id="execIntel">
+				<div class="row baseline u-gap-8">
+					<span class="card-title grow">Panorama externo</span>
+					<span class="card-code" id="execIntelCode">fontes de inteligência</span>
+				</div>
+				<p class="card-note">O que fornecedores de pesquisa, imprensa especializada e centros de resposta publicaram sobre phishing no mesmo período — e se já chegou à caixa de denúncias.</p>
+				<div class="intel-teaser-grid" id="execIntelBody"></div>
+				<div class="card-foot">
+					<span class="status grow" id="execIntelFoot"></span>
+					<button class="btn sm" type="button" data-click="open_intel">Abrir panorama</button>
+				</div>
+			</div>
+
+			<div class="grid-auto u-cols-repeat-auto-fit-minmax-260-1fr">
 				<!-- Assuntos -->
 				<div class="card">
 					<div class="row baseline">
 						<span class="card-title grow">Assuntos predominantes</span>
 						<span class="card-code">normalizados</span>
 					</div>
-					<div class="col" style="gap:9px" id="execSubjects"></div>
+					<div class="col u-gap-9" id="execSubjects"></div>
 				</div>
 
 				<!-- Táticas de engenharia social. O LLM responde com um vocabulário
@@ -278,7 +301,7 @@
 						<span class="card-title grow">Táticas mais frequentes</span>
 						<span class="card-code">avaliação do LLM</span>
 					</div>
-					<div class="col" style="gap:10px" id="execTactics"></div>
+					<div class="col u-gap-10" id="execTactics"></div>
 				</div>
 
 				<!-- Departamentos: resolvidos do endereço de quem denunciou, pelas
@@ -288,16 +311,146 @@
 						<span class="card-title grow">Departamentos mais visados</span>
 						<span class="card-code" id="execDeptsCode">quem denunciou</span>
 					</div>
-					<div class="col" style="gap:10px" id="execDepts"></div>
+					<div class="col u-gap-10" id="execDepts"></div>
 				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- ===================== PANORAMA EXTERNO ============================= -->
+	<!-- O que a comunidade de segurança publicou sobre phishing, por tema, grupo e
+	     setor, com o link de cada fonte. A classificação é por vocabulário fechado
+	     (threat_intel.py); o resumo por IA é opcional e cita os itens de onde saiu.
+	     Nada aqui muda veredito. -->
+	<section class="pane hidden" data-view="intel" aria-labelledby="intelTitle">
+		<div class="pane-head intel-head">
+			<button class="icon-btn ghost" type="button" title="Voltar para a Visão Executiva" data-click="show_view" data-arg="exec">
+				<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.8 3.4L5.2 8l4.6 4.6"></path></svg>
+			</button>
+			<div class="grow col u-gap-2">
+				<h2 class="pane-title" id="intelTitle">Panorama externo</h2>
+				<span class="pane-sub mono" id="intelSub">carregando…</span>
+			</div>
+			<div class="row intel-head-tools">
+				<div class="chips" id="intelPeriods"></div>
+				<button class="icon-btn ghost" type="button" title="Atualizar" data-click="reload_intel">
+					<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 11-1.7-4"></path><path d="M12.4 1.4v2.8h-2.8"></path></svg>
+				</button>
+			</div>
+		</div>
+
+		<div class="pane-body pad">
+			<div class="callout hidden" id="intelError">
+				<div class="glyph">
+					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.8v4M8 11.2v.4"></path></svg>
+				</div>
+				<div class="grow col u-gap-5">
+					<span class="callout-title">Não foi possível montar o panorama</span>
+					<p class="card-note" id="intelErrorText"></p>
+				</div>
+			</div>
+
+			<!-- Nenhuma fonte ligada: dizer o que falta, e para o admin, como resolver -->
+			<div class="callout neutral hidden" id="intelEmpty">
+				<div class="glyph">
+					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M1.8 8h12.4"></path></svg>
+				</div>
+				<div class="grow col u-gap-5">
+					<span class="callout-title">Nenhuma fonte de inteligência ligada</span>
+					<p class="card-note" id="intelEmptyText">Nada é baixado até um administrador ligar as fontes. O pacote recomendado traz fornecedores de pesquisa, imprensa especializada e fontes brasileiras.</p>
+					<div class="row hidden u-gap-6 u-mt-3" id="intelEmptyActions">
+						<button class="btn sm" type="button" data-click="enable_intel_recommended">Ligar pacote recomendado</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Período anterior ao começo da coleta, ou fontes com falha -->
+			<div class="callout warn hidden" id="intelPartial">
+				<div class="glyph">
+					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2.2l6.2 11H1.8z"></path><path d="M8 6.6v3M8 11.4v.3"></path></svg>
+				</div>
+				<div class="grow col u-gap-5">
+					<span class="callout-title">O panorama está incompleto</span>
+					<p class="card-note" id="intelPartialText"></p>
+				</div>
+			</div>
+
+			<!-- Destaques: as alegações do período em frases, compostas no cliente a
+			     partir das contagens. O resumo por IA, quando ligado, vem embaixo. -->
+			<div class="card intel-headline" id="intelHeadline">
+				<div class="row baseline u-gap-8">
+					<span class="card-title grow" id="intelHeadlineTitle">O que as fontes relataram</span>
+					<span class="card-code" id="intelHeadlineCode"></span>
+				</div>
+				<div class="col u-gap-10" id="intelHighlights"></div>
+				<div class="intel-summary hidden" id="intelSummaryBox">
+					<div class="row baseline u-gap-8">
+						<span class="intel-summary-label mono">RESUMO POR IA</span>
+						<span class="card-code grow" id="intelSummaryCode"></span>
+						<button class="btn secondary sm hidden" type="button" id="intelSummaryBtn" data-click="generate_intel_summary">Gerar resumo</button>
+					</div>
+					<div class="col u-gap-8" id="intelSummary"></div>
+					<span class="status" id="intelSummaryStatus"></span>
+				</div>
+			</div>
+
+			<div class="intel-layout">
+				<div class="col intel-main u-gap-12">
+					<div class="row baseline u-gap-8">
+						<span class="card-title grow">Temas em destaque</span>
+						<span class="card-code">vocabulário fechado · sem IA</span>
+					</div>
+					<div class="col u-gap-12" id="intelThemes"></div>
+
+					<div class="card flush">
+						<div class="card-head">
+							<span class="card-title grow">Publicações do período</span>
+							<span class="card-code" id="intelItemsCode"></span>
+						</div>
+						<div class="intel-filter hidden" id="intelFilter">
+							<span class="status grow" id="intelFilterLabel"></span>
+							<button class="btn secondary sm" type="button" data-click="clear_intel_filter">Limpar filtro</button>
+						</div>
+						<div id="intelItems"></div>
+					</div>
+				</div>
+
+				<aside class="col intel-side u-gap-12">
+					<div class="card">
+						<div class="row baseline u-gap-8">
+							<span class="card-title grow">Grupos e famílias citados</span>
+						</div>
+						<div class="col u-gap-6" id="intelActors"></div>
+					</div>
+					<div class="card">
+						<span class="card-title">Setores visados</span>
+						<div class="col u-gap-6" id="intelSectors"></div>
+					</div>
+					<div class="card">
+						<span class="card-title">Brasil e América Latina</span>
+						<div class="col u-gap-6" id="intelBrazil"></div>
+					</div>
+					<div class="card">
+						<div class="row baseline u-gap-8">
+							<span class="card-title grow">Fontes</span>
+							<span class="card-code" id="intelSourcesCode"></span>
+						</div>
+						<p class="card-note">Feeds RSS públicos, com endereço fixo no código. Guardamos título, data, link e um trecho curto; o texto completo fica na fonte.</p>
+						<div class="col u-gap-4" id="intelSources"></div>
+						<div class="card-foot hidden" id="intelSourcesFoot">
+							<span class="status grow" id="intelSourcesStatus"></span>
+							<button class="btn secondary sm" type="button" data-click="enable_intel_recommended">Ligar pacote recomendado</button>
+						</div>
+					</div>
+				</aside>
 			</div>
 		</div>
 	</section>
 
 	<!-- ===================== CAIXA DE E-MAIL ============================== -->
 	<section class="pane list" data-view="inbox">
-		<div class="pane-head stacked" style="padding:14px 14px 10px 14px">
-			<div class="row" style="gap:8px">
+		<div class="pane-head stacked u-p-14-14-10-14">
+			<div class="row u-gap-8">
 				<h2 class="pane-title grow">Caixa de e-mail</h2>
 				<button class="icon-btn ghost" type="button" title="Atualizar lista" data-click="list_emails">
 					<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 11-1.7-4"></path><path d="M12.4 1.4v2.8h-2.8"></path></svg>
@@ -331,12 +484,12 @@
 				<button class="chip" type="button" data-click="set_inbox_order" data-arg="oldest">Mais antigos</button>
 			</div>
 
-			<div class="row" style="gap:8px">
+			<div class="row u-gap-8">
 				<div class="check" id="queueCheckAll" data-click="toggle_select_all">
 					<svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.6 5.2l2.1 2.1L8.4 2.6"></path></svg>
 				</div>
 				<span class="check-label" data-click="toggle_select_all">Selecionar todos</span>
-				<span class="push mono" id="queueCheckedLabel" style="font-size:var(--fs-micro);color:var(--danger2)"></span>
+				<span class="push mono u-fs-fs-micro u-c-danger2" id="queueCheckedLabel"></span>
 			</div>
 		</div>
 
@@ -351,14 +504,14 @@
 		<div class="rows" id="queueRows">
 			<div class="tbl-empty" id="queueEmpty">
 				Clique em <strong>Listar e-mails</strong> para buscar todas as denúncias não analisadas.
-				<div style="margin-top:12px"><button class="btn" type="button" id="listMailsBtn" data-click="list_emails" disabled>Listar e-mails</button></div>
+				<div class="u-mt-12"><button class="btn" type="button" id="listMailsBtn" data-click="list_emails" disabled>Listar e-mails</button></div>
 			</div>
 			<!-- Fila cheia, busca sem resultado. É outro estado que "caixa vazia":
 			     um diz que não há denúncia esperando, o outro que a que existe não
 			     casa com o que foi digitado — e a saída de cada um é diferente. -->
 			<div class="tbl-empty hidden" id="queueNoMatch">
 				Nenhum e-mail da fila casa com <strong id="queueNoMatchTerm"></strong>.
-				<div style="margin-top:12px"><button class="btn secondary" type="button" data-click="clear_queue_query">Limpar a busca</button></div>
+				<div class="u-mt-12"><button class="btn secondary" type="button" data-click="clear_queue_query">Limpar a busca</button></div>
 			</div>
 		</div>
 
@@ -369,7 +522,7 @@
 		     página, alternando mais recentes e mais antigos, então a página em
 		     que o analista está costuma estar pronta antes das outras. -->
 		<div class="pager hidden" id="inboxPager">
-			<div class="row" style="gap:6px">
+			<div class="row u-gap-6">
 				<button class="chip" type="button" id="inboxPageFirst" data-click="go_inbox_page" data-arg="first" aria-label="Primeira página">«</button>
 				<button class="chip" type="button" id="inboxPagePrev" data-click="go_inbox_page" data-arg="prev" aria-label="Página anterior">‹</button>
 				<span class="pager-label mono grow" id="inboxPageLabel" aria-live="polite"></span>
@@ -383,11 +536,11 @@
 		     Fica embaixo da lista, colado nela, porque é uma afirmação sobre o
 		     que a lista está mostrando — e sobre o que ela não está. Some sozinho
 		     quando a fila cabe inteira. -->
-		<div class="callout warn hidden" id="inboxLimit" style="margin:0;border-radius:0;border-left:0;border-right:0;border-bottom:0">
+		<div class="callout warn hidden u-m-0 u-radius-0 u-bl-0 u-br-0 u-bb-0" id="inboxLimit">
 			<div class="glyph">
 				<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2.2l6 10.4H2z"></path><path d="M8 6.6v3M8 11.4v.4"></path></svg>
 			</div>
-			<div class="grow col" style="gap:4px">
+			<div class="grow col u-gap-4">
 				<span class="callout-title" id="inboxLimitTitle"></span>
 				<p class="card-note" id="inboxLimitText"></p>
 			</div>
@@ -397,7 +550,7 @@
 	<!-- Preview / execução da análise -->
 	<section class="pane detail" data-view="inbox" id="inboxDetail">
 		<div class="pane-head">
-			<div class="grow col" style="gap:2px">
+			<div class="grow col u-gap-2">
 				<h2 class="pane-title truncate" id="detailTitle">Nenhum e-mail aberto</h2>
 				<span class="pane-sub mono" id="detailSub">selecione um item da lista</span>
 			</div>
@@ -428,7 +581,7 @@
 				<!-- SPF/DKIM/DMARC só são extraídos quando o .eml é aberto pelo
 				     pipeline; a listagem da caixa não os traz. O estado vazio diz
 				     isso em vez de mostrar um traço mudo. -->
-				<div class="auth-strip" id="previewAuth" style="padding-top:11px;border-top:1px solid var(--b1)"></div>
+				<div class="auth-strip u-pt-11 u-bt-1-solid-b1" id="previewAuth"></div>
 			</div>
 
 			<!-- Corpo. Da 51ª denúncia em diante a listagem traz só o envelope:
@@ -436,7 +589,7 @@
 			     diz que está vindo. Um corpo vazio sem aviso pareceria um e-mail
 			     sem texto, que é outra coisa. -->
 			<div class="card hidden" id="previewBodyCard">
-				<div class="row" style="gap:10px">
+				<div class="row u-gap-10">
 					<span class="field-label grow">CONTEÚDO</span>
 					<!-- Texto primeiro, sempre. É o mais rápido de ler e não sabe
 					     se disfarçar: nenhuma logomarca falsificada sobrevive ao
@@ -455,7 +608,7 @@
 				<p class="body-text measure" id="previewBody"></p>
 
 				<!-- ---------------- Como entregue ---------------- -->
-				<div class="col hidden" id="previewVisual" style="gap:12px">
+				<div class="col hidden u-gap-12" id="previewVisual">
 					<div class="progress hidden" id="previewVisualProgress"><span></span></div>
 
 					<!-- De qual mensagem é esta renderização. Numa denúncia
@@ -475,6 +628,7 @@
 					<div class="frame-shell hidden" id="previewFrameShell">
 						<div class="frame-bar">
 							<span class="mono grow" id="previewFrameNote">conteúdo externo · inerte</span>
+							<button class="btn xs secondary" type="button" id="previewUrlsBtn" aria-pressed="false" data-click="toggle_preview_urls">Mostrar URLs</button>
 							<button class="btn xs secondary" type="button" id="previewExpandBtn" data-click="toggle_preview_frame">Expandir</button>
 						</div>
 						<iframe id="previewFrame" title="E-mail como foi entregue" sandbox referrerpolicy="no-referrer"></iframe>
@@ -485,7 +639,7 @@
 					<!-- Anexos: nome, tipo declarado, tipo real e SHA-256. O hash
 					     é o artefato — vai para o VirusTotal ou o MISP sem que o
 					     arquivo passe pela estação de quem não deve executá-lo. -->
-					<div class="hidden col" id="previewAttachments" style="gap:8px"></div>
+					<div class="hidden col u-gap-8" id="previewAttachments"></div>
 				</div>
 			</div>
 
@@ -493,7 +647,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1.6l5.2 2v4c0 3.1-2.2 5.8-5.2 7.2-3-1.4-5.2-4.1-5.2-7.2v-4z"></path><path d="M8 5.4v3.2M8 10.9v.5"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<span class="callout-title">Triagem de e-mails denunciados</span>
 					<p class="card-note">Liste as mensagens ainda não analisadas da caixa monitorada, selecione uma ou várias e rode o scan. Cada e-mail vira um caso registrado nos destinos habilitados, passa pelos analisadores nativos e pela avaliação de engenharia social do LLM antes de receber um veredito.</p>
 				</div>
@@ -503,8 +657,8 @@
 
 	<!-- ===================== E-MAILS ANALISADOS =========================== -->
 	<section class="pane list hidden" data-view="done">
-		<div class="pane-head stacked" style="padding:14px 14px 10px 14px">
-			<div class="row" style="gap:8px">
+		<div class="pane-head stacked u-p-14-14-10-14">
+			<div class="row u-gap-8">
 				<h2 class="pane-title grow">E-mails analisados</h2>
 				<button class="icon-btn ghost" type="button" title="Atualizar" data-click="reload_cases">
 					<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 11-1.7-4"></path><path d="M12.4 1.4v2.8h-2.8"></path></svg>
@@ -536,15 +690,15 @@
 			</div>
 
 			<!-- Set when the analyst drills through from a recurring IOC -->
-			<button class="chip active hidden" type="button" id="doneIocChip" data-click="clear_ioc_filter" style="max-width:100%">
+			<button class="chip active hidden u-maxw-100" type="button" id="doneIocChip" data-click="clear_ioc_filter">
 				<span class="truncate" id="doneIocLabel"></span>
-				<span style="margin-left:6px">×</span>
+				<span class="u-ml-6">×</span>
 			</button>
 
 			<!-- Set when the analyst clicks a slice of the Phishing charts -->
-			<button class="chip active hidden" type="button" id="doneSignalChip" data-click="clear_signal_filter" style="max-width:100%">
+			<button class="chip active hidden u-maxw-100" type="button" id="doneSignalChip" data-click="clear_signal_filter">
 				<span class="truncate" id="doneSignalLabel"></span>
-				<span style="margin-left:6px">×</span>
+				<span class="u-ml-6">×</span>
 			</button>
 		</div>
 		<div class="rows" id="doneRows"></div>
@@ -566,7 +720,7 @@
 	     que já está condenado e espera resposta. -->
 	<section class="pane list hidden" data-view="queues">
 		<div class="pane-head stacked">
-			<div class="row" style="gap:8px">
+			<div class="row u-gap-8">
 				<h2 class="pane-title grow">Filas de Trabalho</h2>
 				<button class="icon-btn ghost" type="button" title="Atualizar" data-click="reload_desk">
 					<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 11-1.7-4"></path><path d="M12.4 1.4v2.8h-2.8"></path></svg>
@@ -609,8 +763,8 @@
 	     mostraria um veredito que outra pessoa já corrigiu. -->
 	<section class="pane detail hidden" data-view="done queues" id="caseDetail">
 		<div class="pane-head">
-			<div class="grow col" style="gap:2px">
-				<div class="row" style="gap:8px;min-width:0">
+			<div class="grow col u-gap-2">
+				<div class="row u-gap-8 u-minw-0">
 					<h2 class="pane-title truncate" id="caseTitle">Nenhum caso aberto</h2>
 					<span class="pill hidden" id="caseVerdictPill"></span>
 					<!-- O veredito da análise, quando uma pessoa já decidiu outro -->
@@ -626,7 +780,7 @@
 			<!-- Faixa de métricas do handoff. Risco, VirusTotal e idade do domínio
 			     não existem como campo no caso do TheHive; ficam como "—" até o
 			     pipeline gravá-los. Observáveis é real. Ver ROADMAP.md. -->
-			<div class="grid-auto narrow hidden" id="caseMetrics" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px"></div>
+			<div class="grid-auto narrow hidden u-cols-repeat-auto-fit-minmax-140-1fr u-gap-8" id="caseMetrics"></div>
 
 			<!-- A decisão de uma pessoa sobre o veredito. Fica acima do raciocínio da
 			     análise, e não abaixo: quem abre o caso precisa saber primeiro que o
@@ -635,14 +789,14 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6l5.2 2v4c0 3.1-2.2 5.8-5.2 7.2-3-1.4-5.2-4.1-5.2-7.2v-4z"></path><path d="M5.6 8.1l1.7 1.7 3.2-3.4"></path></svg>
 				</div>
-				<div class="grow col" style="gap:6px">
-					<div class="row" style="gap:8px">
+				<div class="grow col u-gap-6">
+					<div class="row u-gap-8">
 						<span class="callout-title grow" id="caseReclassTitle">Reclassificado como legítimo</span>
 						<button class="btn quiet hidden" type="button" id="caseRevertBtn" data-click="open_case_revert">Desfazer</button>
 					</div>
 					<span class="status mono" id="caseReclassMeta"></span>
 					<p class="reclass-quote" id="caseReclassQuote"></p>
-					<div class="col" style="gap:2px" id="caseReclassOutcomes"></div>
+					<div class="col u-gap-2" id="caseReclassOutcomes"></div>
 				</div>
 			</div>
 
@@ -650,7 +804,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 5.2v3.6"></path><circle cx="8" cy="11.2" r="0.5"></circle><path d="M7.1 2.2L1.6 12a1 1 0 00.9 1.5h11a1 1 0 00.9-1.5L8.9 2.2a1 1 0 00-1.8 0z"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<span class="callout-title">Reclassificações indisponíveis</span>
 					<p class="card-note">Não foi possível ler as decisões já tomadas sobre este caso. O veredito acima é o que o destino registrou, e marcar como legítimo fica bloqueado até o banco responder — reclassificar às cegas poderia sobrepor a decisão de outra pessoa.</p>
 				</div>
@@ -662,7 +816,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 11-1.7-4"></path><path d="M12.4 1.4v2.8h-2.8"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<span class="callout-title" id="caseReanalyzedTitle">Reanálise</span>
 					<p class="card-note" id="caseReanalyzedNote"></p>
 				</div>
@@ -674,7 +828,7 @@
 			     de novo quando a decisão chega — o botão visível não é a permissão. -->
 			<div class="decision-bar hidden" id="caseDecisionBar">
 				<span class="field-label">DECISÃO</span>
-				<div class="row" style="gap:8px;flex-wrap:wrap">
+				<div class="row u-gap-8 u-wrap">
 					<button class="btn secondary hidden" type="button" id="caseDecideSafeBtn" data-click="open_case_reclassify">
 						<span class="dot ok" aria-hidden="true"></span>Marcar como legítimo
 					</button>
@@ -689,15 +843,15 @@
 			     sabe, nunca zero: uma análise anterior à impressão digital não foi
 			     medida, e "só você denunciou" seria uma afirmação. -->
 			<div class="card hidden" id="caseScopeCard">
-				<div class="row" style="gap:8px">
+				<div class="row u-gap-8">
 					<span class="card-title grow">Escopo</span>
 					<span class="card-code" id="caseScopeMatch"></span>
 				</div>
-				<div class="row baseline" style="gap:10px;flex-wrap:wrap">
+				<div class="row baseline u-gap-10 u-wrap">
 					<span class="scope-count" id="caseScopeCount">…</span>
 					<span class="card-note grow" id="caseScopeNote">medindo…</span>
 				</div>
-				<div class="col hidden" style="gap:0" id="caseScopeRows"></div>
+				<div class="col hidden u-gap-0" id="caseScopeRows"></div>
 				<button class="obs-more hidden" type="button" id="caseScopeMore" data-click="toggle_case_scope" aria-expanded="false" aria-controls="caseScopeRows">
 					<span id="caseScopeMoreLabel">Ver as denúncias</span>
 					<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"></path></svg>
@@ -709,7 +863,7 @@
 			     passo a passo, a tela lista os fatos gravados e diz que não sabe qual
 			     regra disparou, em vez de adivinhar. -->
 			<div class="card hidden" id="caseLlmCard">
-				<div class="row" style="gap:8px">
+				<div class="row u-gap-8">
 					<span class="card-title grow" id="caseWhyTitle">Por que este veredito</span>
 					<span class="card-code" id="caseWhyCode"></span>
 				</div>
@@ -717,29 +871,29 @@
 
 				<div class="sep"></div>
 
-				<div class="col" style="gap:10px">
-					<div class="row" style="gap:8px;flex-wrap:wrap">
+				<div class="col u-gap-10">
+					<div class="row u-gap-8 u-wrap">
 						<span class="field-label grow">AVALIAÇÃO DE ENGENHARIA SOCIAL</span>
 						<span class="field-hint" id="caseLlmDetected"></span>
 						<span class="pill" id="caseLlmRisk">LLM</span>
 					</div>
 					<!-- Táticas reconhecidas pelo LLM, gravadas como tag do caso -->
-					<div class="row" style="gap:6px;flex-wrap:wrap" id="caseTactics"></div>
+					<div class="row u-gap-6 u-wrap" id="caseTactics"></div>
 					<p class="body-text measure" id="caseLlmText"></p>
-					<div class="col hidden" style="gap:8px" id="caseEvidenceBlock">
+					<div class="col hidden u-gap-8" id="caseEvidenceBlock">
 						<span class="field-label">ELEMENTOS DO E-MAIL QUE A IA APONTOU</span>
 						<ul class="evidence" id="caseEvidence"></ul>
 					</div>
-					<div class="col hidden" style="gap:10px" id="caseCouncil"></div>
+					<div class="col hidden u-gap-10" id="caseCouncil"></div>
 				</div>
 
-				<div class="col hidden" style="gap:8px" id="caseScoreBlock">
+				<div class="col hidden u-gap-8" id="caseScoreBlock">
 					<div class="sep"></div>
-					<div class="row" style="gap:8px">
+					<div class="row u-gap-8">
 						<span class="field-label grow">SCORE PONDERADO</span>
 						<span class="card-code" id="caseScoreValue"></span>
 					</div>
-					<div class="col" style="gap:4px" id="caseScoreFactors"></div>
+					<div class="col u-gap-4" id="caseScoreFactors"></div>
 				</div>
 			</div>
 
@@ -756,7 +910,7 @@
 				</button>
 			</div>
 
-			<div class="row hidden" id="caseActions" style="gap:8px;flex-wrap:wrap">
+			<div class="row hidden u-gap-8 u-wrap" id="caseActions">
 				<!-- Secundário, não primário: um botão azul cheio no topo da fileira
 				     seria a ação mais destacada da tela sem fazer nada -->
 				<button class="btn secondary" type="button" id="caseBlockBtn" data-click="open_case_block">Bloquear indicadores</button>
@@ -767,7 +921,7 @@
 			<!-- No painel, e não em modal: quem escreve o motivo precisa continuar
 			     lendo o raciocínio e os observáveis logo acima -->
 			<div class="card hidden" id="caseReclassForm">
-				<div class="row" style="gap:8px">
+				<div class="row u-gap-8">
 					<span class="card-title grow" id="caseReclassFormTitle">Marcar como legítimo</span>
 					<span class="card-code" id="caseReclassFrom"></span>
 				</div>
@@ -781,18 +935,27 @@
 				<!-- Só num falso positivo corrigido. Marcada por padrão quando a errata
 				     está ligada, porque a analista sabe coisas que a configuração não
 				     sabe: que o denunciante já foi avisado por telefone, por exemplo. -->
-				<div class="col hidden" style="gap:6px" id="caseErrataRow">
-					<div class="row" style="gap:8px">
+				<div class="col hidden u-gap-6" id="caseErrataRow">
+					<div class="row u-gap-8">
 						<div class="check" id="caseErrataCheck" role="checkbox" aria-checked="false" tabindex="0" data-click="toggle_case_errata" data-enter="toggle_case_errata"><svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 8.3l3.4 3.4 7.4-7.4"></path></svg></div>
 						<span class="check-label" data-click="toggle_case_errata">Enviar errata a quem denunciou</span>
 					</div>
 					<span class="field-hint" id="caseErrataHint"></span>
 				</div>
 
+				<!-- Os hosts e IPs que os analisadores acusaram. Só o que a analista
+				     marcar vira precedente (a IA recebe a decisão quando ele for
+				     acusado de novo); começa tudo desmarcado de propósito. -->
+				<div class="col hidden u-gap-6" id="caseIndicatorRow">
+					<span class="field-label">HOSTS QUE VOCÊ VERIFICOU</span>
+					<div class="col u-gap-6" id="caseIndicatorList"></div>
+					<span class="field-hint">Marque só os hosts e IPs que você conferiu e são legítimos. Cada um vira precedente: a IA recebe esta decisão e o seu motivo quando ele for acusado de novo, e um admin pode transformá-lo em regra de whitelist.</span>
+				</div>
+
 				<!-- O que esta decisão ensina às análises seguintes. "Só este caso" é o
 				     padrão; os outros dois exigem admin no servidor, e a tela diz isso
 				     em vez de esconder a opção. -->
-				<div class="col hidden" style="gap:8px" id="caseMemoryRow">
+				<div class="col hidden u-gap-8" id="caseMemoryRow">
 					<span class="field-label">VALER TAMBÉM PARA</span>
 					<div class="tabs inline" id="caseMemoryScope" role="radiogroup" aria-label="Escopo da decisão">
 						<button class="tab active" type="button" role="radio" aria-checked="true" data-click="set_case_memory_scope" data-arg="case">Só este caso</button>
@@ -813,7 +976,7 @@
 			     de SSRF da caixa de entrada; as imagens remotas são buscadas pelo
 			     servidor, nunca pelo navegador da analista. -->
 			<div class="card hidden" id="caseBodyCard">
-				<div class="row" style="gap:8px">
+				<div class="row u-gap-8">
 					<span class="card-title grow">E-mail denunciado</span>
 					<div class="tabs inline" role="tablist" aria-label="Forma de exibição do e-mail">
 						<button class="tab active" type="button" role="tab" aria-selected="true" id="caseMailTabVisual" data-click="set_case_mail_mode" data-arg="visual">Como entregue</button>
@@ -821,21 +984,22 @@
 					</div>
 				</div>
 
-				<div class="col" style="gap:12px" id="caseMailVisual">
+				<div class="col u-gap-12" id="caseMailVisual">
 					<div class="progress hidden" id="caseMailProgress"><span></span></div>
 					<div class="inert-strip hidden" id="caseMailInert"></div>
 					<div class="frame-shell hidden" id="caseMailFrameShell">
 						<div class="frame-bar">
 							<span class="mono grow">conteúdo externo · inerte</span>
+							<button class="btn xs secondary" type="button" id="caseMailUrlsBtn" aria-pressed="false" data-click="toggle_case_mail_urls">Mostrar URLs</button>
 							<button class="btn xs secondary" type="button" id="caseMailExpandBtn" data-click="toggle_case_mail_frame">Expandir</button>
 						</div>
 						<iframe id="caseMailFrame" title="E-mail denunciado como foi entregue" sandbox referrerpolicy="no-referrer"></iframe>
 					</div>
 					<p class="absent hidden" id="caseMailEmpty"></p>
-					<div class="hidden col" id="caseMailAttachments" style="gap:8px"></div>
+					<div class="hidden col u-gap-8" id="caseMailAttachments"></div>
 				</div>
 
-				<div class="col hidden" style="gap:6px" id="caseMailText">
+				<div class="col hidden u-gap-6" id="caseMailText">
 					<p class="card-note">Conteúdo não confiável, renderizado como texto puro.</p>
 					<p class="body-text" id="caseBody"></p>
 				</div>
@@ -845,7 +1009,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M5.3 8.2l1.9 1.9 3.6-4"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<span class="callout-title">Histórico das análises</span>
 					<p class="card-note">Cada e-mail analisado virou um caso registrado. Selecione um da lista para ver o veredito, os observáveis extraídos e a avaliação de engenharia social registrada durante a análise.</p>
 				</div>
@@ -857,10 +1021,10 @@
 	     há caso aberto numa das duas telas e a analista o abriu, e some quando
 	     ela troca de tela — quem decide a visibilidade é sync_case_assistant().
 	     O contexto é o do caso aberto, carregado pelo servidor com as mesmas
-	     proteções de prompt do Chat AI (build_chat_system_prompt). -->
+	     proteções de prompt do chat do caso (build_chat_system_prompt). -->
 	<section class="pane side hidden" id="caseAssistant" aria-label="Assistente IA do caso">
 		<div class="pane-head">
-			<div class="grow col" style="gap:2px">
+			<div class="grow col u-gap-2">
 				<h2 class="pane-title">Assistente IA</h2>
 				<span class="pane-sub mono truncate" id="assistantSub">nenhum caso carregado</span>
 			</div>
@@ -894,7 +1058,7 @@
 	<section class="pane hidden" data-view="tactic">
 		<div class="pane-head stacked">
 			<div class="row">
-				<div class="grow col" style="gap:2px">
+				<div class="grow col u-gap-2">
 					<h2 class="pane-title">Phishing confirmado</h2>
 					<span class="pane-sub mono" id="phishCount">carregando…</span>
 				</div>
@@ -945,7 +1109,7 @@
 					<div class="glyph">
 						<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6l5.2 2v4c0 3.1-2.2 5.8-5.2 7.2-3-1.4-5.2-4.1-5.2-7.2v-4z"></path><path d="M8 6v3"></path><path d="M8 11h.01"></path></svg>
 					</div>
-					<div class="grow col" style="gap:5px">
+					<div class="grow col u-gap-5">
 						<span class="callout-title" id="phishHeadlineTitle">—</span>
 						<p class="card-note" id="phishHeadlineText"></p>
 					</div>
@@ -956,11 +1120,11 @@
 					<div class="glyph">
 						<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="5.3"></circle><circle cx="8" cy="8" r="1.4"></circle><path d="M8 .9v2.4M8 12.7v2.4M.9 8h2.4M12.7 8h2.4"></path></svg>
 					</div>
-					<div class="grow col" style="gap:4px">
+					<div class="grow col u-gap-4">
 						<span class="callout-title">IOC mais recorrente: <span class="mono" id="phishCampaignValue"></span></span>
 						<p class="card-note" id="phishCampaignText"></p>
 					</div>
-					<div class="row" style="gap:6px;flex-wrap:wrap">
+					<div class="row u-gap-6 u-wrap">
 						<button class="btn sm" type="button" data-click="open_campaign">Ver casos com esse IOC</button>
 						<button class="btn secondary sm" type="button" id="phishBlockBtn"
 							data-click="open_campaign_block">Bloquear no gateway</button>
@@ -972,11 +1136,11 @@
 				<!-- Esquerda: quem está mandando -->
 				<div class="phish-stack">
 					<div class="card">
-						<div class="col" style="gap:2px">
+						<div class="col u-gap-2">
 							<span class="card-title">Principais remetentes por risco agregado</span>
 							<span class="card-code" id="phishSendersMode">—</span>
 						</div>
-						<div class="col" style="gap:14px" id="phishSenders"></div>
+						<div class="col u-gap-14" id="phishSenders"></div>
 						<p class="card-note" id="phishSendersNote"></p>
 					</div>
 
@@ -985,7 +1149,7 @@
 				<!-- Centro: o que fazer com o que chegou -->
 				<div class="phish-stack">
 					<div class="card">
-						<div class="col" style="gap:2px">
+						<div class="col u-gap-2">
 							<span class="card-title">IOCs e remediação proposta</span>
 							<span class="card-code" id="phishIocMode">—</span>
 						</div>
@@ -1003,7 +1167,7 @@
 
 					<div class="card">
 						<span class="card-title">Ações recomendadas</span>
-						<div class="col" style="gap:14px" id="phishActions"></div>
+						<div class="col u-gap-14" id="phishActions"></div>
 					</div>
 
 					<!-- Duas fontes, separadas de propósito: o que já foi analisado no
@@ -1019,7 +1183,7 @@
 						</div>
 						<div class="subject-group">
 							<span class="field-label">ANALISADOS NO PERÍODO</span>
-							<div class="col" style="gap:10px" id="phishSubjects"></div>
+							<div class="col u-gap-10" id="phishSubjects"></div>
 						</div>
 						<div class="sep"></div>
 						<div class="subject-group">
@@ -1027,7 +1191,7 @@
 								<span class="field-label grow">NA CAIXA AGORA · SEM VEREDITO</span>
 								<span class="card-code" id="phishInboxSubjectsCount"></span>
 							</div>
-							<div class="col" style="gap:10px" id="phishInboxSubjects"></div>
+							<div class="col u-gap-10" id="phishInboxSubjects"></div>
 						</div>
 					</div>
 				</div>
@@ -1040,7 +1204,7 @@
 					     somá-lo a `fail` inventaria falha que ninguém observou — por isso ele
 					     fica fora da pizza e é dito por extenso embaixo dela. -->
 					<div class="card">
-						<div class="col" style="gap:2px">
+						<div class="col u-gap-2">
 							<span class="card-title">Sinais de autenticação</span>
 							<span class="card-code" id="phishAuthScope">—</span>
 						</div>
@@ -1048,7 +1212,7 @@
 					</div>
 
 					<div class="card">
-						<div class="col" style="gap:2px">
+						<div class="col u-gap-2">
 							<span class="card-title">Faixas do score</span>
 							<span class="card-code" id="phishTierScope">—</span>
 						</div>
@@ -1066,76 +1230,38 @@
 		</div>
 	</section>
 
-	<!-- ===================== CHAT AI ====================================== -->
-	<section class="pane list hidden" data-view="chat">
-		<div class="pane-head stacked" style="padding:14px 14px 12px 14px">
-			<h2 class="pane-title">Contexto da conversa</h2>
-			<span class="pane-sub mono">a IA responde apenas sobre o caso carregado</span>
-		</div>
-		<div class="pane-body stack">
-			<div class="col" style="gap:7px">
-				<span class="field-label">CASO DO THEHIVE</span>
-				<div class="row" style="gap:6px">
-					<input class="input mono grow" id="chatCaseInput" type="text" placeholder="número (25) ou id (~503816)" data-enter="chat_load_context">
-					<button class="btn sm" type="button" id="chatLoadBtn" data-click="chat_load_context">Carregar</button>
-				</div>
-			</div>
-
-			<div class="card" id="chatScopeCard">
-				<div class="row" style="gap:7px">
-					<span class="dot" id="chatScopeDot"></span>
-					<span class="card-title">Escopo carregado</span>
-				</div>
-				<!-- The key/value list is rebuilt on every load, so the status line
-				     below must stay outside it -->
-				<div class="col" style="gap:6px" id="chatScopeRows"></div>
-				<span class="status" id="chatContextStatus">Nenhum caso carregado.</span>
-				<button class="btn quiet hidden" type="button" id="chatClearBtn" data-click="chat_clear_context">Limpar contexto</button>
-			</div>
-
-			<p class="card-note">O conteúdo do e-mail é dado não confiável. Trate as respostas como apoio à investigação, nunca como veredito.</p>
-		</div>
-	</section>
-
-	<section class="pane detail hidden" data-view="chat">
-		<div class="pane-head">
-			<div class="grow col" style="gap:2px">
-				<div class="row" style="gap:8px">
-					<h2 class="pane-title truncate" id="chatTitle">Chat AI</h2>
-					<span class="pill hidden" id="chatLockPill">contexto travado</span>
-				</div>
-				<span class="pane-sub mono" id="chatSubtitle">carregue um caso para começar</span>
-			</div>
-		</div>
-		<div class="chat-scroll" id="chatMessages"><div class="chat-thread" id="chatThread"></div></div>
-		<div class="composer">
-			<div class="chips" id="chatSuggestions"></div>
-			<div class="composer-box">
-				<input id="chatQuestionInput" type="text" placeholder="Pergunte sobre este e-mail ou padrão…" disabled data-enter="chat_send">
-				<button class="btn sm" type="button" id="chatSendBtn" disabled data-click="chat_send">Enviar</button>
-			</div>
-			<span class="composer-note">A IA responde apenas com base no caso carregado, usando o modelo configurado em Configurações → IA.</span>
-		</div>
-	</section>
-
 	<!-- ===================== USUÁRIOS ===================================== -->
 	<section class="pane hidden" data-view="users">
 		<div class="pane-head">
-			<div class="grow col" style="gap:2px">
+			<div class="grow col u-gap-2">
 				<h2 class="pane-title">Usuários</h2>
 				<span class="pane-sub mono" id="userCount">—</span>
 			</div>
 			<button class="btn" type="button" data-click="open_user_modal">
-				<span style="font-size:var(--fs-title);line-height:1;margin-top:-1px">+</span>Incluir usuário
+				<span class="u-fs-fs-title u-lh-1 u-mt-n1">+</span>Incluir usuário
 			</button>
 		</div>
 		<div class="pane-body">
 			<div class="tbl-head cols-users">
-				<span>USUÁRIO</span><span>CARGO</span><span>SITUAÇÃO</span><span>ÚLTIMO ACESSO</span><span style="text-align:right">AÇÕES</span>
+				<span>USUÁRIO</span><span>CARGO</span><span>PERFIL</span><span>SITUAÇÃO</span><span>ÚLTIMO ACESSO</span><span class="u-text-right">AÇÕES</span>
 			</div>
 			<div id="usersRows"></div>
+
+			<!-- Perfis de acesso (access_profiles.py): o que cada conta vê, para
+			     mais ou para menos que o cargo. O servidor confere em toda rota;
+			     esta lista é só onde se monta o perfil. -->
+			<div class="pane-head u-wrap u-p-14-22 u-bt-1-solid-b1">
+				<div class="col u-gap-2 u-flex-1-1-200">
+					<span class="card-title">Perfis de acesso</span>
+					<span class="pane-sub">Sem perfil, a conta vê o que o cargo dá. Com perfil, vê exatamente as telas, abas e ações marcadas nele — mais ou menos que o cargo. Usuários e perfis é sempre e só do global_admin.</span>
+				</div>
+				<button class="btn" type="button" data-click="open_profile_modal">
+					<span class="u-fs-fs-title u-lh-1 u-mt-n1">+</span>Novo perfil
+				</button>
+			</div>
+			<div id="profilesRows"></div>
 		</div>
-		<div style="padding:10px 22px;border-top:1px solid var(--b1)"><span class="status" id="usersStatus"></span></div>
+		<div class="u-p-10-22 u-bt-1-solid-b1"><span class="status" id="usersStatus"></span></div>
 	</section>
 
 	<!-- ===================== AUDITORIA ==================================== -->
@@ -1148,7 +1274,7 @@
 	     conversa começam olhando para a mesma coisa. -->
 	<section class="pane hidden audit-pane" data-view="audit" aria-labelledby="auditTitle">
 		<div class="pane-head">
-			<div class="grow col" style="gap:2px;min-width:0">
+			<div class="grow col u-gap-2 u-minw-0">
 				<h2 class="pane-title" id="auditTitle">Auditoria</h2>
 				<span class="pane-sub mono truncate" id="auditSub">carregando…</span>
 			</div>
@@ -1230,7 +1356,7 @@
 
 		<div class="audit-pager">
 			<span class="status mono" id="auditPagerLabel"></span>
-			<div class="row push" style="gap:6px">
+			<div class="row push u-gap-6">
 				<button class="btn quiet xs" type="button" id="auditPrevBtn" data-click="audit_page" data-arg="prev" disabled>Anteriores</button>
 				<button class="btn quiet xs" type="button" id="auditNextBtn" data-click="audit_page" data-arg="next" disabled>Próximos</button>
 			</div>
@@ -1244,7 +1370,7 @@
 	     nenhum, só a pergunta e a conversa. -->
 	<section class="pane side hidden audit-assistant" id="auditAssistant" aria-label="Assistente de auditoria">
 		<div class="pane-head">
-			<div class="grow col" style="gap:2px;min-width:0">
+			<div class="grow col u-gap-2 u-minw-0">
 				<h2 class="pane-title">Assistente de auditoria</h2>
 				<span class="pane-sub mono truncate" id="auditAiSub">lendo a trilha…</span>
 			</div>
@@ -1268,17 +1394,16 @@
 	<section class="pane hidden" data-view="integr">
 		<div class="pane-head stacked">
 			<div class="row">
-				<div class="grow col" style="gap:2px">
+				<div class="grow col u-gap-2">
 					<h2 class="pane-title">Integrações</h2>
 					<span class="pane-sub mono" id="integrSummary">—</span>
 				</div>
 			</div>
 			<div class="tabs" id="integrTabs">
-				<button class="tab active" type="button" data-click="show_integr_tab" data-arg="plataforma">Plataforma</button>
-				<button class="tab" type="button" data-click="show_integr_tab" data-arg="analisadores">Analisadores</button>
-				<button class="tab" type="button" data-click="show_integr_tab" data-arg="priorizacao">Priorização</button>
-				<button class="tab" type="button" data-click="show_integr_tab" data-arg="bloqueio">Bloqueio</button>
-				<button class="tab" type="button" data-click="show_integr_tab" data-arg="tickets">Tickets</button>
+				<a class="tab active" href="/integr/analisadores" data-click="show_integr_tab" data-arg="analisadores">Analisadores</a>
+				<a class="tab" href="/integr/priorizacao" data-click="show_integr_tab" data-arg="priorizacao">Priorização</a>
+				<a class="tab" href="/integr/bloqueio" data-click="show_integr_tab" data-arg="bloqueio">Bloqueio</a>
+				<a class="tab" href="/integr/tickets" data-click="show_integr_tab" data-arg="tickets">Tickets</a>
 			</div>
 		</div>
 
@@ -1288,7 +1413,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.5A1.5 1.5 0 013.5 4h9A1.5 1.5 0 0114 5.5v1a1.5 1.5 0 000 3v1A1.5 1.5 0 0112.5 12h-9A1.5 1.5 0 012 10.5v-1a1.5 1.5 0 000-3v-1z"></path><path d="M9.5 4v8" stroke-dasharray="1.5 1.5"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<div class="title-line"><span class="callout-title">Onde a análise fica registrada</span>{% call info() %}Terminada a análise, o resultado — veredito, observáveis, o que cada analisador respondeu e a avaliação do LLM — é entregue a cada destino habilitado. Eles são independentes entre si: um Jira fora do ar não impede a gravação em disco.{% endcall %}</div>
 					<p class="card-note" id="ticketsNote"></p>
 				</div>
@@ -1304,12 +1429,12 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5L4.8 11.2a2.4 2.4 0 01-3.4-3.4l1.7-1.7"></path><path d="M9.5 6.5l1.7-1.7a2.4 2.4 0 013.4 3.4l-1.7 1.7"></path><path d="M6.2 9.8l3.6-3.6"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<div class="title-line"><span class="callout-title">Integre com qualquer ferramenta que aceite uma API REST</span>{% call info() %}Os três destinos acima têm cliente escrito. Um conector não tem: você abre a documentação da ferramenta de destino, copia o JSON que ela exige e cola aqui, marcando onde entram os dados da análise. Splunk, ServiceNow, PagerDuty, Slack, Sentinel — todos pelo mesmo formulário.{% endcall %}</div>
 					<p class="card-note" id="connectorsNote"></p>
 				</div>
 			</div>
-			<div class="row" style="gap:8px;margin-bottom:12px">
+			<div class="row u-gap-8 u-mb-12">
 				<span class="grow"></span>
 				<button class="btn sm" type="button" data-click="open_connector_modal">Novo conector</button>
 			</div>
@@ -1322,7 +1447,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M3.6 3.6l8.8 8.8"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<div class="title-line"><span class="callout-title">Destinos de bloqueio</span>{% call info() %}Diferente dos analisadores, que só leem, estes destinos <strong>alteram sistemas de terceiros</strong>: a lista de bloqueio do seu tenant do Microsoft 365 e os objetos do seu firewall. Nada aqui é acionado pelo pipeline — bloquear é sempre um clique explícito no detalhe do caso, e cada um entra no log de auditoria com o valor e o destino. <strong>Testar</strong> faz apenas uma chamada de leitura: nunca bloqueia nada.{% endcall %}</div>
 					<p class="card-note">Estes destinos <strong>alteram sistemas de terceiros</strong>. Bloquear é sempre um clique explícito no detalhe do caso.</p>
 					<p class="card-note" id="respondersNote"></p>
@@ -1337,7 +1462,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5V9"></path><path d="M6.5 12.5V4"></path><path d="M10.5 12.5V7"></path><path d="M14 12.5V2.5"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<div class="title-line"><span class="callout-title">Metodologia do score</span>{% call info() %}Duas regras que valem a pena saber antes de mexer. <strong>O veredito é piso do score, nunca teto</strong>: um e-mail que os analisadores condenaram não aparece na faixa de legítimo porque a média saiu baixa, e por consequência a faixa só eleva um veredito — nunca o rebaixa. E <strong>nenhum fator subtrai</strong>: um analisador que não conseguiu olhar (nível <code>info</code>) fica fora da média em vez de diluí-la, e evidência de inocência — blocklist limpa, remetente autenticado — participa com peso reduzido, porque "não está na lista" é evidência fraca.{% endcall %}</div>
 					<p class="card-note"><strong>score = 100 × Σ ( peso × fator )</strong>, com cada fator normalizado em [0,1]. O peso de cada linha abaixo é o quanto aquele sinal vale no total; o ranking reordena ao vivo conforme você ajusta.</p>
 					<p class="card-note" id="scoringNote"></p>
@@ -1347,7 +1472,7 @@
 			<div class="grid-auto">
 				<div class="card">
 					<div class="row top">
-						<div class="grow col" style="gap:2px">
+						<div class="grow col u-gap-2">
 							<span class="card-title">Faixas</span>
 							<span class="card-code">onde cada score cai</span>
 						</div>
@@ -1372,7 +1497,7 @@
 
 				<div class="card">
 					<div class="row top">
-						<div class="grow col" style="gap:2px">
+						<div class="grow col u-gap-2">
 							<span class="card-title">O que o score faz com o veredito</span>
 							<span class="card-code">modo de operação</span>
 						</div>
@@ -1391,17 +1516,17 @@
 
 				<div class="card">
 					<div class="row top">
-						<div class="grow col" style="gap:2px">
+						<div class="grow col u-gap-2">
 							<span class="card-title">Triagem de correspondência em massa</span>
 							<span class="card-code">RFC 2369 · 8058 · 3098</span>
 						</div>
 					</div>
 					<p class="card-note">Uma mensagem com gramática de lista nos cabeçalhos — <code>List-Unsubscribe</code>, <code>List-Unsubscribe-Post</code>, <code>Precedence: bulk</code>, <code>X-Advertisement</code> — <strong>e</strong> com o domínio remetente autenticado é rotulada como <strong>spam</strong> em vez de ocupar a fila. As duas condições andam juntas: o cabeçalho de lista foi escrito por quem enviou; a autenticação, pelo servidor que recebeu.</p>
-					<div class="row" style="gap:9px">
+					<div class="row u-gap-9">
 						<span class="field-label grow">ROTULAR COMO SPAM</span>
 						<div class="toggle" id="scoringSpamTriage" data-click="toggle_switch"><span class="knob"></span></div>
 					</div>
-					<div class="row" style="gap:9px">
+					<div class="row u-gap-9">
 						<span class="field-label grow">PULAR OS ANALISADORES DE REPUTAÇÃO</span>
 						<div class="toggle" id="scoringSpamSkip" data-click="toggle_switch"><span class="knob"></span></div>
 					</div>
@@ -1409,7 +1534,7 @@
 				</div>
 			</div>
 
-			<div class="row" style="gap:8px;margin-bottom:4px">
+			<div class="row u-gap-8 u-mb-4">
 				<input class="input grow" id="scoringQuery" type="text" autocomplete="off"
 					placeholder="Filtrar por nome, fonte ou tipo de observável…"
 					data-input="filter_scoring_debounced">
@@ -1432,12 +1557,16 @@
 		</div>
 
 		<!-- ANALISADORES -->
-		<div class="pane-body pad hidden" data-integr-tab="analisadores">
+		<!-- A aba em que Integrações abre: é a única sem `hidden`, e a marcada como
+		     `active` na barra acima. Existia uma aba Plataforma à frente dela, com um
+		     único card: um espelho somente-leitura do nome da exportação MISP. O nome
+		     é um campo do destino TheHive (aba Tickets), e é lá que ele se edita -->
+		<div class="pane-body pad" data-integr-tab="analisadores">
 			<div class="callout neutral">
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.6"></circle><path d="M10.4 10.4L14 14"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<div class="title-line">
 						<span class="callout-title">Analisadores nativos</span>
 						{% call info() %}Consultam a reputação dos observáveis direto no fornecedor, sem intermediário. São eles que o pipeline roda em cada análise. Cada um define a partir de que evidência um observável vira malicioso ou suspeito — use <strong>Testar</strong> para ver o veredito que o limiar atual produz antes de habilitar.{% endcall %}
@@ -1445,12 +1574,34 @@
 					<p class="card-note" id="analyzersPipelineNote"></p>
 				</div>
 			</div>
-			<div class="row" style="gap:8px;margin-bottom:12px">
+			<div class="row u-gap-8 u-mb-12">
 				<input class="input grow" id="analyzerQuery" type="text" autocomplete="off"
 					placeholder="Filtrar por nome, tipo ou observável — sandbox, url, virustotal…"
 					data-input="filter_analyzers_debounced">
 				<button class="btn sm hidden" type="button" id="analyzerQueryClear"
 					data-click="clear_analyzer_filter">Limpar</button>
+			</div>
+			<!-- Grupo A: listas gratuitas baixadas para o servidor. A consulta é local, então
+			     nada do e-mail sai da rede e não há chave nem cota. Montado por
+			     render_feed_cards (bluephish.js) a partir do registro da API. -->
+			<div id="feedsGroup" class="hidden">
+				<div class="row top u-gap-8 u-mb-12">
+					<div class="grow col u-gap-5">
+						<div class="title-line">
+							<span class="card-title">Feeds públicos · consulta offline</span>
+							{% call info() %}Listas gratuitas que o servidor baixa e atualiza sozinho. A análise consulta a cópia local, então nenhum domínio ou URL do e-mail sai da rede e não há chave nem cota. Constar na lista condena; não constar não absolve, e por isso o resultado é "sem opinião". Gratuito não quer dizer livre para qualquer uso: confira a licença em cada card.{% endcall %}
+						</div>
+						<p class="card-note">Baixados para este servidor e consultados localmente.</p>
+					</div>
+					<button class="btn sm" type="button" id="feedsRecommendedBtn"
+						data-click="enable_recommended_feeds">Ativar pacote recomendado</button>
+				</div>
+				<div class="grid-cards" id="feedCards"></div>
+				<div class="sep"></div>
+				<div class="grow col u-gap-5 u-mb-12">
+					<span class="card-title">Serviços com chave · consulta online</span>
+					<p class="card-note">Cada um consulta o fornecedor direto, com a sua chave ou conta.</p>
+				</div>
 			</div>
 			<div class="grid-cards" id="analyzerCards"></div>
 
@@ -1463,7 +1614,7 @@
 				<div class="glyph">
 					<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5L4.8 11.2a2.4 2.4 0 01-3.4-3.4l1.7-1.7"></path><path d="M9.5 6.5l1.7-1.7a2.4 2.4 0 013.4 3.4l-1.7 1.7"></path><path d="M6.2 9.8l3.6-3.6"></path></svg>
 				</div>
-				<div class="grow col" style="gap:5px">
+				<div class="grow col u-gap-5">
 					<div class="title-line">
 						<span class="callout-title">Consulte qualquer fornecedor que aceite uma API REST</span>
 						{% call info() %}Os analisadores acima têm cliente escrito. Se você já paga um serviço de reputação que não está na lista, não precisa esperar: informe o endereço da consulta, aponte onde o veredito fica na resposta JSON e mapeie os valores dele para malicioso, suspeito ou limpo. Ele passa a rodar no pipeline como os demais, com card, teste e limiar.{% endcall %}
@@ -1471,62 +1622,40 @@
 					<p class="card-note" id="customAnalyzersNote"></p>
 				</div>
 			</div>
-			<div class="row" style="gap:8px;margin-bottom:12px">
+			<div class="row u-gap-8 u-mb-12">
 				<span class="grow"></span>
 				<button class="btn sm" type="button" data-click="open_custom_modal">Novo analisador</button>
 			</div>
 		</div>
 
-		<!-- PLATAFORMA -->
-		<div class="pane-body pad" data-integr-tab="plataforma">
-			<div class="grid-cards">
-				<!-- MISP / caso -->
-				<div class="card">
-					<div class="row top">
-						<div class="grow col" style="gap:2px">
-							<span class="card-title">MISP</span>
-							<span class="card-code">exportação de casos maliciosos</span>
-						</div>
-						<span class="pill" id="mispPill">—</span>
-					</div>
-					<p class="card-note">Nome do servidor MISP configurado no TheHive. Os casos com veredito malicioso são exportados automaticamente para ele.</p>
-					<div class="field">
-						<span class="field-label">NOME DA EXPORTAÇÃO</span>
-						<input class="input mono" id="mispIdInput" type="text" placeholder="MISP THP">
-					</div>
-					<div class="card-foot">
-						<span class="status grow" id="mispStatus">definido junto com os parâmetros do caso</span>
-						<button class="btn sm" type="button" data-click="show_config_tab" data-arg="caso">Abrir</button>
-					</div>
-				</div>
-
-			</div>
-		</div>
 	</section>
 
 	<!-- ===================== CONFIGURAÇÕES ================================ -->
 	<section class="pane hidden" data-view="config">
 		<div class="pane-head stacked">
 			<div class="row">
-				<div class="grow col" style="gap:2px">
+				<div class="grow col u-gap-2">
 					<h2 class="pane-title">Configurações</h2>
 					<span class="pane-sub mono">parâmetros do back-end de análise</span>
 				</div>
 			</div>
 			<div class="tabs" id="configTabs">
-				<button class="tab active" type="button" data-click="show_config_tab" data-arg="auto">Análise automática</button>
-				<button class="tab" type="button" data-click="show_config_tab" data-arg="ia">IA</button>
-				<button class="tab" type="button" data-click="show_config_tab" data-arg="email">E-mail</button>
-				<button class="tab" type="button" data-click="show_config_tab" data-arg="notificacao">Notificações</button>
-				<button class="tab" type="button" data-click="show_config_tab" data-arg="caso">Caso</button>
-				<button class="tab" type="button" data-click="show_config_tab" data-arg="departamentos">Departamentos</button>
+				<a class="tab active" href="/config/auto" data-click="show_config_tab" data-arg="auto">Análise automática</a>
+				<a class="tab" href="/config/ia" data-click="show_config_tab" data-arg="ia">IA</a>
+				<a class="tab" href="/config/email" data-click="show_config_tab" data-arg="email">E-mail</a>
+				<a class="tab" href="/config/notificacao" data-click="show_config_tab" data-arg="notificacao">Notificações</a>
+				<a class="tab" href="/config/caso" data-click="show_config_tab" data-arg="caso">Caso</a>
+				<a class="tab" href="/config/departamentos" data-click="show_config_tab" data-arg="departamentos">Departamentos</a>
 				<!-- Quem entra no painel é decisão de global_admin, não de admin: a aba
 				     só aparece para quem também administra usuários -->
-				<button class="tab hidden" id="configTabSso" type="button" data-click="show_config_tab" data-arg="sso">SSO</button>
+				<a class="tab hidden" id="configTabSso" href="/config/sso" data-click="show_config_tab" data-arg="sso">SSO</a>
 				<!-- Mesma régua do SSO: encurtar a retenção apaga histórico, e isso é
 				     decisão de global_admin -->
-				<button class="tab hidden" id="configTabAudit" type="button" data-click="show_config_tab" data-arg="auditoria">Auditoria</button>
-				<button class="tab" type="button" data-click="show_config_tab" data-arg="whitelist">Whitelist</button>
+				<a class="tab hidden" id="configTabAudit" href="/config/auditoria" data-click="show_config_tab" data-arg="auditoria">Auditoria</a>
+				<!-- Mesma régua: alongar a sessão afrouxa o auto logoff -->
+				<a class="tab hidden" id="configTabSecurity" href="/config/seguranca" data-click="show_config_tab" data-arg="seguranca">Segurança</a>
+				<a class="tab" href="/config/certificados" data-click="show_config_tab" data-arg="certificados">Certificados</a>
+				<a class="tab" href="/config/whitelist" data-click="show_config_tab" data-arg="whitelist">Whitelist</a>
 			</div>
 		</div>
 
@@ -1535,11 +1664,11 @@
 			<!-- ANÁLISE AUTOMÁTICA
 			     Um bloco por função. Cada bloco junta o que liga a função, o que a
 			     regula e o próprio Salvar: o que está dentro da borda é salvo junto. -->
-			<div class="pane-body pad narrow" data-config-tab="auto" style="overflow:visible">
+			<div class="pane-body pad narrow u-ov-visible" data-config-tab="auto">
 				<section class="setting-block" aria-labelledby="schedulerBlockTitle">
 					<header class="setting-block-head">
 						<div class="glyph"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.6V8l2.4 1.5"></path></svg></div>
-						<div class="grow col" style="gap:2px">
+						<div class="grow col u-gap-2">
 							<div class="title-line">
 								<h3 class="setting-block-title" id="schedulerBlockTitle">Agendamento automático</h3>
 								{% call info() %}Quando habilitado, o coletor busca e-mails não analisados da caixa monitorada em ciclos fixos e envia cada mensagem ao pipeline de análise. Configuração em <code>GET / POST /scheduler</code>.{% endcall %}
@@ -1550,30 +1679,30 @@
 					</header>
 
 					<div class="setting-block-body">
-						<div class="col" style="gap:8px">
+						<div class="col u-gap-8">
 							<div class="title-line">
 								<span class="setting-name">Intervalo entre ciclos</span>
 								{% call info() %}Tempo entre o fim de um ciclo de coleta e o início do próximo. Chave <code>autoAnalysis.intervalMinutes</code>.{% endcall %}
 							</div>
 							<div class="row">
 								<input class="grow" type="range" min="1" max="1440" step="1" id="schedulerIntervalRange" aria-label="Intervalo entre ciclos, controle deslizante, em minutos" data-input="sync_range" data-arg="schedulerInterval">
-								<input class="input mono" type="number" min="1" max="1440" id="schedulerInterval" aria-label="Intervalo entre ciclos, em minutos" style="flex:0 0 90px;width:90px" data-input="sync_range" data-arg="schedulerIntervalRange">
-								<span class="card-code" style="flex:0 0 auto">min</span>
+								<input class="input mono u-flex-0-0-90 u-w-90" type="number" min="1" max="1440" id="schedulerInterval" aria-label="Intervalo entre ciclos, em minutos" data-input="sync_range" data-arg="schedulerIntervalRange">
+								<span class="card-code u-flex-0-0-auto">min</span>
 							</div>
 							<span class="field-hint">faixa 1–1440 · padrão 10</span>
 						</div>
 
 						<div class="sep"></div>
 
-						<div class="col" style="gap:8px">
+						<div class="col u-gap-8">
 							<div class="title-line">
 								<span class="setting-name">Máximo de e-mails por ciclo</span>
 								{% call info() %}Cada ciclo analisa no máximo esse número de e-mails pendentes, do mais antigo para o mais novo. Chave <code>autoAnalysis.maxPerCycle</code>.{% endcall %}
 							</div>
 							<div class="row">
 								<input class="grow" type="range" min="1" max="100" step="1" id="schedulerMaxRange" aria-label="Máximo de e-mails por ciclo, controle deslizante" data-input="sync_range" data-arg="schedulerMaxPerCycle">
-								<input class="input mono" type="number" min="1" max="100" id="schedulerMaxPerCycle" aria-label="Máximo de e-mails por ciclo" style="flex:0 0 90px;width:90px" data-input="sync_range" data-arg="schedulerMaxRange">
-								<span class="card-code" style="flex:0 0 auto">e-mails</span>
+								<input class="input mono u-flex-0-0-90 u-w-90" type="number" min="1" max="100" id="schedulerMaxPerCycle" aria-label="Máximo de e-mails por ciclo" data-input="sync_range" data-arg="schedulerMaxRange">
+								<span class="card-code u-flex-0-0-auto">e-mails</span>
 							</div>
 							<span class="field-hint">faixa 1–100 · padrão 10</span>
 						</div>
@@ -1589,7 +1718,7 @@
 				<section class="setting-block" aria-labelledby="pollBlockTitle">
 					<header class="setting-block-head">
 						<div class="glyph"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5l1.6-5.2A1.5 1.5 0 015 3.2h6a1.5 1.5 0 011.4 1.1L14 9.5v2.8a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.3z"></path><path d="M2 9.5h3.2l1 1.6h3.6l1-1.6H14"></path></svg></div>
-						<div class="grow col" style="gap:2px">
+						<div class="grow col u-gap-2">
 							<div class="title-line">
 								<h3 class="setting-block-title" id="pollBlockTitle">Consulta automática da caixa</h3>
 								{% call info() %}O servidor relê a caixa monitorada em ciclo fixo e empurra a listagem para a tela <strong>Caixa de e-mail</strong>, para o analista não precisar clicar em Atualizar. A listagem cobre a caixa inteira; o conteúdo de cada e-mail é carregado em segundo plano, página por página, e quem abre um e-mail que ainda não chegou a vez dele é atendido na hora. É só leitura: nenhuma análise é iniciada e nenhuma mensagem é marcada como lida. Configuração em <code>GET / POST /inbox-poll</code>.{% endcall %}
@@ -1600,22 +1729,22 @@
 					</header>
 
 					<div class="setting-block-body">
-						<div class="col" style="gap:8px">
+						<div class="col u-gap-8">
 							<div class="title-line">
 								<span class="setting-name">Intervalo entre consultas</span>
 								{% call info() %}Tempo entre uma releitura da caixa e a próxima. Chave <code>inboxPolling.intervalSeconds</code>.{% endcall %}
 							</div>
 							<div class="row">
 								<input class="grow" type="range" min="15" max="3600" step="5" id="pollIntervalRange" aria-label="Intervalo de varredura da caixa, controle deslizante, em segundos" data-input="sync_range" data-arg="pollInterval">
-								<input class="input mono" type="number" min="15" max="3600" id="pollInterval" aria-label="Intervalo de varredura da caixa, em segundos" style="flex:0 0 90px;width:90px" data-input="sync_range" data-arg="pollIntervalRange">
-								<span class="card-code" style="flex:0 0 auto">s</span>
+								<input class="input mono u-flex-0-0-90 u-w-90" type="number" min="15" max="3600" id="pollInterval" aria-label="Intervalo de varredura da caixa, em segundos" data-input="sync_range" data-arg="pollIntervalRange">
+								<span class="card-code u-flex-0-0-auto">s</span>
 							</div>
 							<span class="field-hint">faixa 15–3600 · padrão 60</span>
 						</div>
 
 						<div class="sep"></div>
 
-						<div class="col" style="gap:8px">
+						<div class="col u-gap-8">
 							<div class="title-line">
 								<span class="setting-name">E-mails por página</span>
 								{% call info() %}A <strong>Caixa de e-mail</strong> é paginada com esse tamanho, e o servidor carrega em segundo plano página por página — primeiro a página 1 dos mais recentes, depois a dos mais antigos, depois a 2 de cada — até a caixa inteira estar pronta, com texto e diagramação. Imagens remotas só são buscadas quando alguém abre <strong>Como entregue</strong>: buscá-las para todo e-mail avisaria cada remetente de que a caixa é lida. 50 por página cabe num único scan. Chave <code>inboxPolling.pageSize</code>.{% endcall %}
@@ -1640,10 +1769,10 @@
 			</div>
 
 			<!-- IA -->
-			<div class="pane-body pad narrow hidden" data-config-tab="ia" style="overflow:visible">
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="ia">
 				<div class="card">
 					<div class="row top">
-						<div class="grow col" style="gap:4px">
+						<div class="grow col u-gap-4">
 							<span class="card-title">Análise de engenharia social</span>
 							<span class="card-code">GET / POST /llm-config</span>
 						</div>
@@ -1724,25 +1853,64 @@
 							</select></span>
 						</label>
 					</div>
-					<p class="card-note"><strong>Malicioso autônomo</strong> deixa um modelo forte encerrar o caso como malicioso sem confirmação de analisador — resolve o caso, exporta para o MISP e responde ao denunciante. Recomendado apenas com um modelo hospedado capaz.</p>
+					<p class="card-note"><strong>Malicioso autônomo</strong> deixa um modelo forte encerrar o caso como malicioso sem confirmação de analisador — o veredito segue para os destinos habilitados e o denunciante é respondido. Recomendado apenas com um modelo hospedado capaz.</p>
 				</div>
 
 				<div class="card">
-					<div class="row baseline" style="gap:10px">
+					<div class="row baseline u-gap-10">
 						<span class="card-title grow">Instrução da IA</span>
 						<span class="card-code" id="promptChars">0 caracteres</span>
 					</div>
-					<p class="card-note">Prompt de sistema enviado antes de cada análise. Vale para a análise automática e para o Chat AI. O contrato de formato de saída e a proteção contra dado não confiável são anexados automaticamente e não podem ser sobrescritos.</p>
-					<textarea class="textarea" id="llmSystemPrompt" aria-label="Instrução de sistema enviada ao modelo" rows="10" style="min-height:240px" data-input="update_prompt_chars"></textarea>
+					<p class="card-note">Prompt de sistema enviado antes de cada análise. Vale para a análise automática e para o assistente do caso. O contrato de formato de saída e a proteção contra dado não confiável são anexados automaticamente e não podem ser sobrescritos.</p>
+					<textarea class="textarea u-minh-240" id="llmSystemPrompt" aria-label="Instrução de sistema enviada ao modelo" rows="10" data-input="update_prompt_chars"></textarea>
 					<div class="card-foot">
 						<span class="status grow">Esvazie o campo e salve para restaurar o prompt padrão.</span>
 						<button class="btn sm" type="button" id="llmSaveBtn" data-click="save_llm_config">Salvar</button>
 					</div>
 				</div>
+
+				<!-- Resumo do Panorama externo. Separado da análise de propósito: resumir
+				     manchetes não precisa do modelo caro que julga e-mail, e o texto que
+				     ele lê é de terceiros, cercado como não confiável (§4.8.2). -->
+				<div class="card">
+					<div class="row top">
+						<div class="grow col u-gap-4">
+							<div class="title-line"><span class="card-title">Resumo do panorama externo</span>{% call info() %}Resumir manchetes é tarefa simples: um modelo barato e rápido dá conta, e o modelo caro da análise não resume melhor. Procure no catálogo do provedor os modelos das linhas mini, flash, haiku ou small; num Ollama local, um modelo pequeno também serve. O resumo lê só o título e o trecho das publicações coletadas, nunca um e-mail da caixa, e cada frase cita a publicação de onde saiu.{% endcall %}</div>
+							<span class="card-code">GET / POST /api/threat-intel/summary-config</span>
+						</div>
+						<div class="toggle" id="intelSummaryEnabled" data-click="toggle_switch"><span class="knob"></span></div>
+					</div>
+					<p class="card-note">Escreve, sobre as publicações do período, um parágrafo curto no topo do Panorama externo. Usa o mesmo provedor configurado acima; os números da tela continuam vindo da contagem, nunca do modelo.</p>
+					<div class="grid-auto">
+						<label class="field">
+							<span class="field-label">MODELO DO RESUMO</span>
+							<input class="input mono model-field" id="intelSummaryModel" type="text" readonly placeholder="vazio = mesmo modelo da análise" data-click="open_llm_model_picker" data-arg="intelSummaryModel" data-enter="open_llm_model_picker">
+							<span class="field-hint" id="intelSummaryModelCaps"></span>
+						</label>
+						<label class="field">
+							<span class="field-label">QUANDO GERAR</span>
+							<span class="select-wrap"><select class="select" id="intelSummaryMode">
+								<option value="manual">Só quando alguém pedir na tela</option>
+								<option value="auto">Depois de cada coleta com novidade</option>
+							</select></span>
+						</label>
+						<label class="field">
+							<span class="field-label">TAMANHO</span>
+							<span class="select-wrap"><select class="select" id="intelSummaryLength">
+								<option value="short">Curto — até 3 frases</option>
+								<option value="medium">Médio — até 6 frases</option>
+							</select></span>
+						</label>
+					</div>
+					<div class="card-foot">
+						<span class="status grow" id="intelSummaryConfigStatus">A escolha fina de modelo ainda vai ser discutida; por ora, qualquer modelo barato do provedor serve.</span>
+						<button class="btn sm" type="button" id="intelSummarySaveBtn" data-click="save_intel_summary_config">Salvar</button>
+					</div>
+				</div>
 			</div>
 
 			<!-- E-MAIL -->
-			<div class="pane-body pad narrow hidden" data-config-tab="email" style="overflow:visible">
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="email">
 				<div class="card">
 					<span class="card-title">Provedor da caixa</span>
 					<div class="tabs" id="emailProviderTabs">
@@ -1750,7 +1918,7 @@
 						<button class="tab" type="button" id="gmailTabBtn" data-click="select_email_tab" data-arg="gmail">Gmail / Workspace</button>
 					</div>
 
-					<div id="m365Tab" class="col" style="gap:12px">
+					<div id="m365Tab" class="col u-gap-12">
 						<span class="card-code">Graph API · Mail.ReadWrite com consentimento do administrador</span>
 						<div class="grid-auto">
 							<label class="field">
@@ -1772,7 +1940,7 @@
 						</div>
 					</div>
 
-					<div id="gmailTab" class="col hidden" style="gap:12px">
+					<div id="gmailTab" class="col hidden u-gap-12">
 						<span class="card-code">IMAP · exige verificação em duas etapas e senha de app</span>
 						<div class="grid-auto">
 							<label class="field">
@@ -1810,7 +1978,7 @@
 				<section class="setting-block" aria-labelledby="smtpBlockTitle">
 					<header class="setting-block-head">
 						<div class="glyph"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.2 1.8L7.3 8.7"></path><path d="M14.2 1.8L9.8 14.2 7.3 8.7 1.8 6.2z"></path></svg></div>
-						<div class="grow col" style="gap:2px">
+						<div class="grow col u-gap-2">
 							<div class="title-line">
 								<h3 class="setting-block-title" id="smtpBlockTitle">Servidor de envio (SMTP)</h3>
 								{% call info() %}Por onde saem os avisos ao denunciante e os alertas da equipe. <strong>Testar</strong> abre a sessão, negocia o TLS e autentica — e não envia mensagem nenhuma, para o botão não entregar teste na caixa de alguém. Em provedor com MFA (Microsoft 365, Google Workspace) a senha da conta é recusada: gere uma senha de aplicativo. O remetente precisa ser um endereço que o servidor autoriza este usuário a usar. Configuração em <code>GET / POST /smtp-config</code>.{% endcall %}
@@ -1879,18 +2047,18 @@
 			     Duas perguntas diferentes, duas guias: o que o denunciante recebe
 			     sobre o e-mail que denunciou, e o que a equipe recebe sobre a fila
 			     inteira. O servidor de envio mora na aba E-mail. -->
-			<div class="pane-body pad narrow hidden" data-config-tab="notificacao" style="overflow:visible">
-				<div class="tabs inline" id="notifTabs" style="align-self:flex-start">
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="notificacao">
+				<div class="tabs inline u-self-flex-start" id="notifTabs">
 					<button class="tab active" type="button" data-click="show_notif_tab" data-arg="reporter">Aviso ao denunciante</button>
 					<button class="tab" type="button" data-click="show_notif_tab" data-arg="team">Equipe de SI</button>
 				</div>
 
 				<!-- GUIA 1: AVISO AO DENUNCIANTE -->
-				<div class="col" style="gap:14px" data-notif-tab="reporter">
+				<div class="col u-gap-14" data-notif-tab="reporter">
 					<section class="setting-block" aria-labelledby="verdictBlockTitle">
 						<header class="setting-block-head">
 							<div class="glyph"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="3.3" width="12.4" height="9.4" rx="1.6"></rect><path d="M2.2 4.2L8 8.6l5.8-4.4"></path></svg></div>
-							<div class="grow col" style="gap:2px">
+							<div class="grow col u-gap-2">
 								<div class="title-line">
 									<h3 class="setting-block-title" id="verdictBlockTitle">Aviso ao denunciante</h3>
 									{% call info() %}Cada aviso tem o próprio interruptor: desligar "Análise iniciada" não desliga o aviso de phishing confirmado. Use <strong>{subject}</strong> como marcador do assunto do e-mail analisado; as quebras de linha saem como estão. Vereditos suspeitos nunca disparam e-mail automático: o caso fica aberto para o analista. A errata sai só quando alguém corrige um falso positivo na mesa de trabalho e deixa marcada a caixa "Enviar errata" — assim um aviso por telefone, ou uma campanha que vai ser comunicada de outro jeito, não gera um e-mail a mais. Reanalisar um caso nunca avisa ninguém. No modo de e-mail bruto os avisos vão para a caixa monitorada, nunca para o remetente analisado. Configuração em <code>GET / POST /verdict-config</code>.{% endcall %}
@@ -1902,7 +2070,7 @@
 						<div class="setting-block-body">
 							<div class="event-row" id="verdictStartRow">
 								<div class="event-row-head">
-									<div class="grow col" style="gap:2px">
+									<div class="grow col u-gap-2">
 										<span class="setting-name" id="verdictStartLabel">Análise iniciada</span>
 										<span class="field-hint">quando o e-mail denunciado entra na análise</span>
 									</div>
@@ -1912,7 +2080,7 @@
 							</div>
 							<div class="event-row" id="verdictSafeRow">
 								<div class="event-row-head">
-									<div class="grow col" style="gap:2px">
+									<div class="grow col u-gap-2">
 										<span class="setting-name" id="verdictSafeLabel">Veredito: seguro</span>
 										<span class="field-hint">quando a análise conclui que o e-mail é legítimo</span>
 									</div>
@@ -1922,7 +2090,7 @@
 							</div>
 							<div class="event-row" id="verdictMaliciousRow">
 								<div class="event-row-head">
-									<div class="grow col" style="gap:2px">
+									<div class="grow col u-gap-2">
 										<span class="setting-name" id="verdictMaliciousLabel">Veredito: phishing confirmado</span>
 										<span class="field-hint">quando a análise conclui que o e-mail é malicioso</span>
 									</div>
@@ -1935,7 +2103,7 @@
 							     ela confirma a caixa no formulário da decisão. -->
 							<div class="event-row" id="verdictErrataRow">
 								<div class="event-row-head">
-									<div class="grow col" style="gap:2px">
+									<div class="grow col u-gap-2">
 										<span class="setting-name" id="verdictErrataLabel">Errata: falso positivo corrigido</span>
 										<span class="field-hint">quando uma pessoa reclassifica como legítimo um e-mail que a análise condenou ou marcou como suspeito</span>
 									</div>
@@ -1953,11 +2121,11 @@
 				</div>
 
 				<!-- GUIA 2: EQUIPE DE SI -->
-				<div class="col hidden" style="gap:14px" data-notif-tab="team">
+				<div class="col hidden u-gap-14" data-notif-tab="team">
 					<section class="setting-block" aria-labelledby="volumeBlockTitle">
 						<header class="setting-block-head">
 							<div class="glyph"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 11.5l3.3-3.6 2.8 2.4 3.2-4.6 3.7 3.1"></path><path d="M1.5 14h13"></path></svg></div>
-							<div class="grow col" style="gap:2px">
+							<div class="grow col u-gap-2">
 								<div class="title-line">
 									<h3 class="setting-block-title" id="volumeBlockTitle">Alerta de volume na fila</h3>
 									{% call info() %}Olha a fila da Caixa de e-mail — os e-mails que ainda <strong>não foram analisados</strong> — e avisa a equipe quando o mesmo assunto ou o mesmo remetente do e-mail denunciado se repete acima do limiar dentro da janela. Prefixos como Re:/Fwd: e números de protocolo são ignorados para agrupar a mesma campanha. Nada é baixado para isto: um e-mail só entra na conta quando o conteúdo dele já foi carregado pela leitura da caixa. Depois de disparar, o mesmo padrão espera o cooldown antes de avisar de novo.{% endcall %}
@@ -1970,7 +2138,7 @@
 						<div class="setting-block-body">
 							<p class="inline-note hidden" id="volumePollNote"></p>
 
-							<div class="col" style="gap:10px">
+							<div class="col u-gap-10">
 								<span class="setting-name">Agrupar por</span>
 								<div class="option-row">
 									<span class="grow check-label" id="volumeBySubjectLabel">Mesmo assunto</span>
@@ -2029,7 +2197,7 @@
 					<section class="setting-block" aria-labelledby="alertHooksTitle">
 						<header class="setting-block-head">
 							<div class="glyph"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5L4.8 11.2a2.4 2.4 0 01-3.4-3.4l1.7-1.7"></path><path d="M9.5 6.5l1.7-1.7a2.4 2.4 0 013.4 3.4l-1.7 1.7"></path><path d="M6.2 9.8l3.6-3.6"></path></svg></div>
-							<div class="grow col" style="gap:2px">
+							<div class="grow col u-gap-2">
 								<div class="title-line">
 									<h3 class="setting-block-title" id="alertHooksTitle">Webhooks da equipe</h3>
 									{% call info() %}Teams, Slack, Google Chat, PagerDuty ou qualquer ferramenta que aceite uma API REST. É o mesmo formulário dos conectores de Integrações — endereço, autenticação, corpo JSON com variáveis, pré-visualização e teste — com as variáveis do alerta no lugar das do relatório. Só HTTPS público, e o destino é revalidado a cada disparo.{% endcall %}
@@ -2046,23 +2214,23 @@
 					<section class="setting-block" aria-labelledby="volumeRecentTitle">
 						<header class="setting-block-head">
 							<div class="glyph"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.6V8l2.4 1.5"></path></svg></div>
-							<div class="grow col" style="gap:2px">
+							<div class="grow col u-gap-2">
 								<h3 class="setting-block-title" id="volumeRecentTitle">Últimos alertas</h3>
 								<span class="setting-block-sub">O que foi detectado e por onde saiu</span>
 							</div>
 						</header>
 						<div class="setting-block-body">
-							<div class="col" style="gap:0" id="volumeRecent"></div>
+							<div class="col u-gap-0" id="volumeRecent"></div>
 						</div>
 					</section>
 				</div>
 			</div>
 
 			<!-- CASO -->
-			<div class="pane-body pad narrow hidden" data-config-tab="caso" style="overflow:visible">
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="caso">
 				<div class="card">
 					<span class="card-title">Parâmetros do caso</span>
-					<p class="card-note">TLP, PAP e tags aplicados a cada caso criado. <strong>Nome da exportação MISP</strong> é o servidor MISP configurado no TheHive, usado para exportar casos maliciosos.</p>
+					<p class="card-note">TLP, PAP e tags aplicados a cada caso criado.</p>
 					<div class="grid-auto">
 						<label class="field">
 							<span class="field-label">TLP</span>
@@ -2086,10 +2254,6 @@
 							<span class="field-label">TAGS (SEPARADAS POR VÍRGULA)</span>
 							<input class="input mono" id="caseTagsInput" type="text" placeholder="email, ThePhish">
 						</label>
-						<label class="field">
-							<span class="field-label">NOME DA EXPORTAÇÃO MISP</span>
-							<input class="input mono" id="caseMispIdInput" type="text" placeholder="MISP THP">
-						</label>
 					</div>
 					<div class="card-foot">
 						<span class="status grow" id="caseStatus"></span>
@@ -2101,8 +2265,8 @@
 				     Dito aqui, por extenso, porque é uma decisão de retenção de dado
 				     sensível e não um detalhe de implementação (§7.15). -->
 				<div class="card">
-					<div class="row" style="gap:10px">
-						<div class="grow col" style="gap:2px">
+					<div class="row u-gap-10">
+						<div class="grow col u-gap-2">
 							<span class="card-title" id="evidenceTitle">Mensagem original das análises</span>
 							<span class="field-hint">o que a mesa de trabalho usa para mostrar o e-mail como entregue e para reanalisar</span>
 						</div>
@@ -2129,21 +2293,21 @@
 			</div>
 
 			<!-- DEPARTAMENTOS -->
-			<div class="pane-body pad narrow hidden" data-config-tab="departamentos" style="overflow:visible">
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="departamentos">
 				<div class="card">
 					<div class="row top">
-						<div class="grow col" style="gap:4px">
+						<div class="grow col u-gap-4">
 							<span class="card-title">Departamento de quem denuncia</span>
 							<span class="card-code">GET / POST /departments-config</span>
 						</div>
 						<div class="toggle" id="deptEnabled" data-click="toggle_switch"><span class="knob"></span></div>
 					</div>
 					<p class="card-note">A única coisa que a análise sabe sobre quem denunciou é o endereço de e-mail. O <strong>Entra ID</strong> é consultado para descobrir a que área essa pessoa pertence, e é isso que alimenta <strong>Departamentos mais visados</strong> na Visão Executiva. O diretório é a resposta da própria organização — uma lista digitada aqui ficaria errada no dia em que alguém mudasse de time. Vale a partir das próximas análises: casos já encerrados não são reprocessados.</p>
-					<div class="callout neutral" style="margin-top:2px">
+					<div class="callout neutral u-mt-2">
 						<div class="glyph">
 							<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 7.4v3.8M8 4.8v.4"></path></svg>
 						</div>
-						<div class="grow col" style="gap:4px">
+						<div class="grow col u-gap-4">
 							<span class="callout-title">Permissão necessária: User.Read.All</span>
 							<p class="card-note">Permissão <em>de aplicativo</em> no Microsoft Graph, com consentimento de administrador. Não é a mesma que lê a caixa (Mail.ReadWrite): um registro de aplicativo que já lê e-mail ainda precisa receber esta. Use <strong>Testar</strong> abaixo para confirmar antes de ligar.</p>
 						</div>
@@ -2173,14 +2337,14 @@
 					<div class="sep"></div>
 
 					<div class="row top">
-						<div class="grow col" style="gap:4px">
+						<div class="grow col u-gap-4">
 							<span class="setting-name">Usar as credenciais do Microsoft 365 configuradas em E-mail</span>
 							<span class="field-hint">Mesmo tenant, mesmo registro de aplicativo — só falta conceder User.Read.All a ele. Desligue para usar um registro separado.</span>
 						</div>
 						<div class="toggle" id="deptUseEmailCreds" data-click="toggle_dept_credentials"><span class="knob"></span></div>
 					</div>
 
-					<div class="col hidden" id="deptOwnCreds" style="gap:10px">
+					<div class="col hidden u-gap-10" id="deptOwnCreds">
 						<div class="grid-auto">
 							<label class="field">
 								<span class="field-label">TENANT ID</span>
@@ -2200,12 +2364,12 @@
 
 					<div class="sep"></div>
 
-					<div class="col" style="gap:8px">
-						<div class="row baseline" style="gap:10px">
+					<div class="col u-gap-8">
+						<div class="row baseline u-gap-10">
 							<span class="grow setting-name">Testar contra o Entra ID</span>
 							<span class="card-code">não salva nada</span>
 						</div>
-						<div class="row" style="gap:8px">
+						<div class="row u-gap-8">
 							<input class="input mono grow" id="deptTestAddress" type="text" placeholder="fulano@acme.com — vazio testa só a permissão">
 							<button class="btn secondary sm" type="button" data-click="test_departments_config">Testar</button>
 						</div>
@@ -2220,10 +2384,10 @@
 			</div>
 
 			<!-- SSO -->
-			<div class="pane-body pad narrow hidden" data-config-tab="sso" style="overflow:visible">
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="sso">
 				<div class="card">
 					<div class="row top">
-						<div class="grow col" style="gap:4px">
+						<div class="grow col u-gap-4">
 							<span class="card-title">SSO corporativo — Microsoft Entra ID</span>
 							<span class="card-code">GET / POST /sso-config</span>
 						</div>
@@ -2257,15 +2421,15 @@
 				</div>
 
 				<div class="card">
-					<div class="col" style="gap:4px">
+					<div class="col u-gap-4">
 						<span class="card-title">Quem entra, e com qual cargo</span>
 						<p class="card-note">O cargo vem do <strong>grupo no Entra ID</strong>, não de uma lista mantida aqui: uma pessoa que muda de time muda de acesso sem ninguém precisar lembrar. Uma entrada por linha — o <em>object id</em> do grupo de segurança, ou o nome de uma <em>App Role</em> do registro de aplicativo. Quem não casa com nenhuma linha <strong>não entra</strong>; e quem casa com mais de um cargo entra pelo mais alto.</p>
 					</div>
-					<div class="callout neutral" style="margin-top:2px">
+					<div class="callout neutral u-mt-2">
 						<div class="glyph">
 							<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 7.4v3.8M8 4.8v.4"></path></svg>
 						</div>
-						<div class="grow col" style="gap:4px">
+						<div class="grow col u-gap-4">
 							<span class="callout-title">Prefira App Roles a grupos</span>
 							<p class="card-note">Acima de ~200 grupos por pessoa o Entra ID para de mandar a lista no token e manda um ponteiro. O login então é recusado, porque decidir cargo pelo que sobrou daria o cargo errado. App Role não tem esse limite, e o nome é legível na tela.</p>
 						</div>
@@ -2292,9 +2456,9 @@
 			<!-- AUDITORIA — onde a trilha fica, por quanto tempo, e a cópia no SIEM.
 			     Os pisos vêm do servidor (audit_store.MIN_*) e são conferidos lá;
 			     os min/max dos campos são só ajuda de digitação. -->
-			<div class="pane-body pad narrow hidden" data-config-tab="auditoria" style="overflow:visible">
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="auditoria">
 				<div class="card">
-					<div class="col" style="gap:4px">
+					<div class="col u-gap-4">
 						<span class="card-title">Trilha de auditoria</span>
 						<span class="card-code">GET / POST /audit-log-config</span>
 					</div>
@@ -2325,8 +2489,8 @@
 				</div>
 
 				<div class="card">
-					<div class="row" style="gap:10px">
-						<div class="grow col" style="gap:2px">
+					<div class="row u-gap-10">
+						<div class="grow col u-gap-2">
 							<span class="card-title" id="auditSyslogTitle">Cópia para o SIEM (syslog)</span>
 							<span class="field-hint">cada registro também sai, na hora, para um servidor syslog</span>
 						</div>
@@ -2358,10 +2522,247 @@
 				</div>
 			</div>
 
+			<!-- SEGURANÇA — auto logoff e duração da sessão. Os limites vêm do
+			     servidor (security_policy.MIN_*/MAX_*) e são conferidos lá; os
+			     min/max dos campos são só ajuda de digitação. -->
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="seguranca">
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Sessão e auto logoff</span>
+						<span class="card-code">GET / POST /security-config</span>
+					</div>
+					<p class="card-note">A sessão cai sozinha quando ninguém mexe no painel por um tempo, e cai de qualquer jeito depois de uma duração máxima. A inatividade é uma só para todas as abas: conta gesto de uma pessoa (clique, tecla, rolagem), não a atualização automática das telas. Antes de cair, o painel avisa e oferece continuar conectado. A mudança vale na próxima requisição de toda sessão aberta e entra na trilha de auditoria, com o antes e o depois.</p>
+					<div class="grid-auto">
+						<label class="field">
+							<span class="field-label">INATIVIDADE (MINUTOS)</span>
+							<input class="input mono" id="securityIdleMinutes" type="number" min="5" max="240" step="1">
+							<span class="field-hint">de 5 a 240 minutos</span>
+						</label>
+						<label class="field">
+							<span class="field-label">DURAÇÃO MÁXIMA (HORAS)</span>
+							<input class="input mono" id="securityAbsoluteHours" type="number" min="1" max="24" step="1">
+							<span class="field-hint">de 1 a 24 horas, mesmo com uso contínuo</span>
+						</label>
+						<label class="field">
+							<span class="field-label">AVISO ANTES (SEGUNDOS)</span>
+							<input class="input mono" id="securityWarnSeconds" type="number" min="30" max="300" step="1">
+							<span class="field-hint">de 30 a 300 segundos</span>
+						</label>
+					</div>
+					<div class="card-foot">
+						<span class="status grow" id="securityStatus"></span>
+						<button class="btn sm" type="button" id="securitySaveBtn" data-click="save_security_config">Salvar</button>
+					</div>
+				</div>
+
+				<!-- Limite por IP, banimento e lista de liberados (abuse_guard).
+				     O estado dos banimentos é da memória do processo: reiniciar o
+				     contêiner solta todos. -->
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Proteção contra abuso</span>
+						<span class="card-code">POST /security-config/protection</span>
+					</div>
+					<p class="card-note">Um teto de requisições por minuto para cada IP, somando todas as rotas, e o banimento temporário do IP que erra demais — senha, código do segundo fator ou senha atual na troca de senha, além de cada minuto acima do teto. Os limites próprios do login (5 por minuto) e o bloqueio da conta continuam valendo para todos. Um IP da lista de liberados não é limitado nem banido.</p>
+					<div class="callout warn hidden" id="securityNotCountable" role="status"><span class="callout-title" id="securityNotCountableText"></span></div>
+					<div class="row u-gap-10">
+						<div class="grow col u-gap-2">
+							<span class="card-title" id="securityRateTitle">Limite por IP</span>
+							<span class="field-hint">responde 429 a quem passar do teto até o minuto virar</span>
+						</div>
+						<div class="toggle" id="securityRateEnabled" data-click="toggle_switch" aria-labelledby="securityRateTitle"><span class="knob"></span></div>
+					</div>
+					<div class="grid-auto">
+						<label class="field">
+							<span class="field-label">REQUISIÇÕES POR MINUTO</span>
+							<input class="input mono" id="securityPerMinute" type="number" min="60" max="10000" step="1">
+							<span class="field-hint">de 60 a 10000 — um escritório atrás de um NAT é um IP só</span>
+						</label>
+					</div>
+					<div class="row u-gap-10">
+						<div class="grow col u-gap-2">
+							<span class="card-title" id="securityBanTitle">Banimento de IP</span>
+							<span class="field-hint">o IP fica sem acesso nenhum ao painel pelo tempo definido</span>
+						</div>
+						<div class="toggle" id="securityBanEnabled" data-click="toggle_switch" aria-labelledby="securityBanTitle"><span class="knob"></span></div>
+					</div>
+					<div class="grid-auto">
+						<label class="field">
+							<span class="field-label">FALHAS ATÉ BANIR</span>
+							<input class="input mono" id="securityMaxFailures" type="number" min="3" max="100" step="1">
+							<span class="field-hint">de 3 a 100</span>
+						</label>
+						<label class="field">
+							<span class="field-label">DENTRO DE (MINUTOS)</span>
+							<input class="input mono" id="securityWindowMinutes" type="number" min="1" max="1440" step="1">
+							<span class="field-hint">de 1 a 1440</span>
+						</label>
+						<label class="field">
+							<span class="field-label">BANIDO POR (MINUTOS)</span>
+							<input class="input mono" id="securityBanMinutes" type="number" min="1" max="10080" step="1">
+							<span class="field-hint">de 1 a 10080 (uma semana)</span>
+						</label>
+					</div>
+					<label class="field">
+						<span class="field-label">IPS LIBERADOS (UM POR LINHA, ENDEREÇO OU REDE CIDR)</span>
+						<textarea class="textarea mono" id="securityAllowlist" rows="4" spellcheck="false" placeholder="203.0.113.10&#10;198.51.100.0/24"></textarea>
+						<span class="field-hint" id="securityYourAddress"></span>
+					</label>
+					<div class="card-foot">
+						<span class="status grow" id="protectionStatus"></span>
+						<button class="btn quiet sm" type="button" id="securityAllowMeBtn" data-click="allowlist_my_address">Liberar meu IP</button>
+						<button class="btn sm" type="button" id="protectionSaveBtn" data-click="save_protection_config">Salvar</button>
+					</div>
+				</div>
+
+				<!-- reCAPTCHA v3 no login por senha (captcha.py). A chave secreta
+				     nunca volta: o campo fica vazio, e vazio mantém a gravada. -->
+				<div class="card">
+					<div class="row u-gap-10">
+						<div class="grow col u-gap-2">
+							<span class="card-title" id="captchaTitle">reCAPTCHA no login</span>
+							<span class="card-code">POST /security-config/captcha</span>
+						</div>
+						<div class="toggle" id="captchaEnabled" data-click="toggle_switch" aria-labelledby="captchaTitle"><span class="knob"></span></div>
+					</div>
+					<p class="card-note">reCAPTCHA v3 do Google: não mostra desafio, dá uma nota de 0 a 1 a cada tentativa de login por senha, e o servidor recusa abaixo da nota mínima. O SSO e o segundo fator não passam por ele. Se o Google estiver fora do ar, ou recusar a chave secreta, o login segue e o caso vai para a trilha — o captcha não tranca ninguém fora. Saída de emergência: <code>manage.py captcha-off</code> ou <code>BLUEPHISH_CAPTCHA_DISABLED=1</code>. IPs da lista de liberados não passam pelo captcha.</p>
+					<div class="callout warn hidden" id="captchaEnvOff" role="status"><span class="callout-title">BLUEPHISH_CAPTCHA_DISABLED está ligado no servidor: o captcha não é cobrado, seja qual for a configuração abaixo.</span></div>
+					<div class="grid-auto">
+						<label class="field">
+							<span class="field-label">CHAVE DO SITE</span>
+							<input class="input mono" id="captchaSiteKey" type="text" spellcheck="false" autocomplete="off">
+						</label>
+						<label class="field">
+							<span class="field-label">CHAVE SECRETA</span>
+							<input class="input mono" id="captchaSecret" type="password" spellcheck="false" autocomplete="new-password">
+							<span class="field-hint" id="captchaSecretHint"></span>
+						</label>
+						<label class="field">
+							<span class="field-label">NOTA MÍNIMA</span>
+							<input class="input mono" id="captchaMinScore" type="number" min="0.1" max="0.9" step="0.1">
+							<span class="field-hint">de 0.1 a 0.9 — o Google sugere 0.5</span>
+						</label>
+					</div>
+					<div class="card-foot">
+						<span class="status grow" id="captchaStatus"></span>
+						<button class="btn sm" type="button" id="captchaSaveBtn" data-click="save_captcha_config">Salvar</button>
+					</div>
+				</div>
+
+				<!-- Cofre de segredos (secret_vault.py): só o estado, nunca um valor -->
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Cofre de segredos</span>
+						<span class="card-code">AES-256-GCM · chave mestra fora do volume de dados</span>
+					</div>
+					<p class="card-note">As senhas, chaves de API e tokens das integrações não ficam no configuration.json: ficam cifradas no banco, cada uma com o seu salt, e o arquivo guarda só uma referência. A chave mestra é um arquivo montado à parte (docker/secrets/master.key no host), que não vai junto num backup do volume de dados — guarde uma cópia dela em outro lugar, porque sem ela os segredos não abrem.</p>
+					<div class="callout warn hidden" id="vaultWarning" role="status"><span class="callout-title" id="vaultWarningText"></span></div>
+					<div class="row u-gap-8 u-wrap" id="vaultFacts"></div>
+				</div>
+
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Endereços banidos agora</span>
+						<span class="card-code">POST /security-config/unban</span>
+					</div>
+					<div class="col u-gap-8" id="securityBansRows"></div>
+				</div>
+			</div>
+
+			<!-- CERTIFICADOS — o do vhost (público) e o interno (frontend ↔ API).
+			     cert_store.py e acme_client.py; a chave privada entra e não volta. -->
+			<div class="pane-body pad narrow hidden u-ov-visible" data-config-tab="certificados">
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Certificados da instalação</span>
+						<span class="card-code">GET /cert-config</span>
+					</div>
+					<p class="card-note">Dois certificados, de propósito diferentes. O do vhost é o que o navegador vê. O interno protege a conversa entre o frontend e a API, e é emitido por uma CA que só existe nesta instalação: o frontend só aceita a API que essa CA assinou. O vhost e o frontend recarregam sozinhos quando o arquivo muda (em até 30 s); a API lê o certificado interno ao subir, então trocar o interno vale depois de reiniciar o contêiner da API.</p>
+					<div class="col u-gap-10" id="certRows"></div>
+				</div>
+
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Enviar o certificado do vhost (PEM)</span>
+						<span class="card-code">POST /cert-config/pem</span>
+					</div>
+					<p class="card-note">O certificado, a chave privada e, se houver, a cadeia intermediária. A chave tem de ser deste certificado, ele não pode estar vencido, e a cadeia é posta na ordem antes de gravar — um par que não serve é recusado, e o vhost segue com o atual.</p>
+					<div class="grid-auto">
+						<label class="field"><span class="field-label">CERTIFICADO (.pem / .crt)</span><input class="input" id="certPemFile" type="file" accept=".pem,.crt,.cer"></label>
+						<label class="field"><span class="field-label">CHAVE PRIVADA (.key / .pem)</span><input class="input" id="certKeyFile" type="file" accept=".pem,.key"></label>
+						<label class="field"><span class="field-label">CADEIA (OPCIONAL)</span><input class="input" id="certChainFile" type="file" accept=".pem,.crt,.cer"></label>
+						<label class="field"><span class="field-label">SENHA DA CHAVE (SE HOUVER)</span><input class="input" id="certPemPassword" type="password" autocomplete="off"></label>
+					</div>
+					<div class="card-foot">
+						<span class="status grow" id="certPemStatus"></span>
+						<button class="btn sm" type="button" id="certPemBtn" data-click="upload_cert_pem">Enviar PEM</button>
+					</div>
+				</div>
+
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Enviar o certificado do vhost (PFX / PKCS#12)</span>
+						<span class="card-code">POST /cert-config/pfx</span>
+					</div>
+					<div class="grid-auto">
+						<label class="field"><span class="field-label">ARQUIVO (.pfx / .p12)</span><input class="input" id="certPfxFile" type="file" accept=".pfx,.p12"></label>
+						<label class="field"><span class="field-label">SENHA DO PFX</span><input class="input" id="certPfxPassword" type="password" autocomplete="off"></label>
+					</div>
+					<div class="card-foot">
+						<span class="status grow" id="certPfxStatus"></span>
+						<button class="btn sm" type="button" id="certPfxBtn" data-click="upload_cert_pfx">Enviar PFX</button>
+					</div>
+				</div>
+
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Gerar um autoassinado para o vhost</span>
+						<span class="card-code">POST /cert-config/selfsigned</span>
+					</div>
+					<p class="card-note">Serve para começar ou para uma rede só interna: o navegador avisa até que cada pessoa aceite o certificado. Um teste de TLS público (SSL Labs) dá nota T para autoassinado, por melhor que seja o resto — o A+ pede um certificado de CA, da Let's Encrypt ou da sua empresa.</p>
+					<label class="field"><span class="field-label">NOMES (SEPARADOS POR VÍRGULA)</span><input class="input mono" id="certSelfNames" type="text" placeholder="bluephish.acme.net, 10.0.0.5" spellcheck="false"></label>
+					<div class="card-foot">
+						<span class="status grow" id="certSelfStatus"></span>
+						<button class="btn sm" type="button" id="certSelfBtn" data-click="generate_cert_self_signed">Gerar autoassinado</button>
+					</div>
+				</div>
+
+				<div class="card">
+					<div class="col u-gap-4">
+						<span class="card-title">Let's Encrypt</span>
+						<span class="card-code">POST /cert-config/letsencrypt</span>
+					</div>
+					<p class="card-note">Emite pelo desafio HTTP-01: a Let's Encrypt precisa alcançar este servidor pela porta 80, da internet, em cada nome pedido. Uma instalação só interna não consegue — use o PEM ou o PFX da CA da empresa. Comece pelo ambiente de teste (staging): a produção limita as emissões por semana, e uma configuração errada repetida queima o limite. Com a renovação automática, o certificado é renovado quando faltam 30 dias.</p>
+					<div class="grid-auto">
+						<label class="field"><span class="field-label">NOMES (SEPARADOS POR VÍRGULA)</span><input class="input mono" id="certLeDomains" type="text" placeholder="bluephish.acme.net" spellcheck="false"></label>
+						<label class="field"><span class="field-label">E-MAIL DE CONTATO</span><input class="input" id="certLeEmail" type="email" placeholder="soc@acme.net"></label>
+					</div>
+					<div class="row u-gap-10">
+						<div class="grow col u-gap-2">
+							<span class="card-title" id="certLeStagingTitle">Ambiente de teste (staging)</span>
+							<span class="field-hint">desligado, emite na produção: certificado que o navegador aceita</span>
+						</div>
+						<div class="toggle" id="certLeStaging" data-click="toggle_switch" aria-labelledby="certLeStagingTitle"><span class="knob"></span></div>
+					</div>
+					<div class="row u-gap-10">
+						<div class="grow col u-gap-2">
+							<span class="card-title" id="certLeRenewTitle">Renovar sozinho</span>
+							<span class="field-hint">confere a cada 12 h e renova faltando 30 dias</span>
+						</div>
+						<div class="toggle" id="certLeRenew" data-click="toggle_switch" aria-labelledby="certLeRenewTitle"><span class="knob"></span></div>
+					</div>
+					<div class="card-foot">
+						<span class="status grow" id="certLeStatus"></span>
+						<button class="btn quiet sm" type="button" id="certLeSaveBtn" data-click="save_letsencrypt_config">Salvar</button>
+						<button class="btn sm" type="button" id="certLeIssueBtn" data-click="issue_letsencrypt_cert">Emitir agora</button>
+					</div>
+				</div>
+			</div>
+
 			<!-- WHITELIST -->
 			<div class="tbl fill hidden" data-config-tab="whitelist">
-				<div class="pane-head" style="flex-wrap:wrap;padding:14px 22px">
-					<div class="col" style="gap:2px;flex:1 1 200px">
+				<div class="pane-head u-wrap u-p-14-22">
+					<div class="col u-gap-2 u-flex-1-1-200">
 						<span class="card-title">Whitelist</span>
 						<span class="pane-sub mono" id="whitelistCount"></span>
 					</div>
@@ -2370,7 +2771,7 @@
 					<div class="toolbar">
 						<button class="btn quiet sm" type="button" data-click="whitelist_migrate" title="Converte um whitelist.json no formato antigo">Migrar v1</button>
 						<label class="btn quiet sm">Importar<input type="file" id="whitelistImportFile" accept=".json" class="hidden" data-change="whitelist_import"></label>
-						<span class="select-wrap" style="flex:0 0 7.5rem">
+						<span class="select-wrap u-flex-0-0-7_5rem">
 							<select class="select sm" id="whitelistImportMode" title="Modo de importação">
 								<option value="merge">Mesclar</option>
 								<option value="replace">Substituir</option>
@@ -2383,7 +2784,7 @@
 				<!-- Uma aba por tipo. O efeito de cada um está escrito no compositor
 				     porque é a distinção que a whitelist antiga não fazia: suprimir
 				     observável e rebaixar veredito têm risco muito diferente. -->
-				<div class="row" style="padding:10px 22px 0 22px;gap:6px;flex-wrap:wrap">
+				<div class="row u-p-10-22-0-22 u-gap-6 u-wrap">
 					<button class="tab active" type="button" data-wl-tab="sender" data-click="whitelist_show_type" data-arg="sender">Remetente</button>
 					<button class="tab" type="button" data-wl-tab="domain" data-click="whitelist_show_type" data-arg="domain">Domínio</button>
 					<button class="tab" type="button" data-wl-tab="url" data-click="whitelist_show_type" data-arg="url">URL</button>
@@ -2395,14 +2796,14 @@
 					<button class="tab" type="button" data-wl-tab="memory" data-click="whitelist_show_type" data-arg="memory">Aprendido <span class="tab-count mono" id="wlMemoryPending"></span></button>
 				</div>
 
-				<div class="col hidden" style="gap:10px;padding:14px 22px;min-height:0;overflow-y:auto" id="wlMemoryPanel">
-					<p class="card-note" style="margin:0">Liberações criadas por quem corrigiu um falso positivo na mesa de trabalho. <strong>Mensagem idêntica</strong> rebaixa sozinha a próxima cópia exata da mensagem, é contada como uma regra e suspensa sozinha se esconder vereditos ruins demais. <strong>Remetente</strong> nunca rebaixa por si: é uma proposta, e só vale depois de virar regra aqui, com a exigência de domínio autenticado.</p>
-					<div class="row" style="gap:8px">
+				<div class="col hidden u-gap-10 u-p-14-22 u-minh-0 u-ovy-auto" id="wlMemoryPanel">
+					<p class="card-note u-m-0">Liberações criadas por quem corrigiu um falso positivo na mesa de trabalho. <strong>Mensagem idêntica</strong> rebaixa sozinha a próxima cópia exata da mensagem, é contada como uma regra e suspensa sozinha se esconder vereditos ruins demais. <strong>Remetente</strong> nunca rebaixa por si: é uma proposta, e só vale depois de virar regra aqui, com a exigência de domínio autenticado. <strong>Indicador</strong> é um host ou IP que um analisador acusou num caso corrigido: também não rebaixa nada, mas a IA recebe a decisão e o motivo sempre que ele for acusado de novo, e o caso mostra o precedente. Vira regra de domínio ou IP aqui, se você aceitar.</p>
+					<div class="row u-gap-8">
 						<span class="status grow" id="wlMemoryStatus"></span>
 						<div class="check" id="wlMemoryAll" role="checkbox" aria-checked="false" tabindex="0" data-click="toggle_memory_inactive"><svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 8.3l3.4 3.4 7.4-7.4"></path></svg></div>
 						<span class="check-label" data-click="toggle_memory_inactive">Mostrar revogadas e expiradas</span>
 					</div>
-					<div class="col" style="gap:8px" id="wlMemoryRows"></div>
+					<div class="col u-gap-8" id="wlMemoryRows"></div>
 				</div>
 
 				<!-- Criar uma regra é uma região só: a nota do tipo, os campos, e as
@@ -2410,7 +2811,7 @@
 				     do filtro, ao lado de uma ação que é da lista — e ninguém entendia
 				     em que o Simular ia mexer. -->
 				<div class="wl-composer">
-					<p class="card-note" style="margin:0" id="whitelistTypeNote"></p>
+					<p class="card-note u-m-0" id="whitelistTypeNote"></p>
 					<div class="wl-composer-fields" id="whitelistFormFields"></div>
 					<div class="wl-composer-actions">
 						<span class="wl-composer-hint" id="whitelistComposerHint"></span>
@@ -2423,7 +2824,7 @@
 				<!-- Achar e gerenciar o que já existe é a outra região, encostada no
 				     cabeçalho da tabela que ela comanda. -->
 				<div class="wl-listbar">
-					<div class="search" style="flex:1 1 200px">
+					<div class="search u-flex-1-1-200">
 						<svg width="12" height="12" viewBox="0 0 10 10" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.81038 7.0756C6.18079 7.54011 5.40248 7.81466 4.56004 7.81466C2.46451 7.81466 0.765747 6.11589 0.765747 4.02037C0.765747 1.92484 2.46451 0.226074 4.56004 0.226074C6.65557 0.226074 8.35433 1.92484 8.35433 4.02037C8.35433 4.8628 8.07978 5.64112 7.61527 6.27071L9.70535 8.36078C9.92761 8.58305 9.92761 8.94341 9.70535 9.16568C9.48308 9.38794 9.12272 9.38794 8.90046 9.16568L6.81038 7.0756ZM7.21604 4.02037C7.21604 5.48724 6.02691 6.67637 4.56004 6.67637C3.09317 6.67637 1.90403 5.48724 1.90403 4.02037C1.90403 2.5535 3.09317 1.36436 4.56004 1.36436C6.02691 1.36436 7.21604 2.5535 7.21604 4.02037Z"></path></svg>
 						<input id="whitelistSearch" type="text" placeholder="Filtrar as regras já cadastradas…" data-input="render_whitelist">
 					</div>
@@ -2434,15 +2835,15 @@
 				     estreitava só as linhas e o cabeçalho deixava de bater com elas. -->
 				<div class="tbl-scroll">
 					<div class="tbl-head cols-wl">
-						<span class="row" style="gap:9px">
-							<span class="check" id="whitelistCheckAll" data-click="whitelist_toggle_all" style="cursor:pointer" title="Marcar tudo que está visível"><svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 8.3l3.4 3.4 7.4-7.4"></path></svg></span>
+						<span class="row u-gap-9">
+							<span class="check u-cursor-pointer" id="whitelistCheckAll" data-click="whitelist_toggle_all" title="Marcar tudo que está visível"><svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 8.3l3.4 3.4 7.4-7.4"></path></svg></span>
 							REGRA
 						</span>
-						<span>PRAZO</span><span>USO</span><span>CRIADA POR</span><span style="text-align:right">AÇÕES</span>
+						<span>PRAZO</span><span>USO</span><span>CRIADA POR</span><span class="u-text-right">AÇÕES</span>
 					</div>
 					<div id="whitelistRows"></div>
 				</div>
-				<div style="padding:10px 22px;border-top:1px solid var(--b1)"><span class="status" id="whitelistStatus"></span></div>
+				<div class="u-p-10-22 u-bt-1-solid-b1"><span class="status" id="whitelistStatus"></span></div>
 		</div>
 
 		</div>
@@ -2451,7 +2852,7 @@
 	<!-- ===================== MINHA CONTA ================================== -->
 	<section class="pane hidden" data-view="account">
 		<div class="pane-head">
-			<div class="grow col" style="gap:2px">
+			<div class="grow col u-gap-2">
 				<h2 class="pane-title">Minha conta</h2>
 				<span class="pane-sub mono" id="accountIdentity">—</span>
 			</div>
@@ -2460,9 +2861,9 @@
 			<div class="card">
 				<span class="card-title">Verificação em duas etapas</span>
 				<p class="card-note">O acesso ao painel exige um aplicativo autenticador (TOTP). Códigos por e-mail ou SMS não são oferecidos: os dois são interceptáveis — SMS por troca de chip, e-mail pela própria caixa que esta plataforma existe para vigiar.</p>
-				<div class="row" style="gap:9px;flex-wrap:wrap">
+				<div class="row u-gap-9 u-wrap">
 					<span class="pill ok" id="accountMfaPill">ativa</span>
-					<span class="mono" id="accountMfaSince" style="font-size:var(--fs-micro);color:var(--t3)"></span>
+					<span class="mono u-fs-fs-micro u-c-t3" id="accountMfaSince"></span>
 				</div>
 				<p class="card-note">Trocou de telefone ou perdeu o acesso ao aplicativo? Peça a um global_admin para zerar sua verificação em duas etapas — o próximo acesso pede a configuração de novo.</p>
 			</div>
@@ -2501,7 +2902,7 @@
      consulta o provedor no servidor: a chave de API não passa por aqui. -->
 <div class="modal model-picker hidden" id="llmModelModal" role="dialog" aria-labelledby="llmModelTitle">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title" id="llmModelTitle">Escolher modelo LLM</h2>
 			<span class="modal-sub" id="llmModelSub">carregando modelos…</span>
 		</div>
@@ -2516,15 +2917,52 @@
 	<div class="model-groups" id="llmModelGroups"></div>
 </div>
 
+<div class="modal hidden u-w-min-56rem-96vw" id="profileModal">
+	<div class="modal-head">
+		<div class="grow col u-gap-3">
+			<h2 class="modal-title" id="profileModalTitle">Novo perfil</h2>
+			<span class="modal-sub">marque o que quem recebe este perfil pode abrir e fazer</span>
+		</div>
+		<button class="modal-close" type="button" data-click="close_modal">×</button>
+	</div>
+	<div class="col u-gap-12">
+		<div class="grid-auto">
+			<label class="field">
+				<span class="field-label">NOME</span>
+				<input class="input" id="profileName" type="text" maxlength="64" placeholder="Analista N1">
+			</label>
+			<label class="field">
+				<span class="field-label">COMEÇAR DO QUE O CARGO DÁ</span>
+				<span class="select-wrap"><select class="select" id="profileFromRole" data-change="profile_from_role">
+					<option value="">—</option>
+					<option value="analyst">analyst</option>
+					<option value="admin">admin</option>
+					<option value="global_admin">global_admin</option>
+				</select></span>
+			</label>
+		</div>
+		<label class="field">
+			<span class="field-label">DESCRIÇÃO</span>
+			<input class="input" id="profileDescription" type="text" maxlength="300" placeholder="Para quem é, e por quê">
+		</label>
+		<div class="profile-groups" id="profileChecks"></div>
+	</div>
+	<div class="modal-foot">
+		<span class="status grow" id="profileModalStatus"></span>
+		<button class="btn secondary" type="button" data-click="close_modal">Cancelar</button>
+		<button class="btn" type="button" id="profileSaveBtn" data-click="save_profile">Salvar perfil</button>
+	</div>
+</div>
+
 <div class="modal hidden" id="userModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title">Incluir usuário</h2>
 			<span class="modal-sub">a conta é criada com a senha informada</span>
 		</div>
 		<button class="modal-close" type="button" data-click="close_modal">×</button>
 	</div>
-	<div class="col" style="gap:12px">
+	<div class="col u-gap-12">
 		<label class="field">
 			<span class="field-label">USUÁRIO</span>
 			<input class="input" id="newUserName" type="text" placeholder="nome.sobrenome">
@@ -2548,9 +2986,9 @@
 	</div>
 </div>
 
-<div class="modal hidden" id="analyzerModal" style="width:520px">
+<div class="modal hidden u-w-520" id="analyzerModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title" id="analyzerModalTitle">Analisador</h2>
 			<span class="modal-sub" id="analyzerModalKind"></span>
 		</div>
@@ -2561,28 +2999,28 @@
 
 	<!-- Guia: prose vinda do back end, recolhida por padrão para não empurrar o
 	     formulário para fora da tela de quem já sabe o que está configurando -->
-	<div class="col" style="gap:8px" id="analyzerGuideBox">
+	<div class="col u-gap-8" id="analyzerGuideBox">
 		<button class="btn sm" type="button" id="analyzerGuideToggle" data-click="toggle_analyzer_guide"></button>
-		<div class="col hidden" style="gap:10px" id="analyzerGuide"></div>
+		<div class="col hidden u-gap-10" id="analyzerGuide"></div>
 	</div>
 
 	<!-- Credenciais, tipos de observável e limiares são montados a partir do
 	     registro do back end -->
-	<div class="col" style="gap:12px" id="analyzerCreds"></div>
+	<div class="col u-gap-12" id="analyzerCreds"></div>
 	<div class="sep"></div>
-	<div class="col" style="gap:10px" id="analyzerObservables"></div>
+	<div class="col u-gap-10" id="analyzerObservables"></div>
 	<div class="sep" id="analyzerThresholdsSep"></div>
-	<div class="col" style="gap:14px" id="analyzerThresholds"></div>
+	<div class="col u-gap-14" id="analyzerThresholds"></div>
 
 	<div class="sep"></div>
 
-	<div class="col" style="gap:8px">
+	<div class="col u-gap-8">
 		<div class="title-line"><span class="field-label">TESTAR CONTRA UM OBSERVÁVEL</span>{% call info() %}Consulta o fornecedor com as credenciais e os limiares que estão nesta tela — não precisa salvar antes. Nada é gravado por este teste.{% endcall %}</div>
-		<div class="row" style="gap:6px">
+		<div class="row u-gap-6">
 			<input class="input mono grow" id="analyzerTestValue" aria-label="Valor para testar o analisador" type="text" data-enter="test_analyzer">
 			<button class="btn secondary sm" type="button" id="analyzerTestBtn" data-click="test_analyzer">Testar</button>
 		</div>
-		<div class="row hidden" id="analyzerTestResult" style="gap:8px;align-items:flex-start">
+		<div class="row hidden u-gap-8 u-items-flex-start" id="analyzerTestResult">
 			<span class="pill" id="analyzerTestLevel"></span>
 			<span class="status grow" id="analyzerTestDetail"></span>
 		</div>
@@ -2598,9 +3036,9 @@
 <!-- Analisador definido pelo analista. Formulário próprio porque o que se
      configura aqui não são credenciais de um fornecedor conhecido, e sim para
      onde o servidor vai chamar e como ler a resposta. -->
-<div class="modal hidden" id="customModal" style="width:560px">
+<div class="modal hidden u-w-560" id="customModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title" id="customModalTitle">Novo analisador</h2>
 			<span class="modal-sub">definido por você</span>
 		</div>
@@ -2609,9 +3047,9 @@
 
 	<p class="card-note" id="customModalNote"></p>
 
-	<div class="col" style="gap:12px">
+	<div class="col u-gap-12">
 		<div class="row top">
-			<div class="grow col" style="gap:4px">
+			<div class="grow col u-gap-4">
 				<span class="card-title">Habilitar analisador</span>
 				<span class="field-hint">desligado, nada é enviado ao fornecedor</span>
 			</div>
@@ -2638,14 +3076,14 @@
 		</label>
 
 		<div class="row top">
-			<div class="grow col" style="gap:4px">
+			<div class="grow col u-gap-4">
 				<div class="title-line"><span class="card-title">Permitir rede interna</span>{% call info() %}Ligue só se este analisador aponta mesmo para dentro da sua rede — um MISP on-prem, um TIP interno. Desligado, o endereço precisa ser HTTPS público. O serviço de metadados da nuvem é recusado dos dois jeitos.{% endcall %}</div>
 				<span class="field-hint">Desligado, só aceita endereço HTTPS público.</span>
 			</div>
 			<div class="toggle" id="customAllowInternal" data-click="toggle_switch"><span class="knob"></span></div>
 		</div>
 
-		<div class="row" style="gap:10px">
+		<div class="row u-gap-10">
 			<label class="field grow">
 				<span class="field-label">MÉTODO</span>
 				<span class="select-wrap">
@@ -2681,7 +3119,7 @@
 
 		<div class="field">
 			<span class="title-line"><span class="field-label">OBSERVÁVEIS QUE ELE JULGA</span>{% call info() %}Anexos não estão disponíveis: enviar arquivo para um endereço arbitrário é o que esta tela evita.{% endcall %}</span>
-			<div class="row" style="gap:12px;flex-wrap:wrap" id="customObservables"></div>
+			<div class="row u-gap-12 u-wrap" id="customObservables"></div>
 		</div>
 
 		<label class="field">
@@ -2693,8 +3131,8 @@
 
 		<div class="field">
 			<span class="field-label">MAPA DE VALOR PARA VEREDITO</span>
-			<div class="col" style="gap:6px" id="customLevelMap"></div>
-			<button class="btn sm secondary" type="button" data-click="add_custom_rule" style="align-self:flex-start">Adicionar regra</button>
+			<div class="col u-gap-6" id="customLevelMap"></div>
+			<button class="btn sm secondary u-self-flex-start" type="button" data-click="add_custom_rule">Adicionar regra</button>
 		</div>
 
 		<label class="field">
@@ -2707,13 +3145,13 @@
 
 	<div class="sep"></div>
 
-	<div class="col" style="gap:8px">
+	<div class="col u-gap-8">
 		<div class="title-line"><span class="field-label">TESTAR CONTRA UM OBSERVÁVEL</span>{% call info() %}Consulta o endereço com o que está nesta tela — não precisa salvar antes. Nada é gravado por este teste.{% endcall %}</div>
-		<div class="row" style="gap:6px">
+		<div class="row u-gap-6">
 			<input class="input mono grow" id="customTestValue" aria-label="Valor para testar o analisador personalizado" type="text" data-enter="test_custom">
 			<button class="btn secondary sm" type="button" data-click="test_custom">Testar</button>
 		</div>
-		<div class="row hidden" id="customTestResult" style="gap:8px;align-items:flex-start">
+		<div class="row hidden u-gap-8 u-items-flex-start" id="customTestResult">
 			<span class="pill" id="customTestLevel"></span>
 			<span class="status grow" id="customTestDetail"></span>
 		</div>
@@ -2730,9 +3168,9 @@
 <!-- Destino de ticket. Mesma forma do modal do analisador, e pela mesma razão:
      com os campos no card, os três destinos empilhavam uma dúzia de inputs na
      primeira coisa que se vê ao abrir a aba. -->
-<div class="modal hidden" id="ticketModal" style="width:560px">
+<div class="modal hidden u-w-560" id="ticketModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title" id="ticketModalTitle">Destino</h2>
 			<span class="modal-sub" id="ticketModalKind"></span>
 		</div>
@@ -2742,15 +3180,15 @@
 	<p class="card-note" id="ticketModalDesc"></p>
 
 	<!-- Campos montados a partir do registro do back end -->
-	<div class="col" style="gap:12px" id="ticketFields"></div>
+	<div class="col u-gap-12" id="ticketFields"></div>
 	<p class="card-note" id="ticketDocs"></p>
 
 	<div class="sep"></div>
 
-	<div class="col" style="gap:8px">
+	<div class="col u-gap-8">
 		<span class="field-label">TESTAR O DESTINO</span>
 		<p class="card-note">Verifica credencial e alcance com o que está nesta tela — não precisa salvar antes. <strong>Nenhum ticket é criado</strong>: <span id="ticketTestHint"></span></p>
-		<div class="row" style="gap:6px">
+		<div class="row u-gap-6">
 			<span class="grow"></span>
 			<button class="btn secondary sm" type="button" data-click="test_ticket_destination">Testar</button>
 		</div>
@@ -2767,9 +3205,9 @@
      release por tela, então tudo que um cliente HTTP escrito à mão decidiria no
      código precisa caber aqui. A pré-visualização é o que impede que isso vire
      tentativa e erro contra a ferramenta de destino. -->
-<div class="modal hidden" id="connectorModal" style="width:640px">
+<div class="modal hidden u-w-640" id="connectorModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title" id="connectorModalTitle">Novo conector</h2>
 			<span class="modal-sub">definido por você</span>
 		</div>
@@ -2778,9 +3216,9 @@
 
 	<p class="card-note" id="connectorModalNote"></p>
 
-	<div class="col" style="gap:12px">
+	<div class="col u-gap-12">
 		<div class="row top">
-			<div class="grow col" style="gap:4px">
+			<div class="grow col u-gap-4">
 				<span class="card-title" id="connectorEnabledTitle">Habilitar conector</span>
 				<span class="field-hint" id="connectorEnabledHint">desligado, nenhuma análise é enviada ao destino</span>
 			</div>
@@ -2799,8 +3237,8 @@
 				placeholder="O que este conector registra, e onde."></textarea>
 		</label>
 
-		<div class="row" style="gap:10px">
-			<label class="field" style="width:110px">
+		<div class="row u-gap-10">
+			<label class="field u-w-110">
 				<span class="field-label">MÉTODO</span>
 				<span class="select-wrap">
 					<select class="select" id="connectorMethod">
@@ -2819,14 +3257,14 @@
 		</div>
 
 		<div class="row top">
-			<div class="grow col" style="gap:4px">
+			<div class="grow col u-gap-4">
 				<div class="title-line"><span class="card-title">Permitir rede interna</span>{% call info() %}Ligue só se o destino está mesmo dentro da sua rede. Desligado, o endereço precisa ser HTTPS público — o corpo desta requisição carrega o relatório inteiro, com o corpo do e-mail. O serviço de metadados da nuvem é recusado dos dois jeitos.{% endcall %}</div>
 				<span class="field-hint">Desligado, só aceita endereço HTTPS público.</span>
 			</div>
 			<div class="toggle" id="connectorAllowInternal" data-click="toggle_switch"><span class="knob"></span></div>
 		</div>
 
-		<div class="row" style="gap:10px">
+		<div class="row u-gap-10">
 			<label class="field grow">
 				<span class="field-label">AUTENTICAÇÃO</span>
 				<span class="select-wrap">
@@ -2839,7 +3277,7 @@
 					</select>
 				</span>
 			</label>
-			<label class="field" style="width:120px">
+			<label class="field u-w-120">
 				<span class="field-label">TIMEOUT (S)</span>
 				<input class="input mono" id="connectorTimeout" type="number" min="1" max="60">
 			</label>
@@ -2873,20 +3311,20 @@
 
 		<div class="field">
 			<span class="field-label">VARIÁVEIS DISPONÍVEIS</span>
-			<div class="row" style="gap:5px;flex-wrap:wrap" id="connectorVariables"></div>
+			<div class="row u-gap-5 u-wrap" id="connectorVariables"></div>
 			<span class="field-hint">Clique para inserir no corpo, na posição do cursor.</span>
 		</div>
 
 		<div class="field">
 			<span class="field-label">PARÂMETROS</span>
 			<p class="card-note">Para o que não cabe no JSON colado: um cabeçalho, um parâmetro de URL, ou um campo customizado da sua fila. Chave em <span class="mono">body</span> aceita caminho pontilhado — <span class="mono">fields.customfield_10010</span> — e é mesclada sobre o corpo acima.</p>
-			<div class="col" style="gap:6px" id="connectorParams"></div>
-			<button class="btn sm secondary" type="button" data-click="add_connector_param" style="align-self:flex-start">Adicionar parâmetro</button>
+			<div class="col u-gap-6" id="connectorParams"></div>
+			<button class="btn sm secondary u-self-flex-start" type="button" data-click="add_connector_param">Adicionar parâmetro</button>
 		</div>
 
 		<div class="sep"></div>
 
-		<div class="row" style="gap:10px">
+		<div class="row u-gap-10">
 			<label class="field grow" id="connectorMinVerdictField">
 				<span class="field-label">DISPARAR PARA</span>
 				<span class="select-wrap">
@@ -2913,19 +3351,19 @@
 
 	<div class="sep"></div>
 
-	<div class="col" style="gap:8px">
+	<div class="col u-gap-8">
 		<span class="field-label">CONFERIR ANTES DE LIGAR</span>
 		<p class="card-note"><strong>Pré-visualizar</strong> monta a requisição com um relatório de exemplo e mostra o que sairia, sem sair. <strong>Testar disparo</strong> envia de verdade — vai criar um chamado, alerta ou mensagem real na ferramenta de destino. Use uma fila de testes na primeira vez.</p>
-		<div class="row" style="gap:6px">
+		<div class="row u-gap-6">
 			<button class="btn secondary sm" type="button" data-click="preview_connector">Pré-visualizar</button>
 			<button class="btn secondary sm" type="button" data-click="test_connector">Testar disparo</button>
 		</div>
-		<div class="col hidden" id="connectorPreviewBox" style="gap:6px">
-			<div class="row" style="gap:8px;align-items:center">
+		<div class="col hidden u-gap-6" id="connectorPreviewBox">
+			<div class="row u-gap-8 u-items-center">
 				<span class="pill" id="connectorPreviewPill">—</span>
 				<span class="status grow" id="connectorPreviewDetail"></span>
 			</div>
-			<pre class="input mono" id="connectorPreviewBody" style="max-height:260px;overflow:auto;white-space:pre-wrap"></pre>
+			<pre class="input mono u-maxh-260 u-ov-auto u-ws-pre-wrap" id="connectorPreviewBody"></pre>
 		</div>
 	</div>
 
@@ -2940,9 +3378,9 @@
 <!-- "Adicionar à whitelist" do handoff: escolher observáveis do caso aberto e
      cadastrá-los como exceção. Diferente dos outros blocos novos, este é real —
      a API de whitelist já existe, só faltava o caminho a partir do caso. -->
-<div class="modal hidden" id="caseWhitelistModal" style="width:480px">
+<div class="modal hidden u-w-480" id="caseWhitelistModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title">Adicionar à whitelist</h2>
 			<span class="modal-sub" id="caseWhitelistSub">observáveis do caso</span>
 		</div>
@@ -2951,15 +3389,15 @@
 
 	<p class="card-note">Uma entrada na whitelist faz o observável ser ignorado em <strong>todas</strong> as análises seguintes. Use apenas para falso positivo confirmado.</p>
 
-	<div class="row" style="gap:8px">
+	<div class="row u-gap-8">
 		<div class="check" id="caseWlAll" data-click="toggle_case_wl_all">
 			<svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.6 5.2l2.1 2.1L8.4 2.6"></path></svg>
 		</div>
 		<span class="check-label" data-click="toggle_case_wl_all">Selecionar tudo</span>
-		<span class="push mono" id="caseWlCount" style="font-size:var(--fs-micro);color:var(--t4)"></span>
+		<span class="push mono u-fs-fs-micro u-c-t4" id="caseWlCount"></span>
 	</div>
 
-	<div class="col" style="gap:7px;max-height:320px;overflow-y:auto" id="caseWlRows"></div>
+	<div class="col u-gap-7 u-maxh-320 u-ovy-auto" id="caseWlRows"></div>
 
 	<div class="modal-foot">
 		<span class="status grow" id="caseWlStatus"></span>
@@ -2973,9 +3411,9 @@
      diferenças que vêm de o destino escrever em vez de ler: o botão de teste diz
      em voz alta que não bloqueia, e a lista de tipos aceitos é a efetiva, não a
      declarada pelo registro. -->
-<div class="modal hidden" id="responderModal" style="width:540px">
+<div class="modal hidden u-w-540" id="responderModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title" id="responderModalTitle">Destino de bloqueio</h2>
 			<span class="modal-sub" id="responderModalKind"></span>
 		</div>
@@ -2984,21 +3422,21 @@
 
 	<p class="card-note" id="responderModalDesc"></p>
 
-	<div class="col" style="gap:8px" id="responderGuideBox">
+	<div class="col u-gap-8" id="responderGuideBox">
 		<button class="btn sm" type="button" id="responderGuideToggle" data-click="toggle_responder_guide"></button>
-		<div class="col hidden" style="gap:10px" id="responderGuide"></div>
+		<div class="col hidden u-gap-10" id="responderGuide"></div>
 	</div>
 
-	<div class="col" style="gap:12px" id="responderCreds"></div>
+	<div class="col u-gap-12" id="responderCreds"></div>
 	<div class="sep" id="responderSettingsSep"></div>
-	<div class="col" style="gap:14px" id="responderSettings"></div>
+	<div class="col u-gap-14" id="responderSettings"></div>
 
 	<div class="sep"></div>
 
-	<div class="col" style="gap:8px">
+	<div class="col u-gap-8">
 		<span class="field-label">TESTAR A CONEXÃO</span>
 		<p class="card-note" id="responderTestNote"></p>
-		<div class="row" style="gap:6px">
+		<div class="row u-gap-6">
 			<span class="status grow" id="responderTestDetail"></span>
 			<button class="btn secondary sm" type="button" id="responderTestBtn" data-click="test_responder">Testar conexão</button>
 		</div>
@@ -3015,9 +3453,9 @@
      escolha, invertida. A diferença é que aqui o efeito é fora da aplicação, e
      por isso cada indicador E cada destino são marcados um a um — nada é
      bloqueado por aceitar o caso inteiro. -->
-<div class="modal hidden" id="blockModal" style="width:520px">
+<div class="modal hidden u-w-520" id="blockModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title">Bloquear indicadores</h2>
 			<span class="modal-sub" id="blockSub"></span>
 		</div>
@@ -3026,24 +3464,24 @@
 
 	<p class="card-note">O bloqueio vale para <strong>toda a organização</strong>, não só para quem denunciou, e não é desfeito por esta tela — remover é feito no console do destino. Cada bloqueio entra no log de auditoria com o seu usuário.</p>
 
-	<div class="col" style="gap:8px">
+	<div class="col u-gap-8">
 		<span class="field-label">DESTINOS</span>
-		<div class="col" style="gap:7px" id="blockResponderRows"></div>
+		<div class="col u-gap-7" id="blockResponderRows"></div>
 	</div>
 
 	<div class="sep"></div>
 
-	<div class="row" style="gap:8px">
+	<div class="row u-gap-8">
 		<div class="check" id="blockAll" data-click="toggle_block_all">
 			<svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.6 5.2l2.1 2.1L8.4 2.6"></path></svg>
 		</div>
 		<span class="check-label" data-click="toggle_block_all">Selecionar tudo</span>
-		<span class="push mono" id="blockCount" style="font-size:var(--fs-micro);color:var(--t4)"></span>
+		<span class="push mono u-fs-fs-micro u-c-t4" id="blockCount"></span>
 	</div>
 
-	<div class="col" style="gap:7px;max-height:280px;overflow-y:auto" id="blockRows"></div>
+	<div class="col u-gap-7 u-maxh-280 u-ovy-auto" id="blockRows"></div>
 
-	<div class="col hidden" style="gap:7px" id="blockResults"></div>
+	<div class="col hidden u-gap-7" id="blockResults"></div>
 
 	<div class="modal-foot">
 		<span class="status grow" id="blockStatus"></span>
@@ -3052,9 +3490,9 @@
 	</div>
 </div>
 
-<div class="modal hidden" id="promptModal" style="width:400px">
+<div class="modal hidden u-w-400" id="promptModal">
 	<div class="modal-head">
-		<div class="grow col" style="gap:3px">
+		<div class="grow col u-gap-3">
 			<h2 class="modal-title" id="promptTitle">Confirmar</h2>
 			<span class="modal-sub" id="promptSub"></span>
 		</div>
@@ -3071,9 +3509,28 @@
 	</div>
 </div>
 
+<!-- Aviso de auto logoff. Não é um modal: um modal aberto por outra tela (uma
+     confirmação, um bloqueio) ficaria por baixo dele ou o fecharia. O tempo
+     vem do servidor a cada sinal de vida (auth.session_deadline: o prazo que
+     vence primeiro, a inatividade ou a duração máxima) -->
+<div class="idle-warning hidden" id="idleWarning" role="alertdialog" aria-labelledby="idleWarningTitle" aria-describedby="idleWarningText">
+	<div class="col grow u-gap-3">
+		<!-- Dois avisos, porque são dois prazos: o de inatividade se adia com um
+		     gesto, o da duração máxima não se adia com nada (auth.session_deadline) -->
+		<span class="idle-warning-title" id="idleWarningTitle" data-ends-by="idle">Sua sessão vai encerrar por inatividade</span>
+		<span class="idle-warning-title hidden" id="idleWarningTitleAbsolute" data-ends-by="absolute">A sessão vai atingir a duração máxima</span>
+		<span class="idle-warning-text" id="idleWarningText"><span>Encerra em <b class="mono" id="idleWarningCount">—</b></span> · <span data-ends-by="idle">Qualquer gesto no painel mantém a sessão.</span><span class="hidden" data-ends-by="absolute">Salve o que estiver fazendo; depois será preciso entrar de novo.</span></span>
+	</div>
+	<button class="btn secondary sm" type="button" data-click="do_logout">Sair agora</button>
+	<button class="btn sm" type="button" id="idleStayBtn" data-click="stay_signed_in">Continuar conectado</button>
+</div>
+
 <div class="toast-dock" id="toastDock"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='assets/js/i18n-en.js', v=asset_version) }}"></script>
+<script src="{{ url_for('static', filename='assets/js/i18n.js', v=asset_version) }}"></script>
+<script src="{{ url_for('static', filename='assets/js/panorama.js', v=asset_version) }}"></script>
 <script src="{{ url_for('static', filename='assets/js/bluephish.js', v=asset_version) }}"></script>
 </body>
 

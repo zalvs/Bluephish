@@ -44,6 +44,10 @@ def admit(socket_sid):
 		return False
 	if not auth.session_policy_holds():
 		return False
+	# O handshake não passa por before_request: o banimento do endereço é
+	# conferido aqui, como a política de sessão logo acima
+	if auth.address_refused():
+		return False
 	if flask.session.get(auth.MFA_DONE) is not True:
 		return False
 	session_sid = flask.session.get('sid')

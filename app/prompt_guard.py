@@ -6,7 +6,6 @@ ANALYSIS_OUTPUT_CONTRACT does — is a request, not a control: the model complie
 most of the time, and "most of the time" is not a security boundary. This module
 is the part that does not depend on the model choosing to cooperate.
 
-
 Four layers, in the order the text meets them:
 
   sanitize()     Strips the characters that carry an instruction past a human

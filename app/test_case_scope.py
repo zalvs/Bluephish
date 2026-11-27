@@ -253,6 +253,29 @@ class Keys(DatabaseBacked):
 	def test_an_unknown_record_has_no_keys(self):
 		self.assertIsNone(self.scope.keys_for('4127'))
 
+	def test_the_flagged_indicators_come_back_for_the_precedents(self):
+		# É o que a reclassificação lê para saber que host ensinar — inclusive
+		# num registro do Jira, cujo contexto não traz os observáveis
+		flagged = [{'key': 'domain:d1a2b3c4.cloudfront.net', 'type': 'domain',
+			'value': 'd1a2b3c4.cloudfront.net', 'level': 'malicious', 'analyzers': ['VirusTotal']}]
+		self.scope.record(['4127'], '4127', 'Sua fatura', 'cobranca@exemplo.com', 'ana@empresa.com',
+			'corpo', [], 'Malicious', now = NOW, flagged = flagged)
+		self.assertEqual(self.scope.keys_for('4127')['flagged'], flagged)
+
+	def test_a_fingerprint_older_than_the_column_reads_as_unknown(self):
+		# None, e não []: "a análise não acusou nada" e "não sabemos" são
+		# afirmações diferentes, e só a segunda recorre aos observáveis do registro
+		self.report(['4127'], '4127', 'ana@empresa.com')
+		session = models.get_session()
+		session.query(models.AnalysisFingerprint).update({'flagged': None})
+		session.commit()
+		session.close()
+		self.assertIsNone(self.scope.keys_for('4127')['flagged'])
+
+	def test_an_analysis_without_flagged_indicators_reads_as_an_empty_list(self):
+		self.report(['4127'], '4127', 'ana@empresa.com')
+		self.assertEqual(self.scope.keys_for('4127')['flagged'], [])
+
 	def test_the_latest_analysis_of_a_record_wins(self):
 		# Reanalisar um caso grava outra impressão digital sob a mesma referência
 		self.report(['4127'], '4127', 'ana@empresa.com', body = 'antigo')

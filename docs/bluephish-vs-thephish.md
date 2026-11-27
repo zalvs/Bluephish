@@ -13,7 +13,7 @@ o repositório dele é a referência do que ele faz hoje.
 | | ThePhish | Bluephish |
 |---|---|---|
 | **Quem inicia uma análise** | O analista escolhe um e-mail na interface web e a inicia | Manual (o analista escolhe) **ou** 100% automática, por um agendador |
-| **O que precisa para rodar** | TheHive, Cortex e MISP | Só ele mesmo: um contêiner. TheHive e MISP são extras opcionais |
+| **O que precisa para rodar** | TheHive, Cortex e MISP | Só a própria stack (vhost, frontend, API e PostgreSQL), subida pelo `setup.sh`. TheHive e MISP são extras opcionais |
 | **Onde rodam os analisadores** | No Cortex, um serviço à parte | Dentro do Bluephish: analisadores nativos, fornecedores que você mesmo acrescenta e regras YARA locais |
 | **Onde o resultado é registrado** | Um caso no TheHive, exportado ao MISP quando malicioso | Qualquer combinação de disco, TheHive, Jira e conectores genéricos para qualquer API REST, ou nenhum deles |
 | **Como o veredito é formado** | A partir dos vereditos dos analisadores | Os analisadores, a avaliação de engenharia social de um LLM, a autenticação do remetente (SPF/DKIM/DMARC) e uma pontuação ponderada, cada um numa ordem fixa que só pode elevar um veredito |

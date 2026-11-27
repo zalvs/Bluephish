@@ -159,5 +159,20 @@ class TheRenderedEmailStaysInert(unittest.TestCase):
 		self.assertEqual(first, 'text')
 
 
+	def test_link_destinations_are_hidden_until_the_button_asks(self):
+		# "Como entregue" mostra a mensagem como a caixa de e-mail mostraria. O
+		# destino impresso ao lado de cada link é do botão "Mostrar URLs": se a
+		# regra voltar a valer sem a classe, toda mensagem passa a vir poluída
+		script = read(SCRIPT)
+		self.assertNotIn('".bp-link::after', script)
+		self.assertIn('"body.show-urls .bp-link::after', script)
+		self.assertIn('"body.show-urls .bp-mismatch', script)
+		self.assertIn('let preview_urls_visible = false;', script)
+		self.assertIn('let case_mail_urls_visible = false;', script)
+		markup = without_comments(read(TEMPLATE))
+		for button in ('previewUrlsBtn', 'caseMailUrlsBtn'):
+			self.assertIn('id="{0}"'.format(button), markup)
+
+
 if __name__ == '__main__':
 	unittest.main()

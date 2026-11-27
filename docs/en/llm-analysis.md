@@ -27,7 +27,7 @@ and would therefore be classified as *Safe* by the reputation analyzers alone.
   uses the OpenAI chat completions format — works with llama.cpp server, vLLM, LM Studio, LocalAI.
 - **Docker**: the Bluephish container must reach the LLM on the host — the default in
   `docker/thephish_conf_files/configuration.json` is `http://host.docker.internal:11434/api/chat`.
-  On Linux add to the Bluephish service in `docker-compose.yml`:
+  On Linux add to the `bluephish` service, in a `docker/docker-compose.override.yml`:
   `extra_hosts: ["host.docker.internal:host-gateway"]`.
 
 ## How it works

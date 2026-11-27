@@ -2,14 +2,23 @@ import os
 import logging
 import logging.handlers
 import datetime
+import json
 import functools
 import secrets
+import time
 import flask
 import flask_login
 
+import abuse_guard
+import access_profiles
+import captcha
 import models
 import mfa
 import audit_store
+import client_addr
+import page_routes
+import security_headers
+import security_policy
 import sso
 from models import User, ROLE_ANALYST, ROLE_ADMIN, ROLE_GLOBAL_ADMIN, ROLES
 
@@ -40,13 +49,133 @@ def audit_log_path():
 	return audit_store.current_path(AUDIT_LOG_PATH)
 
 
-# Client IP, honouring X-Forwarded-For only for its first entry (the value is
-# attacker-controllable, so it is recorded as a hint, never used for decisions)
+# O endereço de quem fez a requisição. X-Forwarded-For só é honrado quando o par
+# é um proxy confiável (BLUEPHISH_TRUSTED_PROXIES) e, nesse caso, vale a entrada
+# mais à direita que não é proxy — a primeira é a que o cliente escreveu. Segue
+# sendo uma dica para a trilha e para o limitador, nunca base de autorização.
+# A regra mora em client_addr.py, que não depende do Flask e tem teste próprio
+def _resolve_client():
+	return client_addr.resolve(
+		flask.request.remote_addr,
+		# Todas as linhas do cabeçalho: um proxy que acrescenta uma segunda linha em
+		# vez de anexar à primeira não pode deixar a do cliente valendo sozinha
+		','.join(flask.request.headers.getlist('X-Forwarded-For')),
+		client_addr.configured_trusted())
+
+
 def client_ip():
-	forwarded = flask.request.headers.get('X-Forwarded-For', '')
-	if forwarded:
-		return forwarded.split(',')[0].strip()[:45]
-	return flask.request.remote_addr or '-'
+	return _resolve_client().ip
+
+
+# --- Limite por IP e banimento (abuse_guard) ---------------------------------
+# A regra mora em abuse_guard.py; aqui só se decide *qual* endereço contar. Não
+# se conta o endereço que não é uma pessoa (gateway do Docker, proxy sem
+# X-Forwarded-For) nem o que está na lista de liberados — ver abuse_guard.
+
+_allowlist_cache = {'key': None, 'networks': []}
+
+UNCOUNTED_ENDPOINTS = ('static', 'api_heartbeat')
+
+# A CSP de toda resposta (thephish_app._security_headers). Mora aqui porque a
+# tela de login é a única que a estende — com as origens do reCAPTCHA, e só
+# quando ele está ligado (captcha.login_csp). Sem 'unsafe-inline' no script-src:
+# ver BLUEPHISH_ARCHITECTURE.md §7.4
+# A política mora em security_headers (um lugar só); o login a estende com o reCAPTCHA
+BASE_CSP = security_headers.CONTENT_SECURITY_POLICY
+
+
+def _allowlist_networks(entries):
+	key = tuple(entries)
+	if _allowlist_cache['key'] != key:
+		_allowlist_cache['networks'] = abuse_guard.parse_allowlist(entries)
+		_allowlist_cache['key'] = key
+	return _allowlist_cache['networks']
+
+
+def abuse_subject():
+	"""(o IP a contar, a política). O IP é None quando o endereço não é contado."""
+	resolved = _resolve_client()
+	policy = security_policy.protection_policy()
+	if not abuse_guard.countable(resolved, client_addr.configured_trusted()):
+		return None, policy
+	if abuse_guard.is_allowed(resolved.ip, _allowlist_networks(policy['allowlist'])):
+		return None, policy
+	return resolved.ip, policy
+
+
+def address_allowed():
+	"""Se o endereço desta requisição está na lista de liberados do abuse_guard."""
+	policy = security_policy.protection_policy()
+	return abuse_guard.is_allowed(_resolve_client().ip, _allowlist_networks(policy['allowlist']))
+
+
+def captcha_required():
+	"""A configuração do captcha quando este login precisa passar por ele; None quando não."""
+	config = security_policy.captcha_policy()
+	if not captcha.is_active(config) or address_allowed():
+		return None
+	return config
+
+
+def address_status():
+	"""O que a tela de Segurança mostra sobre o endereço de quem está olhando."""
+	resolved = _resolve_client()
+	policy = security_policy.protection_policy()
+	return {
+		'ip': resolved.ip,
+		'countable': abuse_guard.countable(resolved, client_addr.configured_trusted()),
+		'allowed': abuse_guard.is_allowed(resolved.ip, _allowlist_networks(policy['allowlist'])),
+		# X-Forwarded-For chegou de um par que não está em BLUEPHISH_TRUSTED_PROXIES:
+		# se esse par é o proxy da instalação, todo mundo tem o IP dele, e o
+		# primeiro banimento tranca todos. Isentar quem manda o cabeçalho não é a
+		# saída — o atacante o mandaria. A saída é a tela avisar
+		'forwardedIgnored': bool(flask.request.headers.get('X-Forwarded-For')) and resolved.source == 'peer'
+	}
+
+
+def count_failure(kind):
+	"""Uma falha de autenticação deste endereço, na conta do banimento."""
+	ip, policy = abuse_subject()
+	if ip is None:
+		return
+	if abuse_guard.record_failure(ip, kind, policy, time.time()):
+		_audit_ban(ip, kind, policy)
+
+
+def _audit_ban(ip, kind, policy):
+	audit('ip_ban', '-', 'success', 'ip={0} motivo={1} minutos={2}'.format(ip, kind, policy['ban']['banMinutes']))
+
+
+def address_refused():
+	"""Se o endereço desta requisição está banido. Para o websocket, que não passa por before_request."""
+	ip, policy = abuse_subject()
+	if ip is None:
+		return False
+	return abuse_guard.check(ip, policy, time.time(), count_request = False).refused
+
+
+def _abuse_refusal(verdict):
+	if verdict.reason == 'limited':
+		message = 'Requisições demais vindas deste endereço. Tente de novo em instantes.'
+		status = 429
+	else:
+		message = ('Este endereço foi bloqueado temporariamente depois de falhas repetidas. '
+			'Tente de novo em {0} minuto(s) ou peça a um global_admin para liberá-lo.').format(-(-verdict.retry_after // 60))
+		status = 403
+	if _wants_json():
+		response = flask.jsonify({'error': message, 'banned': status == 403, 'retryAfter': verdict.retry_after})
+	else:
+		response = flask.Response(message, mimetype = 'text/plain')
+	response.status_code = status
+	response.headers['Retry-After'] = str(verdict.retry_after)
+	return response
+
+
+# Quando o par é o gateway da bridge do Docker e nenhum proxy confiável
+# informou o cliente, 172.x.0.1 não é uma pessoa: o IP real se perdeu entre a
+# porta publicada e este processo. A trilha diz isso em vez de exibir o gateway
+# como se fosse o autor (ver BLUEPHISH_ARCHITECTURE.md, trilha de auditoria)
+DOCKER_GATEWAY_NOTE = 'ip_origem=gateway-docker (IP real indisponivel)'
 
 
 # Uma linha por registro, e só uma. O nome digitado num login que falhou vai
@@ -70,8 +199,11 @@ def audit(event, username = '-', status = '-', detail = ''):
 		actor = '-'
 		if flask_login.current_user and flask_login.current_user.is_authenticated:
 			actor = '{0}({1})'.format(flask_login.current_user.username, flask_login.current_user.role)
+		client = _resolve_client()
+		if client.docker_gateway:
+			detail = '{0} {1}'.format(detail, DOCKER_GATEWAY_NOTE).strip()
 		audit_log.info('event=%s status=%s ip=%s actor=%s target=%s detail=%s',
-			*(_one_line(value) for value in (event, status, client_ip(), actor, username, detail)))
+			*(_one_line(value) for value in (event, status, client.ip, actor, username, detail)))
 	except Exception as e:
 		print("[ERROR]_[auth]: unable to write the audit log: {}".format(e))
 
@@ -91,10 +223,26 @@ def _wants_json():
 	return 'application/json' in accept and 'text/html' not in accept
 
 
-def _deny(status_code, message):
+# O motivo de um fim de sessão, como a tela de login o entende (o `reason` de
+# /login). Conjunto fechado: é o servidor quem sabe por que a sessão caiu, e a
+# tela não adivinha — um palpite do relógio do painel diria "inatividade" a quem
+# teve a sessão revogada por uma troca de senha
+LOGIN_REASONS = {
+	'idle': 'idle',
+	'absolute': 'expired',
+	'password_changed': 'password',
+	'tab_closed': 'tab'
+}
+
+
+def _deny(status_code, message, reason = None):
+	login_reason = LOGIN_REASONS.get(reason)
 	if status_code == 401 and not _wants_json():
-		return flask.redirect(flask.url_for('login_page', next = flask.request.path))
-	return flask.jsonify({'error': message}), status_code
+		return flask.redirect(flask.url_for('login_page', next = flask.request.path, reason = login_reason))
+	body = {'error': message}
+	if login_reason:
+		body['reason'] = login_reason
+	return flask.jsonify(body), status_code
 
 
 def requires_role(minimum_role):
@@ -104,10 +252,15 @@ def requires_role(minimum_role):
 			user = flask_login.current_user
 			if not user or not user.is_authenticated:
 				return _deny(401, 'Authentication required.')
-			if not user.has_role_at_least(minimum_role):
+			# O perfil de acesso decide antes do cargo (access_profiles): a rota
+			# que pertence a uma tela abre para quem tem a tela, com o cargo que
+			# for; a que não pertence a nenhuma segue o cargo
+			if not access_profiles.allows(user, flask.request.endpoint, minimum_role):
 				audit('authorization_denied', user.username, 'denied', 'path={0} required={1}'.format(flask.request.path, minimum_role))
 				return _deny(403, 'Insufficient privileges.')
 			return view(*args, **kwargs)
+		# Para test_access_profiles achar toda rota protegida
+		wrapper.required_role = minimum_role
 		return wrapper
 	return decorator
 
@@ -124,8 +277,58 @@ requires_global_admin = requires_role(ROLE_GLOBAL_ADMIN)
 # Idle timeout, absolute timeout and password-change revocation are enforced on
 # every request. The three markers live in the session cookie, which is signed,
 # so a client cannot extend its own session by editing them
-IDLE_TIMEOUT = datetime.timedelta(minutes = 30)
-ABSOLUTE_TIMEOUT = datetime.timedelta(hours = 12)
+#
+# Os dois prazos são configuráveis (Configurações → Segurança, global_admin) e
+# lidos de security_policy. Não há constante com o valor deles: uma constante
+# seria o padrão, não o que vale, e quem a lesse cobraria o prazo errado.
+
+
+def session_limits():
+	"""(inatividade, duração máxima, aviso em segundos) que valem agora.
+
+	Lidos uma vez por requisição: a política de sessão, o sinal de vida e o
+	cálculo do prazo perguntam na mesma requisição, e cada pergunta seria mais
+	uma consulta ao arquivo.
+	"""
+	if flask.has_request_context() and '_session_limits' in flask.g:
+		return flask.g._session_limits
+	idle_minutes, absolute_hours, warn_seconds = security_policy.session_limits()
+	limits = (datetime.timedelta(minutes = idle_minutes), datetime.timedelta(hours = absolute_hours), warn_seconds)
+	if flask.has_request_context():
+		flask.g._session_limits = limits
+	return limits
+
+
+def idle_timeout():
+	return session_limits()[0]
+
+
+def absolute_timeout():
+	return session_limits()[1]
+
+
+def session_deadline(now = None):
+	"""(segundos que faltam, qual prazo vence primeiro: 'idle' ou 'absolute').
+
+	A inatividade é uma só para todas as abas (o cookie é um só), então quem
+	pergunta é o painel, ao servidor, a cada sinal de vida: um relógio próprio
+	de cada aba avisaria na hora errada para quem está trabalhando em outra.
+
+	Dizer *qual* prazo vence importa tanto quanto quanto falta: perto do fim da
+	duração máxima, quem está trabalhando não está inativo, e "continuar
+	conectado" não adia nada. O painel avisa diferente nos dois casos.
+	"""
+	now = now or _utcnow()
+	last_seen = _parse(flask.session.get('last_seen'))
+	started_at = _parse(flask.session.get('started_at'))
+	if last_seen is None or started_at is None:
+		return 0, 'idle'
+	idle, absolute, _ = session_limits()
+	idle_end = last_seen + idle
+	absolute_end = started_at + absolute
+	ends_by = 'absolute' if absolute_end <= idle_end else 'idle'
+	left = min(idle_end, absolute_end) - now
+	return int(max(0, left.total_seconds())), ends_by
 
 
 # --- Sessão presa à aba ------------------------------------------------------
@@ -224,12 +427,13 @@ def _session_violation(user, now):
 	"""
 	started_at = _parse(flask.session.get('started_at'))
 	last_seen = _parse(flask.session.get('last_seen'))
-	# Absolute lifetime: a session cannot live longer than ABSOLUTE_TIMEOUT even
-	# if the user is continuously active
-	if started_at is None or (now - started_at) > ABSOLUTE_TIMEOUT:
+	idle, absolute, _ = session_limits()
+	# Absolute lifetime: a session cannot live longer than the configured maximum
+	# even if the user is continuously active
+	if started_at is None or (now - started_at) > absolute:
 		return 'absolute'
 	# Idle timeout
-	if last_seen is None or (now - last_seen) > IDLE_TIMEOUT:
+	if last_seen is None or (now - last_seen) > idle:
 		return 'idle'
 	# Password-change revocation: the session records when the password was last
 	# changed; a newer value in the database means the password changed after
@@ -276,11 +480,36 @@ def enforce_session_policy():
 		_forget_session()
 		flask_login.logout_user()
 		flask.session.clear()
-		return _deny(401, message)
+		return _deny(401, message, reason)
 	sid = flask.session.get('sid')
 	_live_sessions[sid] = now
-	flask.session['last_seen'] = now.strftime('%Y-%m-%d %H:%M:%S')
+	if _counts_as_activity():
+		flask.session['last_seen'] = now.strftime('%Y-%m-%d %H:%M:%S')
 	return None
+
+
+# Cabeçalho que o painel manda quando uma pessoa mexeu em *alguma* aba nos últimos
+# instantes (ver "Atividade" em bluephish.js)
+ACTIVITY_HEADER = 'X-User-Activity'
+
+
+def _counts_as_activity():
+	"""Se esta requisição prova que há uma pessoa do outro lado, e renova a inatividade.
+
+	O limite de inatividade existe para a pessoa que saiu da mesa. O painel, porém,
+	faz requisições sozinho — o sinal de vida da aba a cada 30 s, a leitura da
+	configuração, o painel tático ao vivo — e se cada uma renovasse `last_seen`, a
+	sessão nunca ficaria inativa enquanto houvesse uma aba aberta: o limite de 30
+	minutos existiria no código e não valeria para ninguém. Então a requisição
+	automática renova só o sinal de vida da aba (que decide se a aba foi fechada), e
+	`last_seen` só anda quando o painel diz que houve gesto humano em alguma aba, ou
+	quando é uma navegação de página — que não passa por JavaScript e é sempre uma
+	pessoa. O cookie de sessão é um só para todas as abas, então a inatividade
+	também é uma só: vencida, cai em todas.
+	"""
+	if flask.request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+		return True
+	return flask.request.headers.get(ACTIVITY_HEADER) == '1'
 
 
 def start_session(user):
@@ -329,65 +558,191 @@ def start_session(user):
 # autenticada que não carimbe MFA_DONE. Hoje isso nunca acontece; se um dia
 # alguém acrescentar um caminho de login que esqueça o segundo fator, a rede é o
 # que transforma esse esquecimento numa porta fechada em vez de uma aberta.
-MFA_CHALLENGE_TTL = datetime.timedelta(minutes = 10)
+#
+# O desafio tem prazo e tem um número de tentativas, e os dois são cobrados
+# por desafio — além, e não no lugar, do bloqueio da conta (MAX_FAILED_LOGINS,
+# que segue contando cada código errado através de quantos desafios forem):
+#
+#   * **45 segundos para digitar o código** de quem já tem o aplicativo. Um
+#     código TOTP vive 30 s; quem tem o telefone na mão digita em bem menos que
+#     isso, e quem está adivinhando ganha só o que couber no prazo.
+#   * **2 minutos para parear** o aplicativo pela primeira vez: ler o QR, abrir
+#     o aplicativo, cadastrar a conta. Em 45 segundos isso não cabe, e quem não
+#     termina recebe um segredo novo a cada recomeço.
+#   * **3 códigos errados encerram o desafio** e mandam a pessoa de volta à
+#     senha.
+#
+# O contador e o prazo moram no servidor (_mfa_challenges), não no cookie. A
+# sessão do Flask é um cookie assinado que o próprio navegador guarda: um
+# contador gravado nela seria rebobinado por quem reenviasse o cookie de antes
+# do erro, e cada reenvio daria três tentativas novas. O cookie carrega só o
+# identificador do desafio. Desafio que o servidor não conhece (já encerrado,
+# vencido, ou o processo reiniciou) não vale: falha fechada, como o registro
+# de abas (_live_sessions).
+MFA_CODE_TTL = datetime.timedelta(seconds = 45)
+MFA_ENROLL_TTL = datetime.timedelta(minutes = 2)
+MFA_MAX_ATTEMPTS = 3
 
 # Carimbo da sessão que já passou pelo segundo fator
 MFA_DONE = 'mfa_ok'
 # O desafio em andamento
 MFA_PENDING = 'mfa_pending'
 
+# Por que um desafio terminou sem sessão. Códigos fechados: é o que volta na
+# resposta e na URL do /login, e a tela escolhe a frase pelo código, nunca o
+# contrário
+MFA_END_EXPIRED = 'mfa_expired'
+MFA_END_ATTEMPTS = 'mfa_attempts'
+MFA_END_CANCELLED = 'mfa_cancel'
 
-def _start_mfa_challenge(user, source):
+# id do desafio -> {'user_id', 'started_at', 'attempts'}. Um desafio por conta:
+# um login novo substitui o anterior, de modo que abrir vários desafios em
+# paralelo não multiplica as tentativas
+_mfa_challenges = {}
+
+
+def _challenge_ttl(user):
+	return MFA_CODE_TTL if user.mfa_is_enrolled() else MFA_ENROLL_TTL
+
+
+def _prune_challenges(now):
+	# O maior prazo vale para todos: um desafio de pareamento vencido também sai
+	for challenge_id in [cid for cid, entry in _mfa_challenges.items()
+			if now - entry['started_at'] > MFA_ENROLL_TTL]:
+		_mfa_challenges.pop(challenge_id, None)
+
+
+def _start_mfa_challenge(user, source, next_path = None):
 	"""Troca o primeiro fator provado por um desafio de segundo fator.
 
 	A sessão é esvaziada antes: o que houvesse nela vinha de antes desta pessoa
 	se identificar, e um desafio montado por cima de estado alheio é o começo de
 	uma fixação de sessão.
+
+	`next_path` é a tela que a pessoa queria abrir quando o login a interrompeu.
+	Ele mora dentro do desafio, e não solto na sessão, justamente porque o
+	desafio é o que sobrevive à limpeza acima e ao retorno do provedor de
+	identidade — e porque, vencido o desafio, o destino vai junto. Só chega aqui
+	o que `page_routes.safe_next` já aceitou.
 	"""
+	now = _utcnow()
+	_prune_challenges(now)
+	for challenge_id in [cid for cid, entry in _mfa_challenges.items() if entry['user_id'] == user.id]:
+		_mfa_challenges.pop(challenge_id, None)
+	challenge_id = secrets.token_urlsafe(24)
+	_mfa_challenges[challenge_id] = {'user_id': user.id, 'started_at': now, 'attempts': 0}
 	flask.session.clear()
 	flask.session[MFA_PENDING] = {
+		'id': challenge_id,
 		'user_id': user.id,
-		'at': _utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-		'source': source
+		'at': now.strftime('%Y-%m-%d %H:%M:%S'),
+		'source': source,
+		'next': next_path
 	}
+
+
+def _pending_challenge():
+	"""O registro do servidor para o desafio deste navegador, ou None."""
+	pending = flask.session.get(MFA_PENDING)
+	if not isinstance(pending, dict):
+		return None
+	entry = _mfa_challenges.get(str(pending.get('id') or ''))
+	if entry is None or entry['user_id'] != pending.get('user_id'):
+		return None
+	return entry
+
+
+def _end_challenge():
+	pending = flask.session.pop(MFA_PENDING, None)
+	if isinstance(pending, dict):
+		_mfa_challenges.pop(str(pending.get('id') or ''), None)
 
 
 def _challenge_user(db_session):
 	"""O usuário do desafio em andamento, ou None.
 
-	None cobre tudo que dá errado — sem desafio, desafio vencido, conta apagada
-	entre o primeiro e o segundo fator — porque a resposta é a mesma nos três
-	casos: começar de novo pela senha.
+	None cobre tudo que dá errado — sem desafio, desafio que o servidor não
+	conhece, prazo vencido, tentativas esgotadas, conta apagada ou bloqueada
+	entre o primeiro e o segundo fator — porque a resposta é a mesma em todos
+	os casos: começar de novo pela senha.
 	"""
-	pending = flask.session.get(MFA_PENDING)
-	if not isinstance(pending, dict):
-		return None
-	started_at = _parse(pending.get('at'))
-	if started_at is None or (_utcnow() - started_at) > MFA_CHALLENGE_TTL:
+	entry = _pending_challenge()
+	if entry is None:
 		flask.session.pop(MFA_PENDING, None)
 		return None
 	try:
-		user = db_session.query(User).get(int(pending.get('user_id')))
+		user = db_session.query(User).get(int(entry['user_id']))
 	except (TypeError, ValueError):
-		return None
-	if user is None or user.is_locked():
-		flask.session.pop(MFA_PENDING, None)
+		user = None
+	if (user is None or user.is_locked()
+			or entry['attempts'] >= MFA_MAX_ATTEMPTS
+			or _utcnow() - entry['started_at'] > _challenge_ttl(user)):
+		_end_challenge()
 		return None
 	return user
 
 
+def challenge_status(user):
+	"""Quanto resta do desafio em andamento: o que a tela mostra na contagem.
+
+	Só informa — quem decide é _challenge_user, no servidor, a cada código.
+	"""
+	entry = _pending_challenge()
+	if entry is None:
+		return {'expiresIn': 0, 'attemptsLeft': 0}
+	elapsed = _utcnow() - entry['started_at']
+	remaining = int(max(0, (_challenge_ttl(user) - elapsed).total_seconds()))
+	return {'expiresIn': remaining, 'attemptsLeft': max(0, MFA_MAX_ATTEMPTS - entry['attempts'])}
+
+
+def _wrong_code(db_session, user, step):
+	"""Conta um código errado no desafio e na conta, e responde quando ele acaba.
+
+	Na terceira tentativa do desafio, ou quando a conta acaba de bloquear, o
+	desafio termina e a resposta manda a tela de volta à senha. A frase é a
+	mesma nos dois casos: dizer "a conta bloqueou" contaria a quem está
+	adivinhando que o bloqueio existe e quando ele começou. Devolve None quando
+	ainda restam tentativas.
+	"""
+	locked_now = user.register_failed_login()
+	db_session.commit()
+	entry = _pending_challenge()
+	if entry is not None:
+		entry['attempts'] += 1
+	attempts_left = max(0, MFA_MAX_ATTEMPTS - entry['attempts']) if entry is not None else 0
+	audit(step, user.username, 'failure', 'locked={0} attempts_left={1}'.format(locked_now, attempts_left))
+	count_failure(abuse_guard.KIND_MFA)
+	if locked_now or attempts_left == 0:
+		_end_challenge()
+		return flask.jsonify({'error': 'Tentativas esgotadas. Entre de novo.',
+			'restart': True, 'reason': MFA_END_ATTEMPTS}), 401
+	return None
+
+
 def _complete_login(db_session, user):
-	"""Segundo fator conferido: agora, e só agora, a sessão existe."""
+	"""Segundo fator conferido: agora, e só agora, a sessão existe.
+
+	Devolve a página para onde a pessoa vai: a que ela pediu antes do login, ou a
+	inicial. Validada de novo aqui, mesmo tendo sido na entrada — o que decide se
+	um caminho é página é o mapa de rotas, e ele é o de agora, não o de dez
+	minutos atrás.
+	"""
+	pending = flask.session.get(MFA_PENDING)
+	next_path = page_routes.safe_next((pending or {}).get('next')) or '/'
 	user.register_successful_login()
 	db_session.commit()
-	flask.session.pop(MFA_PENDING, None)
+	# Desafio usado não vale de novo: um cookie copiado antes do acerto não
+	# reabre o segundo passo
+	_end_challenge()
 	flask_login.login_user(user, remember = False)
 	start_session(user)
 	flask.session[MFA_DONE] = True
+	return next_path
 
 
 def _challenge_expired():
-	return flask.jsonify({'error': 'A verificação expirou. Entre de novo.', 'restart': True}), 401
+	return flask.jsonify({'error': 'A verificação expirou. Entre de novo.', 'restart': True,
+		'reason': MFA_END_EXPIRED}), 401
 
 
 def enforce_mfa_policy():
@@ -459,6 +814,26 @@ def register(app, login_manager, limiter):
 	init_audit_log()
 	models.init_db()
 
+	# Antes de tudo, inclusive da política de sessão e das rotas de login: um
+	# endereço banido não chega nem a tentar a senha. Registrado aqui, e não em
+	# thephish_app, para valer também na aplicação que os testes montam
+	@app.before_request
+	def _abuse_guard():
+		ip, policy = abuse_subject()
+		if ip is None:
+			return None
+		# Não contam no limite: os arquivos estáticos (abrir o painel são uns
+		# quinze de uma vez, e o navegador os guarda em cache) e o sinal de vida
+		# da aba — recusado por um minuto, ele deixaria a sessão morrer como "aba
+		# fechada" quando a carência é curta. O banimento vale para os dois igual
+		verdict = abuse_guard.check(ip, policy, time.time(),
+			count_request = flask.request.endpoint not in UNCOUNTED_ENDPOINTS)
+		if not verdict.refused:
+			return None
+		if verdict.reason == 'banned_now':
+			_audit_ban(ip, abuse_guard.KIND_RATE, policy)
+		return _abuse_refusal(verdict)
+
 	@login_manager.user_loader
 	def load_user(user_id):
 		session = models.get_session()
@@ -476,8 +851,13 @@ def register(app, login_manager, limiter):
 	# The login view itself must stay reachable without authentication
 	@app.route('/login', methods = ['GET'])
 	def login_page():
+		# `next` é a tela que a pessoa queria abrir quando caiu aqui (o `_deny`
+		# o preenche com o caminho pedido). Só passa o que é página deste painel:
+		# o que sai desta linha vai para um redirect e para um atributo do HTML, e
+		# nenhum dos dois pode carregar um endereço escolhido por quem montou o link
+		next_path = page_routes.safe_next(flask.request.args.get('next'))
 		if flask_login.current_user.is_authenticated:
-			return flask.redirect(flask.url_for('homepage'))
+			return flask.redirect(next_path or flask.url_for('homepage'))
 		# O botão de SSO é renderizado pelo servidor, não revelado pelo script:
 		# uma instalação sem provedor configurado não chega a ter o botão no HTML
 		requested_error = flask.request.args.get('sso_error', '')
@@ -486,20 +866,45 @@ def register(app, login_manager, limiter):
 		# para cá, e não para o painel, porque ainda falta um fator. O estágio
 		# sai da conta, nunca da URL — um /login?stage=... deixaria qualquer um
 		# escolher em que passo a tela abre
+		#
+		# A tela que volta do segundo passo com um motivo (prazo, tentativas,
+		# cancelar) encerra o desafio antes: sem isso, o desafio que ainda
+		# tivesse meio segundo de vida reabriria o formulário do código, e o
+		# "Cancelar" levaria de volta para o mesmo lugar de onde saiu
+		reason = flask.request.args.get('reason', '')
+		if reason in (MFA_END_EXPIRED, MFA_END_ATTEMPTS, MFA_END_CANCELLED):
+			_end_challenge()
 		stage = ''
+		status = {'expiresIn': 0, 'attemptsLeft': 0}
 		db_session = models.get_session()
 		try:
 			challenged = _challenge_user(db_session)
 			if challenged is not None:
 				stage = 'verify' if challenged.mfa_is_enrolled() else 'enroll'
+				status = challenge_status(challenged)
 		finally:
 			db_session.close()
-		return flask.render_template('login.html',
+		captcha_config = captcha_required()
+		page = flask.make_response(flask.render_template('login.html',
+			captcha_site_key = captcha_config['siteKey'] if captcha_config else '',
+			captcha_script = captcha.SCRIPT_URL,
 			sso_available = sso.is_available(sso.load_config()),
 			sso_error = requested_error if requested_error in SSO_ERRORS else '',
+			next_path = next_path or '',
 			mfa_stage = stage,
+			mfa_expires_in = status['expiresIn'],
+			mfa_attempts_left = status['attemptsLeft'],
 			# Mesma regra do sso_error: um código fechado, nunca texto da URL
-			session_ended = flask.request.args.get('reason', '') == 'tab')
+			session_ended = reason == 'tab',
+			session_idle = reason == 'idle',
+			session_expired = reason == 'expired',
+			password_changed = reason == 'password',
+			mfa_ended = reason if reason in (MFA_END_EXPIRED, MFA_END_ATTEMPTS) else ''))
+		# Só esta resposta, e só com o captcha ligado: o painel segue com a CSP
+		# de sempre (o after_request usa setdefault e não sobrescreve esta)
+		if captcha_config:
+			page.headers['Content-Security-Policy'] = captcha.login_csp(BASE_CSP)
+		return page
 
 	# Rate limited per IP to slow down online brute force. The account lockout
 	# below is the per-account counterpart (an attacker rotating IPs still gets
@@ -510,6 +915,18 @@ def register(app, login_manager, limiter):
 		payload = flask.request.get_json(silent = True) or flask.request.form
 		username = (payload.get('username') or '').strip()
 		password = payload.get('password') or ''
+		# Antes de olhar a senha: um robô não chega a saber se ela estava certa
+		captcha_config = captcha_required()
+		if captcha_config:
+			passed, outcome, score = captcha.verify(captcha_config, payload.get('captchaToken'))
+			if not passed:
+				audit('login', username, 'failure', 'reason=captcha outcome={0} score={1}'.format(outcome, score))
+				count_failure(abuse_guard.KIND_CAPTCHA)
+				return flask.jsonify({'error': 'A verificação anti-robô não passou. Recarregue a página e tente de novo.',
+					'captcha': True}), 401
+			if outcome in (captcha.OUTCOME_UNAVAILABLE, captcha.OUTCOME_MISCONFIGURED):
+				# Passou sem a verificação (captcha.py, decisão 2): fica dito na trilha
+				audit('captcha', username, outcome)
 		session = models.get_session()
 		try:
 			user = session.query(User).filter(User.username == username).first()
@@ -518,10 +935,12 @@ def register(app, login_manager, limiter):
 			# a quem estiver de fora quem é do tenant
 			if user is not None and user.is_sso():
 				audit('login', username, 'failure', 'reason=sso_account')
+				count_failure(abuse_guard.KIND_LOGIN)
 				return flask.jsonify({'error': GENERIC_LOGIN_ERROR}), 401
 			# Locked account: same generic answer, no hint that it is locked
 			if user is not None and user.is_locked():
 				audit('login', username, 'failure', 'reason=locked')
+				count_failure(abuse_guard.KIND_LOGIN)
 				return flask.jsonify({'error': GENERIC_LOGIN_ERROR}), 401
 			if user is None or not user.check_password(password):
 				if user is not None:
@@ -531,16 +950,19 @@ def register(app, login_manager, limiter):
 				else:
 					# Unknown user: nothing to update, but still audited
 					audit('login', username, 'failure', 'reason=unknown_user')
+				count_failure(abuse_guard.KIND_LOGIN)
 				return flask.jsonify({'error': GENERIC_LOGIN_ERROR}), 401
 			# Senha certa não é entrada: é metade dela. A contagem de falhas
 			# *não* é zerada aqui de propósito — ela segue valendo através do
 			# segundo fator, de modo que acertar a senha não dá a quem está
 			# tentando um orçamento novo de tentativas para adivinhar o código.
 			# Quem zera é _complete_login, depois dos dois fatores
-			_start_mfa_challenge(user, 'local')
+			_start_mfa_challenge(user, 'local', page_routes.safe_next(payload.get('next')))
 			enrolled = user.mfa_is_enrolled()
 			audit('login', username, 'mfa_required', 'role={0} enrolled={1}'.format(user.role, enrolled))
-			return flask.jsonify({'mfaRequired': True, 'mfaEnrolled': enrolled})
+			body = {'mfaRequired': True, 'mfaEnrolled': enrolled}
+			body.update(challenge_status(user))
+			return flask.jsonify(body)
 		finally:
 			session.close()
 
@@ -570,9 +992,18 @@ def register(app, login_manager, limiter):
 			_forget_session()
 			flask_login.logout_user()
 			flask.session.clear()
-			return flask.jsonify({'error': 'Session ended, please sign in again.'}), 401
+			return flask.jsonify({'error': 'Session ended, please sign in again.', 'reason': LOGIN_REASONS['tab_closed']}), 401
 		touch_session()
-		return flask.jsonify({'status': 'ok', 'intervalSeconds': TAB_HEARTBEAT_SECONDS})
+		# O sinal de vida só renova a inatividade quando carrega o gesto de uma
+		# pessoa (enforce_session_policy já decidiu isso antes de chegar aqui).
+		# A resposta diz quanto falta, e é por ela que o painel avisa antes de
+		# desligar
+		_, _, warn_seconds = session_limits()
+		seconds_left, ends_by = session_deadline()
+		# secondsLeft é o prazo que vence primeiro — a inatividade ou a duração
+		# máxima, dito em endsBy. Só o primeiro se adia com um gesto
+		return flask.jsonify({'status': 'ok', 'intervalSeconds': TAB_HEARTBEAT_SECONDS,
+			'secondsLeft': seconds_left, 'endsBy': ends_by, 'warnSeconds': warn_seconds})
 
 	# --- Segundo fator: os dois passos do desafio ---
 	# As três rotas abaixo são as únicas que respondem a quem só provou a senha.
@@ -630,17 +1061,19 @@ def register(app, login_manager, limiter):
 				return flask.jsonify({'error': 'Não há uma configuração em andamento. Comece de novo.', 'restart': True}), 409
 			ok, counter = mfa.verify(user.mfa_secret, payload.get('code'))
 			if not ok:
-				locked_now = user.register_failed_login()
-				session.commit()
-				audit('mfa_activate', user.username, 'failure', 'locked={0}'.format(locked_now))
-				return flask.jsonify({'error': 'Código inválido. Confira o relógio do telefone e tente o próximo código.'}), 401
+				ended = _wrong_code(session, user, 'mfa_activate')
+				if ended is not None:
+					return ended
+				body = {'error': 'Código inválido. Confira o relógio do telefone e tente o próximo código.'}
+				body.update(challenge_status(user))
+				return flask.jsonify(body), 401
 			user.confirm_mfa(counter)
 			username = user.username
 			role = user.role
-			_complete_login(session, user)
+			next_path = _complete_login(session, user)
 			audit('mfa_activate', username, 'success')
 			audit('login', username, 'success', 'role={0} mfa=activated'.format(role))
-			return flask.jsonify({'username': username, 'role': role})
+			return flask.jsonify({'username': username, 'role': role, 'next': next_path})
 		finally:
 			session.close()
 
@@ -658,19 +1091,21 @@ def register(app, login_manager, limiter):
 				return flask.jsonify({'error': 'Esta conta ainda precisa configurar o segundo fator.', 'restart': True}), 409
 			ok, counter = mfa.verify(user.mfa_secret, payload.get('code'), user.mfa_last_counter)
 			if not ok:
-				locked_now = user.register_failed_login()
-				session.commit()
-				audit('mfa_verify', user.username, 'failure', 'locked={0}'.format(locked_now))
-				return flask.jsonify({'error': 'Código inválido.'}), 401
+				ended = _wrong_code(session, user, 'mfa_verify')
+				if ended is not None:
+					return ended
+				body = {'error': 'Código inválido.'}
+				body.update(challenge_status(user))
+				return flask.jsonify(body), 401
 			# Guardar o passo aceito é o que impede que o mesmo código volte a
 			# valer enquanto a janela não fecha (ver mfa.verify)
 			user.mfa_last_counter = counter
 			username = user.username
 			role = user.role
-			_complete_login(session, user)
+			next_path = _complete_login(session, user)
 			audit('mfa_verify', username, 'success')
 			audit('login', username, 'success', 'role={0} mfa=totp'.format(role))
-			return flask.jsonify({'username': username, 'role': role})
+			return flask.jsonify({'username': username, 'role': role, 'next': next_path})
 		finally:
 			session.close()
 
@@ -687,6 +1122,10 @@ def register(app, login_manager, limiter):
 			'role': user.role,
 			'canManageUsers': user.has_role_at_least(ROLE_GLOBAL_ADMIN),
 			'canChangeSettings': user.has_role_at_least(ROLE_ADMIN),
+			# As telas, abas e ações que o perfil (ou o cargo) libera. O menu se
+			# monta com isto; quem recusa o resto é o servidor
+			'pages': access_profiles.visible(user),
+			'profileId': user.profile_id,
 			'mfaEnrolled': user.mfa_is_enrolled(),
 			'mfaConfirmedAt': user.mfa_confirmed_at.strftime('%Y-%m-%d %H:%M:%S') if user.mfa_confirmed_at else None
 		})
@@ -709,6 +1148,15 @@ def register(app, login_manager, limiter):
 			print('[ERROR]_[auth]: não foi possível iniciar o fluxo de SSO: {0}'.format(e))
 			return _sso_failure('provider')
 		flask.session['sso_flow'] = flow
+		# Para onde a pessoa queria ir quando caiu na tela de login. Guardado na
+		# sessão porque o provedor de identidade é uma viagem de ida e volta que
+		# não devolve nada que não tenhamos mandado, e o retorno limpa a sessão
+		# (_start_mfa_challenge) — o destino é recolhido no callback antes disso
+		next_path = page_routes.safe_next(flask.request.args.get('next'))
+		if next_path:
+			flask.session['sso_next'] = next_path
+		else:
+			flask.session.pop('sso_next', None)
 		return flask.redirect(auth_uri)
 
 	# Retorno do provedor. Tudo aqui é recusa por padrão: sem flow guardado, com
@@ -718,6 +1166,9 @@ def register(app, login_manager, limiter):
 	def sso_callback():
 		config = sso.load_config()
 		flow = flask.session.pop('sso_flow', None)
+		# Recolhido já: qualquer recusa daqui para baixo não deixa um destino
+		# esquecido na sessão, e o desafio abaixo o leva consigo
+		next_path = flask.session.pop('sso_next', None)
 		if not sso.is_available(config) or not flow:
 			audit('sso_login', status = 'failure', detail = 'reason=no_flow')
 			return _sso_failure('expired')
@@ -752,7 +1203,7 @@ def register(app, login_manager, limiter):
 			# não pode ter: quem tivesse o token do tenant entraria sem mais
 			# nada. Então o retorno do Entra ID não leva ao painel — leva ao
 			# mesmo desafio de segundo fator que o login por senha
-			_start_mfa_challenge(user, 'sso')
+			_start_mfa_challenge(user, 'sso', page_routes.safe_next(next_path))
 			audit('sso_login', username, 'mfa_required', 'role={0} action={1} enrolled={2}'.format(
 				user.role, action, user.mfa_is_enrolled()))
 		finally:
@@ -798,6 +1249,10 @@ def register(app, login_manager, limiter):
 			# Never leave the installation without a global admin
 			if user.role == ROLE_GLOBAL_ADMIN and session.query(User).filter(User.role == ROLE_GLOBAL_ADMIN).count() <= 1:
 				return flask.jsonify({'error': 'The last global_admin cannot be deleted.'}), 400
+			# Nem a última que entra por senha: sem ela, o SSO fora do ar tranca todos
+			if models.is_last_local_global_admin(session, user):
+				audit('user_delete', user.username, 'denied', 'reason=last_local_global_admin')
+				return flask.jsonify({'error': 'The last global_admin with a local password cannot be deleted: if SSO fails, nobody could sign in.'}), 400
 			username = user.username
 			session.delete(user)
 			session.commit()
@@ -809,6 +1264,14 @@ def register(app, login_manager, limiter):
 	@app.route('/api/users/<int:user_id>/role', methods = ['POST'])
 	@requires_global_admin
 	def api_set_role(user_id):
+		# Mesma regra da exclusão: quem rebaixa o próprio cargo perde, no mesmo
+		# clique, o acesso a esta tela que desfaria o erro. A trava do último
+		# global_admin não cobre o caso — havendo dois, um podia se rebaixar e
+		# o outro estar de férias. Quem precisa mudar o próprio cargo pede a
+		# outro global_admin
+		if user_id == flask_login.current_user.id:
+			audit('user_role_change', flask_login.current_user.username, 'denied', 'reason=self')
+			return flask.jsonify({'error': 'You cannot change your own role.'}), 400
 		payload = flask.request.get_json(silent = True) or flask.request.form
 		role = (payload.get('role') or '').strip()
 		if role not in ROLES:
@@ -821,12 +1284,129 @@ def register(app, login_manager, limiter):
 			# Do not allow demoting the last global admin
 			if user.role == ROLE_GLOBAL_ADMIN and role != ROLE_GLOBAL_ADMIN and session.query(User).filter(User.role == ROLE_GLOBAL_ADMIN).count() <= 1:
 				return flask.jsonify({'error': 'The last global_admin cannot be demoted.'}), 400
+			if role != ROLE_GLOBAL_ADMIN and models.is_last_local_global_admin(session, user):
+				audit('user_role_change', user.username, 'denied', 'reason=last_local_global_admin')
+				return flask.jsonify({'error': 'The last global_admin with a local password cannot be demoted: if SSO fails, nobody could sign in.'}), 400
 			user.role = role
 			session.commit()
 			audit('user_role_change', user.username, 'success', 'role={0}'.format(role))
 			return flask.jsonify(user.to_dict())
 		finally:
 			session.close()
+
+	# --- Perfis de acesso (global_admin only, access_profiles.py) ---
+	# Quem distribui acesso precisa ter todo o acesso: estas rotas ficam no cargo
+	# (access_profiles.ROLE_ONLY), e nenhum perfil as abre
+	def _profiles_payload(db_session):
+		counts = {}
+		for user in db_session.query(User).all():
+			if user.profile_id is not None:
+				counts[user.profile_id] = counts.get(user.profile_id, 0) + 1
+		profiles = db_session.query(models.AccessProfile).order_by(models.AccessProfile.name).all()
+		return {
+			'catalogue': list(access_profiles.CATALOGUE),
+			'roleDefaults': {role: sorted(access_profiles.role_items(role)) for role in ROLES},
+			'profiles': [access_profiles.profile_dict(profile, counts.get(profile.id, 0)) for profile in profiles]
+		}
+
+	def _profile_summary(items):
+		return ','.join(items)[:400] or '-'
+
+	@app.route('/api/profiles', methods = ['GET'])
+	@requires_global_admin
+	def api_list_profiles():
+		db_session = models.get_session()
+		try:
+			return flask.jsonify(_profiles_payload(db_session))
+		finally:
+			db_session.close()
+
+	def _save_profile(profile_id):
+		payload = flask.request.get_json(silent = True) or flask.request.form
+		name, description, items, error = access_profiles.validate(payload)
+		if error:
+			audit('profile_save', '-', 'refused', error[:200])
+			return flask.jsonify({'error': error}), 400
+		db_session = models.get_session()
+		try:
+			clash = db_session.query(models.AccessProfile).filter(models.AccessProfile.name == name).first()
+			if clash is not None and clash.id != profile_id:
+				return flask.jsonify({'error': 'Já existe um perfil com esse nome.'}), 400
+			if profile_id is None:
+				profile = models.AccessProfile(name = name)
+				db_session.add(profile)
+				before = '-'
+			else:
+				profile = db_session.query(models.AccessProfile).get(profile_id)
+				if profile is None:
+					return flask.jsonify({'error': 'Perfil não encontrado.'}), 404
+				before = _profile_summary(sorted(access_profiles.parse_items(profile.items)))
+			profile.name = name
+			profile.description = description
+			profile.items = json.dumps(items)
+			profile.updated_at = datetime.datetime.utcnow()
+			db_session.commit()
+			audit('profile_save', name, 'success', 'id={0} antes: {1} | depois: {2}'.format(
+				profile.id, before, _profile_summary(items)))
+			return flask.jsonify(_profiles_payload(db_session))
+		finally:
+			db_session.close()
+
+	@app.route('/api/profiles', methods = ['POST'])
+	@requires_global_admin
+	def api_create_profile():
+		return _save_profile(None)
+
+	@app.route('/api/profiles/<int:profile_id>', methods = ['POST'])
+	@requires_global_admin
+	def api_update_profile(profile_id):
+		return _save_profile(profile_id)
+
+	@app.route('/api/profiles/<int:profile_id>', methods = ['DELETE'])
+	@requires_global_admin
+	def api_delete_profile(profile_id):
+		db_session = models.get_session()
+		try:
+			profile = db_session.query(models.AccessProfile).get(profile_id)
+			if profile is None:
+				return flask.jsonify({'error': 'Perfil não encontrado.'}), 404
+			# Apagar um perfil em uso deixaria as contas dele sem tela nenhuma (o
+			# perfil apagado não cai no cargo: access_profiles._profile_items)
+			in_use = db_session.query(User).filter(User.profile_id == profile_id).count()
+			if in_use:
+				return flask.jsonify({'error': 'O perfil está em {0} conta(s). Troque o perfil delas antes de apagar.'.format(in_use)}), 400
+			name = profile.name
+			db_session.delete(profile)
+			db_session.commit()
+			audit('profile_delete', name, 'success', 'id={0}'.format(profile_id))
+			return flask.jsonify(_profiles_payload(db_session))
+		finally:
+			db_session.close()
+
+	@app.route('/api/users/<int:user_id>/profile', methods = ['POST'])
+	@requires_global_admin
+	def api_set_profile(user_id):
+		payload = flask.request.get_json(silent = True) or flask.request.form
+		raw = payload.get('profileId')
+		db_session = models.get_session()
+		try:
+			user = db_session.query(User).get(user_id)
+			if user is None:
+				return flask.jsonify({'error': 'User not found.'}), 404
+			profile = None
+			if raw not in (None, '', 'null'):
+				try:
+					profile = db_session.query(models.AccessProfile).get(int(raw))
+				except (TypeError, ValueError):
+					profile = None
+				if profile is None:
+					return flask.jsonify({'error': 'Perfil não encontrado.'}), 400
+			user.profile_id = profile.id if profile else None
+			db_session.commit()
+			audit('user_profile_change', user.username, 'success', 'perfil={0}'.format(profile.name if profile else 'cargo'))
+			return flask.jsonify(user.to_dict())
+		finally:
+			db_session.close()
 
 	# Telefone perdido, trocado, ou aplicativo apagado sem querer: o segredo some
 	# junto e não há como recuperá-lo — é essa a natureza de um segredo que só
@@ -919,6 +1499,7 @@ def register(app, login_manager, limiter):
 					session.commit()
 					audit('password_change', user.username, 'failure',
 						'reason=bad_current_password locked={0}'.format(locked_now))
+					count_failure(abuse_guard.KIND_PASSWORD)
 					if locked_now:
 						# Quem estava adivinhando não fica com uma sessão aberta
 						# numa conta que acabou de travar

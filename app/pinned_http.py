@@ -25,9 +25,9 @@ proxy não diria nada sobre o destino —, e a política de saída do proxy é o
 controle. A trava de validate_destination() continua valendo antes dele.
 
 Consumidores (a tabela da §4.5.1): custom_analyzers, connectors, tickets (Jira),
-responders (gerência de firewall), unshorten e email_render. O TheHive fica de
-fora: thehive4py chama o requests por dentro, sem sessão que se possa trocar, e
-o endereço dele é digitado por um admin com a rede interna liberada — o que a
+responders (gerência de firewall), unshorten e email_render, o feed do OpenPhish
+(analyzers._fetch_openphish_feed), mais as leituras do TheHive (tickets.thehive_call). A escrita do TheHive fica de fora: thehive4py chama o requests
+por dentro, sem sessão que se possa trocar, e o endereço dele é digitado por um admin com a rede interna liberada — o que a
 fixação acrescentaria ali é só a recusa do serviço de metadados.
 """
 

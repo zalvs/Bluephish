@@ -25,7 +25,7 @@ import run_analysis
 
 BANNER = ('[E-MAIL EXTERNO]: NÃO CLIQUE em links e anexos de remetentes desconhecidos. '
 	'Não envie informações confidenciais da Instituição. -------------------------------------')
-LURE = 'thalitam 様 このたびはご購入をいただき、誠にありがとうございます。 ご注文内容詳細概要をご確認する'
+LURE = 'fulana 様 このたびはご購入をいただき、誠にありがとうございます。 ご注文内容詳細概要をご確認する'
 VERIFIED = {'authenticated': True, 'spf': 'softfail', 'dkim': 'pass', 'dmarc': 'pass',
 	'fromDomain': 'djycmu.keithhilmer.com'}
 
@@ -65,17 +65,17 @@ class LinkDestinations(unittest.TestCase):
 	def test_the_hosts_of_the_url_observables_are_listed_once(self):
 		summary = run_analysis.summarize_link_destinations([
 			{'type': 'url', 'name': 'https://loganphotographics.com/dkwd'},
-			{'type': 'url', 'name': 'https://LoganPhotographics.com/outra?x=thalita@einstein.br'},
+			{'type': 'url', 'name': 'https://LoganPhotographics.com/outra?x=fulana@empresa-exemplo.com.br'},
 			{'type': 'url', 'name': 'https://m.media-amazon.com/images/G/01/authportal/logo.png'},
-			{'type': 'domain', 'name': 'einstein.br'},
-			{'type': 'mail', 'name': 'thalita@einstein.br'}
+			{'type': 'domain', 'name': 'empresa-exemplo.com.br'},
+			{'type': 'mail', 'name': 'fulana@empresa-exemplo.com.br'}
 		])
 		self.assertIn('- loganphotographics.com', summary)
 		self.assertIn('- m.media-amazon.com', summary)
 		self.assertEqual(summary.count('loganphotographics.com'), 1)
 		self.assertIn('2 distinct host(s)', summary)
 		# O host, não a URL: a query string carrega o endereço de quem recebeu
-		self.assertNotIn('einstein.br', summary)
+		self.assertNotIn('empresa-exemplo.com.br', summary)
 
 	def test_no_url_means_no_block(self):
 		self.assertEqual(run_analysis.summarize_link_destinations([{'type': 'domain', 'name': 'a.example'}]), '')
