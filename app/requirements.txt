@@ -49,11 +49,11 @@ cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.0
 cryptography==50.0.2
-d8s-dicts==0.6.0
+d8s-dicts==0.7.0
 d8s_hypothesis==0.7.0
-d8s-lists==0.8.0
-d8s-math==0.7.0
-d8s-strings==0.5.0
+d8s-lists==0.9.0
+d8s-math==0.8.0
+d8s-strings==0.6.0
 d8s_uuids==0.7.0
 Deprecated==3.0.0
 dictdiffer==0.10.0
@@ -79,7 +79,7 @@ Jinja2==3.1.6
 limits==5.8.0
 MarkupSafe==3.0.4
 more-itertools==11.2.1
-mpmath==1.3.0
+mpmath==1.4.1
 msal==1.39.0
 number-tools==0.1.0
 ordered-set==4.1.0
