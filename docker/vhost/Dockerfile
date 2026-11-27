@@ -1,6 +1,6 @@
 # vhost: a porta de entrada. TLS público e cabeçalhos de segurança; repassa
 # tudo ao frontend pela rede edge. Ver docker/vhost/nginx.conf
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine
 ENV BLUEPHISH_WATCH_FILES="/etc/nginx/certs/fullchain.pem /etc/nginx/certs/privkey.pem"
 ENV BLUEPHISH_HTTPS_PORT=443
 COPY nginx/reload-on-change.sh /usr/local/bin/reload-on-change.sh
