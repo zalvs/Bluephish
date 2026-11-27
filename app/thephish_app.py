@@ -1,5 +1,5 @@
-# Swaps the blocking parts of the standard library for cooperative (greenlet)
-# versions. Websocket needs it to work at all: without it the client drops back to long polling.
+# Monkeypatches the standard library to replace its key elements with green equivalents (greenlets)
+# This is needed for websocket to work and avoid falling back to long polling.
 # It MUST run before anything that imports ssl/socket (requests, urllib3, flask):
 # patching after ssl has been imported leaves a half-patched module whose
 # SSLContext.options setter recurses into itself, and every outbound HTTPS call
@@ -11,6 +11,8 @@ eventlet.monkey_patch()
 
 import os
 import json
+import config_file
+import secret_vault
 import collections
 import re
 import time
@@ -23,13 +25,12 @@ import datetime
 import flask
 import flask_socketio
 import flask_login
-import requests
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 import list_emails
 import email_provider
 import inbox_pages
+import security_headers
 import render_store
 import case_evidence
 import case_from_email
@@ -41,6 +42,10 @@ import departments
 import graph_directory
 import analyzers
 import analyzer_guides
+import feeds
+import threat_intel
+import threat_intel_summary
+import threat_intel_sync
 import custom_analyzers
 import connectors
 import volume_alerts
@@ -57,6 +62,8 @@ import llm_catalog
 import prompt_guard
 import models
 import auth
+import page_routes
+import jwt_session
 import sso
 import whitelist
 import whitelist_state
@@ -66,21 +73,49 @@ import verdict_memory
 import socket_guard
 import audit_trail
 import audit_store
-import config_io
+import security_policy
+import abuse_guard
+import acme_client
+import cert_store
+import access_profiles
+import captcha
 from auth import requires_analyst, requires_admin, requires_global_admin
 from ws_logger import WebSocketLogger
 
 app = flask.Flask(__name__)
 
+# --- Cofre de segredos -------------------------------------------------------
+# Os segredos em texto que ainda estiverem no configuration.json passam para o
+# cofre cifrado na subida (secret_vault, config_file). Sem chave mestra nada
+# muda, e o aviso fica no log e na aba Segurança. Uma falha aqui não derruba a
+# aplicação: o arquivo continua legível como estava.
+try:
+	_sealed = config_file.migrate()
+	if secret_vault.master_key() is None:
+		print('[WARNING]_[thephish_app]: sem chave mestra em {0}: os segredos da configuração seguem em texto no configuration.json'.format(secret_vault.key_file()))
+except Exception:
+	print("[ERROR]_[thephish_app]: Erro ao passar os segredos para o cofre: {}".format(traceback.format_exc()))
+
 # --- Session and CSRF security ---------------------------------------------
 # The signing key must survive a restart (otherwise every session is silently
-# invalidated on deploy) and must never be a hardcoded default. It is taken
-# from the environment; when absent a random key is generated for this process
-# only, which is safe but logs the user out on restart.
+# invalidated on deploy) and must never be a hardcoded default. Com chave
+# mestra, ela é gerada uma vez e guarda-se no cofre — não precisa mais estar no
+# .env. THEPHISH_SECRET_KEY no ambiente ainda vale, e tem precedência, para não
+# derrubar as sessões de quem já a usa; o log sugere tirá-la. Sem chave mestra
+# nem variável, a chave é aleatória por processo e todo mundo sai num reinício.
 _secret = os.environ.get('THEPHISH_SECRET_KEY', '')
+if _secret:
+	if secret_vault.master_key() is not None:
+		print('[WARNING]_[thephish_app]: THEPHISH_SECRET_KEY ainda está no ambiente; com o cofre ligado ela pode sair do .env (a aplicação gera e guarda a dela)')
+else:
+	try:
+		_secret = secret_vault.app_secret('flask-secret-key', lambda: secrets.token_urlsafe(48)) or ''
+	except Exception:
+		print("[ERROR]_[thephish_app]: Erro ao ler a chave de sessão do cofre: {}".format(traceback.format_exc()))
+		_secret = ''
 if not _secret:
 	_secret = secrets.token_urlsafe(48)
-	print('[WARNING]_[thephish_app]: THEPHISH_SECRET_KEY is not set, using a per-process random key (sessions will not survive a restart)')
+	print('[WARNING]_[thephish_app]: THEPHISH_SECRET_KEY is not set and there is no vault key, using a per-process random key (sessions will not survive a restart)')
 app.config['SECRET_KEY'] = _secret
 
 # The cookie is only sent over HTTPS, is unreadable from JavaScript (so an XSS
@@ -92,6 +127,12 @@ app.config['SESSION_COOKIE_NAME'] = 'thephish_session'
 # Flask's own cookie lifetime is the absolute session limit; the idle timeout
 # and the password-change revocation are enforced in auth.enforce_session_policy
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(hours = 12)
+# O cookie de sessão é um JWT estrito (HS256 só, iss/aud fixos, jti = sid
+# revogável no servidor), HttpOnly + Secure + SameSite=Strict. Ver jwt_session.py.
+# Ele herda a tolerância ao relógio que recua (§7.19, session_clock): a VM do
+# Docker Desktop corrige a hora aos saltos, e um token "do futuro" derrubaria a
+# sessão sem nada na auditoria
+app.session_interface = jwt_session.JwtSessionInterface()
 # CSRF tokens follow the session lifetime instead of expiring after one hour
 app.config['WTF_CSRF_TIME_LIMIT'] = None
 
@@ -104,7 +145,7 @@ login_manager.init_app(app)
 login_manager.session_protection = 'strong'
 
 # Per-IP rate limiting; the login route adds its own stricter limit
-limiter = Limiter(app, key_func = get_remote_address, default_limits = [])
+limiter = Limiter(auth.client_ip, app = app, default_limits = [])
 # Cache the static assets in the browser for a week. Serving them uncached made
 # every page load and F5 re-request all ~13 assets, and under that concurrent
 # load the eventlet server (which also handles the socket.io connection) would
@@ -141,6 +182,10 @@ def inject_asset_version():
 
 # Register the authentication/RBAC routes, the user loader and the audit log
 auth.register(app, login_manager, limiter)
+
+# One path per screen of the panel (/config/ia, /integr/tickets, /done/<case>),
+# each with the role that screen needs. The landing page, "/", is homepage below.
+page_routes.register(app)
 
 
 # Endpoints que respondem antes de existir uma sessão: as duas pontas do SSO, a
@@ -194,15 +239,15 @@ def _security_headers(response):
 		pass
 	response.headers.setdefault('X-Content-Type-Options', 'nosniff')
 	response.headers.setdefault('X-Frame-Options', 'DENY')
+	# Dado do SOC não fica em cache do navegador nem de proxy; só /static fica (§4.5)
+	page_routes.no_store_unless_static(response, flask.request.endpoint)
 	# 'same-origin' (not 'no-referrer'): Flask-WTF's CSRF protection checks the
 	# Referer header on HTTPS (WTF_CSRF_SSL_STRICT), so the browser must keep
 	# sending it for our own POST requests. 'same-origin' sends the full referrer
 	# to this app while still stripping it on any cross-origin navigation.
 	response.headers.setdefault('Referrer-Policy', 'same-origin')
 	response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-	response.headers.setdefault('Content-Security-Policy',
-		"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-		"font-src 'self' https://fonts.gstatic.com data:; script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self'")
+	response.headers.setdefault('Content-Security-Policy', security_headers.CONTENT_SECURITY_POLICY)
 	return response
 
 
@@ -366,8 +411,7 @@ INBOX_POLL_MAX_SECONDS = 3600
 
 def load_inbox_poll_config():
 	try:
-		with open('configuration.json') as conf_file:
-			poll_conf = json.load(conf_file).get('inboxPolling', {})
+		poll_conf = config_file.read('configuration.json').get('inboxPolling', {})
 		inbox_poll_state['enabled'] = bool(poll_conf.get('enabled', True))
 		inbox_poll_state['intervalSeconds'] = max(INBOX_POLL_MIN_SECONDS,
 			min(int(poll_conf.get('intervalSeconds', 60)), INBOX_POLL_MAX_SECONDS))
@@ -388,15 +432,14 @@ def save_inbox_poll_config():
 	the same kind of thing: the analyst who switched the queue to oldest-first
 	did it to work through a backlog, and a backlog outlives a container.
 	"""
-	conf_dict = config_io.read_configuration()
+	conf_dict = config_file.read('configuration.json')
 	conf_dict['inboxPolling'] = {
 		'enabled': inbox_poll_state['enabled'],
 		'intervalSeconds': inbox_poll_state['intervalSeconds'],
 		'pageSize': inbox_poll_state['pageSize'],
 		'order': inbox_poll_state['order']
 	}
-	with open('configuration.json', 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, 'configuration.json')
 
 
 def mailbox_is_configured():
@@ -407,7 +450,7 @@ def mailbox_is_configured():
 	error an operator has to see.
 	"""
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		sync_conf = conf_dict.get('email_sync') or {}
 		provider = sync_conf.get('provider', '')
 		if provider == 'm365':
@@ -911,6 +954,10 @@ def on_client_connected():
 	if not admitted:
 		return False
 	try:
+		# A sala leva a listagem da caixa e o log das análises: entra só quem
+		# abriria a caixa pelo HTTP (o perfil decide, como em /list)
+		if not access_profiles.allows(flask_login.current_user, 'obtain_emails_to_analyze', models.ROLE_ANALYST):
+			return None
 		flask_socketio.join_room(INBOX_ROOM)
 		if inbox_poll_state['lastRun']:
 			flask_socketio.emit('inbox', inbox_poll_payload())
@@ -926,7 +973,7 @@ def on_client_disconnected():
 # Load the scheduler settings from configuration.json at startup
 def load_scheduler_config():
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		auto_conf = conf_dict.get('autoAnalysis', {})
 		scheduler_state['enabled'] = bool(auto_conf.get('enabled', False))
 		# Cinco minutos e quinze por ciclo: o ciclo não se sobrepõe (o scheduler
@@ -940,14 +987,13 @@ def load_scheduler_config():
 
 # Persist the scheduler settings in configuration.json so that they survive a restart
 def save_scheduler_config():
-	conf_dict = config_io.read_configuration()
+	conf_dict = config_file.read('configuration.json')
 	conf_dict['autoAnalysis'] = {
 		'enabled': scheduler_state['enabled'],
 		'intervalMinutes': scheduler_state['intervalMinutes'],
 		'maxPerCycle': scheduler_state['maxPerCycle']
 	}
-	with open('configuration.json', 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, 'configuration.json')
 
 
 # Build the JSON representation of the scheduler state returned to the client
@@ -975,11 +1021,11 @@ def analyze_one_email(wsl, mail_uid, log_prefix):
 		case_result = case_from_email.main(wsl, mail_uid)
 	if not case_result:
 		return None
-	observables, external_from_field, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals = case_result
+	observables, external_from_field, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals, extraction_complete = case_result
 	# run_analysis runs the analyzers and then the social engineering analysis, so
 	# the model sees the analyzer results, the sender authentication and the
 	# content before the verdict is computed
-	verdict, _llm_result, _score = run_analysis.main(wsl, observables, external_from_field, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals)
+	verdict, _llm_result, _score = run_analysis.main(wsl, observables, external_from_field, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals, extraction_complete = extraction_complete)
 	if verdict is not None:
 		wsl.emit_info('{0}: email with UID {1} classified as {2}'.format(log_prefix, mail_uid, verdict))
 	# The message is read now, so it is out of the queue. Telling the polling
@@ -1071,7 +1117,7 @@ def scheduler_loop():
 			scheduler_state['nextRunAt'] = time.time() + scheduler_state['intervalMinutes'] * 60
 
 
-# Home page
+# The main page
 @app.route("/")
 @requires_analyst
 def homepage():
@@ -1274,7 +1320,7 @@ def analyze_selected_emails():
 		'results': results
 	})
 
-# Run the analysis of one email and return its verdict
+# Analyze the email and obtain the verdict
 @app.route('/analysis', methods = ['POST'])
 @requires_analyst
 def analyze_email():
@@ -1289,21 +1335,22 @@ def analyze_email():
 	# Instantiate the object used for logging by the other modules. The log goes
 	# only to a socket of this same session; otherwise it is dropped
 	wsl = WebSocketLogger(socketio, socket_guard.log_target(flask.request.form.get('sid')))
-	# Extract the observables from the email, then run the analysis
+	# Call the modules used to create the case and run the analysis
 	# The semaphore makes the fetch and case creation atomic with respect to the automatic analysis
 	with analysis_semaphore:
 		case_result = case_from_email.main(wsl, mail_uid)
 	if not case_result:
 		return flask.jsonify(None)
-	observables, external_from_field, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals = case_result
+	observables, external_from_field, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals, extraction_complete = case_result
 	# The analyzers run first and the social engineering analysis last, inside
 	# run_analysis, so the model judges with the analyzer results in hand
-	verdict, llm_result, score_result = run_analysis.main(wsl, observables, external_from_field, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals)
+	verdict, llm_result, score_result = run_analysis.main(wsl, observables, external_from_field, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals, extraction_complete = extraction_complete)
 	if verdict is None:
 		return flask.jsonify(None)
 	# The verdict is returned together with the result of the LLM analysis so that
 	# the web interface can show the social engineering assessment to the analyst
-	return flask.jsonify({'verdict': verdict, 'llmAnalysis': llm_result, 'score': score_result})
+	response = flask.jsonify({'verdict': verdict, 'llmAnalysis': llm_result, 'score': score_result})
+	return response
 
 # Obtain the current settings and state of the automatic analysis scheduler
 @app.route('/scheduler', methods = ['GET'])
@@ -1387,7 +1434,7 @@ def update_inbox_poll():
 @requires_admin
 def get_llm_config():
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		llm_conf = conf_dict.get('llm_analysis', {})
 		return flask.jsonify({
 			'enabled': bool(llm_conf.get('enabled', False)),
@@ -1458,7 +1505,7 @@ def update_llm_config():
 		if name and not re.match(r'^[A-Za-z0-9][A-Za-z0-9._:\/-]*$', name):
 			return flask.jsonify(None)
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		stored_llm = conf_dict.get('llm_analysis', {})
 		# An empty API key field means "keep the stored key", so the other fields
 		# can be edited without retyping the key. But the stored key is only kept
@@ -1488,8 +1535,7 @@ def update_llm_config():
 				'reviewer': {'model': agent_models['reviewer']}
 			}
 		}
-		with open('configuration.json', 'w') as conf_file:
-			json.dump(conf_dict, conf_file, indent = '\t')
+		config_file.write(conf_dict, 'configuration.json')
 	except Exception as e:
 		print("[ERROR]_[thephish_app]: Error while trying to save the LLM analysis settings in 'configuration.json': {}".format(traceback.format_exc()))
 		return flask.jsonify(None)
@@ -1524,8 +1570,7 @@ def list_llm_models():
 	api_key = (flask.request.form.get("api_key") or '').strip()
 	if api_key == '':
 		try:
-			with open('configuration.json') as conf_file:
-				stored_llm = json.load(conf_file).get('llm_analysis', {})
+			stored_llm = config_file.read('configuration.json').get('llm_analysis', {})
 			stored_host = urlparse(stored_llm.get('api_endpoint', '')).netloc
 			if stored_host and urlparse(api_endpoint).netloc == stored_host:
 				api_key = stored_llm.get('api_key', '')
@@ -1540,7 +1585,7 @@ def list_llm_models():
 @requires_admin
 def get_email_config():
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		sync_conf = conf_dict.get('email_sync') or {}
 		m365_conf = sync_conf.get('m365', {})
 		gmail_conf = sync_conf.get('gmail', {})
@@ -1594,7 +1639,7 @@ def update_email_config():
 		if not re.match(mail_regex, gmail_user):
 			return flask.jsonify(None)
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		sync_conf = conf_dict.get('email_sync') or {}
 		m365_conf = sync_conf.get('m365', {})
 		gmail_conf = sync_conf.get('gmail', {})
@@ -1654,8 +1699,7 @@ def update_email_config():
 			'm365': m365_conf,
 			'gmail': gmail_conf
 		}
-		with open('configuration.json', 'w') as conf_file:
-			json.dump(conf_dict, conf_file, indent = '\t')
+		config_file.write(conf_dict, 'configuration.json')
 	except Exception as e:
 		print("[ERROR]_[thephish_app]: Error while trying to save the email synchronization settings in 'configuration.json': {}".format(traceback.format_exc()))
 		return flask.jsonify(None)
@@ -1683,7 +1727,7 @@ def update_email_config():
 @requires_admin
 def get_verdict_config():
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		notif_conf = conf_dict.get('notification', {})
 		flags = mailer.notification_flags(notif_conf)
 		return flask.jsonify({
@@ -1726,7 +1770,7 @@ def update_verdict_config():
 	if errata_message == '':
 		errata_message = DEFAULT_NOTIFICATION['errataMessage']
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		notification = conf_dict.get('notification', {})
 		notification.update({
 			# `enabled` segue gravado como "algum aviso ligado", para que uma
@@ -1744,8 +1788,7 @@ def update_verdict_config():
 		# The SMTP settings live under the same section and are edited by another
 		# form: updating instead of replacing is what keeps this one from wiping them
 		conf_dict['notification'] = notification
-		with open('configuration.json', 'w') as conf_file:
-			json.dump(conf_dict, conf_file, indent = '\t')
+		config_file.write(conf_dict, 'configuration.json')
 	except Exception as e:
 		print("[ERROR]_[thephish_app]: Error while trying to save the notification settings in 'configuration.json': {}".format(traceback.format_exc()))
 		return flask.jsonify(None)
@@ -1821,7 +1864,7 @@ def test_smtp_config():
 @requires_admin
 def get_case_config():
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		case_conf = conf_dict.get('case', {})
 		misp_conf = conf_dict.get('misp', {})
 		return flask.jsonify({
@@ -1841,7 +1884,12 @@ def update_case_config():
 	tlp = (flask.request.form.get("tlp") or '').strip()
 	pap = (flask.request.form.get("pap") or '').strip()
 	tags_raw = (flask.request.form.get("tags") or '').strip()
-	misp_id = (flask.request.form.get("mispId") or '').strip()
+	# The MISP export name is no longer on this form: it is a setting of the
+	# TheHive destination, edited on its card. A request that does not carry the
+	# field therefore says nothing about it, and must leave the stored name alone
+	# — reading its absence as "blank" would erase the name on the next save of
+	# the TLP
+	misp_id = flask.request.form.get("mispId")
 	# TLP and PAP are the standard 0-3 levels (white, green, amber, red)
 	if tlp not in ('0', '1', '2', '3') or pap not in ('0', '1', '2', '3'):
 		return flask.jsonify(None)
@@ -1850,17 +1898,17 @@ def update_case_config():
 	if len(tags) == 0:
 		return flask.jsonify(None)
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		conf_dict['case'] = {
 			'tlp': tlp,
 			'pap': pap,
 			'tags': tags
 		}
-		misp_conf = conf_dict.get('misp', {})
-		misp_conf['id'] = misp_id
-		conf_dict['misp'] = misp_conf
-		with open('configuration.json', 'w') as conf_file:
-			json.dump(conf_dict, conf_file, indent = '\t')
+		if misp_id is not None:
+			misp_conf = conf_dict.get('misp', {})
+			misp_conf['id'] = misp_id.strip()
+			conf_dict['misp'] = misp_conf
+		config_file.write(conf_dict, 'configuration.json')
 	except Exception as e:
 		print("[ERROR]_[thephish_app]: Error while trying to save the case settings in 'configuration.json': {}".format(traceback.format_exc()))
 		return flask.jsonify(None)
@@ -1910,11 +1958,10 @@ def update_case_evidence_config():
 	if gigabytes < 0.1 or gigabytes > 1024:
 		return flask.jsonify({'error': 'O espaço reservado vai de 0,1 a 1024 GB.'})
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		conf_dict['caseEvidence'] = {'storeOriginal': store_original, 'retentionDays': retention,
 			'maxGigabytes': gigabytes}
-		with open('configuration.json', 'w') as conf_file:
-			json.dump(conf_dict, conf_file, indent = '\t')
+		config_file.write(conf_dict, 'configuration.json')
 	except Exception:
 		print("[ERROR]_[thephish_app]: Error while saving the original-message settings: {}".format(traceback.format_exc()))
 		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'})
@@ -1928,6 +1975,133 @@ def update_case_evidence_config():
 	auth.audit('case_evidence_update', status = 'ok', detail = 'guardar={0} retencao={1} gb={2}'.format(
 		store_original, retention, gigabytes))
 	return flask.jsonify(evidence_config_response())
+
+
+# --- Segurança: auto logoff e duração da sessão -------------------------------
+# global_admin, não admin: alongar a sessão afrouxa o controle que existe para a
+# pessoa que saiu da mesa. Os limites (security_policy.MIN_*/MAX_*) são
+# conferidos aqui no servidor, e cada mudança entra na trilha com o antes e o
+# depois. Vale na próxima requisição de toda sessão aberta: a regra é lida por
+# auth._session_violation, a mesma do HTTP e do websocket.
+
+def _vault_status():
+	# Contagens e a impressão da chave, nunca um valor (secret_vault.status)
+	try:
+		return secret_vault.status(config_file.read_raw())
+	except Exception:
+		print("[ERROR]_[thephish_app]: Erro ao ler o estado do cofre: {}".format(traceback.format_exc()))
+		return None
+
+
+def _security_config_payload():
+	config = security_policy.load_config()
+	return {
+		'session': config['session'],
+		'protection': config['protection'],
+		# Os banimentos em vigor, e o endereço de quem está olhando: se ele não é
+		# contável (gateway do Docker, proxy sem X-Forwarded-For), o banimento não
+		# age sobre ninguém, e a tela diz isso em vez de parecer que protege
+		'bans': abuse_guard.bans(time.time()),
+		'you': auth.address_status(),
+		# Tudo menos a chave secreta, que não volta para o navegador
+		'captcha': security_policy.captcha_view(config),
+		'captchaDisabledByEnvironment': captcha.disabled_by_environment(),
+		'vault': _vault_status(),
+		'limits': {
+			'idleMinutes': [security_policy.MIN_IDLE_MINUTES, security_policy.MAX_IDLE_MINUTES],
+			'absoluteHours': [security_policy.MIN_ABSOLUTE_HOURS, security_policy.MAX_ABSOLUTE_HOURS],
+			'warnSeconds': [security_policy.MIN_WARN_SECONDS, security_policy.MAX_WARN_SECONDS],
+			'perMinute': [security_policy.MIN_PER_MINUTE, security_policy.MAX_PER_MINUTE],
+			'maxFailures': [security_policy.MIN_MAX_FAILURES, security_policy.MAX_MAX_FAILURES],
+			'windowMinutes': [security_policy.MIN_WINDOW_MINUTES, security_policy.MAX_WINDOW_MINUTES],
+			'banMinutes': [security_policy.MIN_BAN_MINUTES, security_policy.MAX_BAN_MINUTES],
+			'allowlist': security_policy.MAX_ALLOWLIST
+		}
+	}
+
+
+@app.route('/security-config', methods = ['GET'])
+@requires_global_admin
+def get_security_config():
+	return flask.jsonify(_security_config_payload())
+
+
+@app.route('/security-config', methods = ['POST'])
+@requires_global_admin
+def update_security_config():
+	part, error = security_policy.validate(flask.request.form)
+	if error:
+		auth.audit('security_config_update', status = 'refused', detail = error[:300])
+		return flask.jsonify({'error': error})
+	before = security_policy.load_config()
+	# Só a sessão muda; a proteção contra abuso fica como estava
+	config = security_policy.merged(part)
+	try:
+		security_policy.save_config(config)
+	except Exception:
+		print("[ERROR]_[thephish_app]: Erro ao gravar a configuração de segurança: {}".format(traceback.format_exc()))
+		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'})
+	auth.audit('security_config_update', status = 'ok',
+		detail = 'antes: {0} | depois: {1}'.format(security_policy.summary(before), security_policy.summary(config)))
+	return flask.jsonify(_security_config_payload())
+
+
+# --- Segurança: limite por IP, banimento e lista de liberados ------------------
+# global_admin, pela mesma régua da sessão: desligar o banimento ou liberar uma
+# rede é afrouxar a defesa contra força bruta de todas as contas. A regra mora
+# em abuse_guard; os números, em security_policy.
+
+@app.route('/security-config/protection', methods = ['POST'])
+@requires_global_admin
+def update_protection_config():
+	part, error = security_policy.validate_protection(flask.request.form)
+	if error:
+		auth.audit('security_config_update', status = 'refused', detail = error[:300])
+		return flask.jsonify({'error': error})
+	before = security_policy.load_config()
+	config = security_policy.merged(part)
+	try:
+		security_policy.save_config(config)
+	except Exception:
+		print("[ERROR]_[thephish_app]: Erro ao gravar a proteção contra abuso: {}".format(traceback.format_exc()))
+		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'})
+	# Liberar um IP que já estava banido o solta na hora — é para isso que se
+	# libera, quase sempre
+	released = abuse_guard.release_allowed(abuse_guard.parse_allowlist(config['protection']['allowlist']))
+	auth.audit('security_config_update', status = 'ok',
+		detail = 'antes: {0} | depois: {1}{2}'.format(security_policy.protection_summary(before),
+			security_policy.protection_summary(config),
+			' | soltos: {0}'.format(','.join(released)) if released else ''))
+	return flask.jsonify(_security_config_payload())
+
+
+@app.route('/security-config/captcha', methods = ['POST'])
+@requires_global_admin
+def update_captcha_config():
+	before = security_policy.load_config()
+	part, error = security_policy.validate_captcha(flask.request.form, before['captcha'])
+	if error:
+		auth.audit('security_config_update', status = 'refused', detail = error[:300])
+		return flask.jsonify({'error': error})
+	config = security_policy.merged(part)
+	try:
+		security_policy.save_config(config)
+	except Exception:
+		print("[ERROR]_[thephish_app]: Erro ao gravar o captcha: {}".format(traceback.format_exc()))
+		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'})
+	auth.audit('security_config_update', status = 'ok',
+		detail = 'antes: {0} | depois: {1}'.format(security_policy.captcha_summary(before), security_policy.captcha_summary(config)))
+	return flask.jsonify(_security_config_payload())
+
+
+@app.route('/security-config/unban', methods = ['POST'])
+@requires_global_admin
+def unban_address():
+	ip = (flask.request.form.get('ip') or '').strip()[:64]
+	if not abuse_guard.unban(ip):
+		return flask.jsonify({'error': 'Este endereço não está banido.'})
+	auth.audit('ip_unban', status = 'ok', detail = 'ip={0}'.format(ip))
+	return flask.jsonify(_security_config_payload())
 
 
 # --- Trilha de auditoria: onde, por quanto tempo, e a cópia no SIEM ------------
@@ -2050,15 +2224,14 @@ def update_departments_config():
 	stored, _stored_credentials = departments.load_config()
 	config = departments.normalize_config(submitted_departments_config(stored))
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		credentials = departments.credentials_for(config, conf_dict)
 		# Turning it on without credentials would tag nothing and look like an
 		# organization with no departments
 		if config['enabled'] and not departments.credentials_are_complete(credentials):
 			return flask.jsonify(None)
 		conf_dict[departments.CONFIG_SECTION] = config
-		with open('configuration.json', 'w') as conf_file:
-			json.dump(conf_dict, conf_file, indent = '	')
+		config_file.write(conf_dict, 'configuration.json')
 	except Exception as e:
 		print("[ERROR]_[thephish_app]: Error while trying to save the department settings in 'configuration.json': {}".format(traceback.format_exc()))
 		return flask.jsonify(None)
@@ -2081,7 +2254,7 @@ def test_departments_config():
 	stored, _stored_credentials = departments.load_config()
 	config = departments.normalize_config(submitted_departments_config(stored))
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 	except Exception:
 		conf_dict = {}
 	credentials = departments.credentials_for(config, conf_dict)
@@ -2171,10 +2344,9 @@ def update_sso_config():
 	if config['enabled'] and not sso.is_configured(config):
 		return flask.jsonify(None)
 	try:
-		conf_dict = config_io.read_configuration()
+		conf_dict = config_file.read('configuration.json')
 		conf_dict[sso.CONFIG_SECTION] = config
-		with open('configuration.json', 'w') as conf_file:
-			json.dump(conf_dict, conf_file, indent = '	')
+		config_file.write(conf_dict, 'configuration.json')
 	except Exception:
 		print("[ERROR]_[thephish_app]: Error while trying to save the SSO settings to 'configuration.json': {}".format(traceback.format_exc()))
 		return flask.jsonify(None)
@@ -2209,10 +2381,12 @@ def _whitelist_actor():
 
 
 def _whitelist_allow_permanent():
-	# A camada "permanente" e restrita por cargo, e nao por combinado: e o que
-	# impede que ela vire o caminho de menor esforco para nao renovar
+	# A camada "permanente" e restrita, e nao por combinado: e o que impede que
+	# ela vire o caminho de menor esforco para nao renovar. Quem decide e o perfil
+	# de acesso (access_profiles, acao whitelist_permanent); sem perfil, o cargo
+	# global_admin, como sempre
 	try:
-		return flask_login.current_user.has_role_at_least(models.ROLE_GLOBAL_ADMIN)
+		return access_profiles.can_open_item(flask_login.current_user, 'action.whitelist_permanent')
 	except Exception:
 		return False
 
@@ -2471,6 +2645,11 @@ def whitelist_rule_create():
 				if (proposal and proposal['scope'] == verdict_memory.SCOPE_SENDER
 						and rule['type'] == whitelist.TYPE_SENDER and rule['value'] == proposal['key']):
 					verdict_memory.resolve_proposal(int(proposal_id), True, _whitelist_actor(), rule['id'])
+				elif (proposal and proposal['scope'] == verdict_memory.SCOPE_INDICATOR
+						and verdict_memory.rule_matches_indicator(rule, proposal['key'])):
+					# Todas as propostas do mesmo host, e não só a clicada: a regra
+					# responde a todos os casos que o acusaram
+					verdict_memory.resolve_indicator_proposals(proposal['key'], rule['id'], _whitelist_actor())
 			except Exception:
 				print("[ERROR]_[thephish_app]: Error while closing the verdict memory proposal: {}".format(traceback.format_exc()))
 		return _whitelist_response()
@@ -2694,31 +2873,33 @@ def whitelist_migrate():
 		print("[ERROR]_[thephish_app]: Erro ao migrar a whitelist: {}".format(traceback.format_exc()))
 		return flask.jsonify(None)
 
-# --- AI chat: investigate an analyzed case with the local LLM ---------------
-# The analyst loads the context of a case (the analyzed email body, the
-# extracted IOCs and the verdict) and then asks free-form questions; the
-# context is injected as the system prompt of every LLM request
+# --- Case assistant: investigate an analyzed case with the LLM --------------
+# The Assistente panel beside an open case loads that case's context (the
+# analyzed email body, the extracted IOCs and the verdict) and then asks
+# free-form questions; the context is injected as the system prompt of every
+# LLM request. There is no separate chat screen: the case is always the one open
 
-# Cache of the case contexts already built, keyed by the case reference the
-# analyst typed. Rebuilt on demand after a restart
+# Cache of the case contexts already built, keyed by the reference of the case
+# open in the assistant panel. Rebuilt on demand after a restart
 chat_contexts = {}
 
 # Maximum number of characters of the email body injected in the system prompt
 CHAT_MAX_BODY_CHARS = 6000
 
-# Read the TheHive connection settings from configuration.json
+# Read the TheHive connection settings from configuration.json.
+#
+# TheHive is one destination among several and may not be configured at all: an
+# installation that records to disk has an empty address here, or no `thehive`
+# section. Both come back as empty strings, so that the caller can say "TheHive
+# is not configured" instead of failing on a missing key.
 def thehive_settings():
-	conf_dict = config_io.read_configuration()
-	return conf_dict['thehive']['url'].rstrip('/'), conf_dict['thehive']['apikey']
+	conf_dict = config_file.read('configuration.json')
+	thehive_conf = conf_dict.get('thehive') or {}
+	return str(thehive_conf.get('url') or '').rstrip('/'), str(thehive_conf.get('apikey') or '')
 
 # Run a TheHive v1 query and return the parsed JSON
 def thehive_query(base_url, apikey, query):
-	response = requests.post(
-		base_url + '/api/v1/query',
-		headers = {'Authorization': 'Bearer ' + apikey, 'Content-Type': 'application/json'},
-		json = {'query': query},
-		timeout = (10, 30)
-	)
+	response = tickets.thehive_call('POST', base_url, apikey, '/api/v1/query', json = {'query': query})
 	response.raise_for_status()
 	return response.json()
 
@@ -2729,11 +2910,7 @@ def chat_extract_email_body(base_url, apikey, observables):
 		for obs in observables:
 			attachment = obs.get('attachment') or {}
 			if obs.get('dataType') == 'file' and str(attachment.get('name', '')).lower().endswith('.eml'):
-				response = requests.get(
-					base_url + '/api/datastore/' + attachment['id'],
-					headers = {'Authorization': 'Bearer ' + apikey},
-					timeout = (10, 30)
-				)
+				response = tickets.thehive_call('GET', base_url, apikey, '/api/datastore/' + attachment['id'])
 				response.raise_for_status()
 				msg = email.message_from_bytes(response.content)
 				plain_parts = []
@@ -2772,6 +2949,15 @@ def build_chat_context(case_ref):
 			'Para investigar aqui, habilite o destino Disco ou TheHive.'.format(ref)}
 	base_url, apikey = thehive_settings()
 	case_ref = ref
+	# A reference with no source in front is a TheHive case — that is how every
+	# record was named while TheHive was the only place they went. Without an
+	# address and a key there is nowhere to ask, and saying so beats the request
+	# that would fail on an empty URL and reach the analyst as "unable to load".
+	# Only for something shaped like a TheHive reference: anything else is still
+	# told, below, that it is not a reference at all
+	if re.match(r'^(\d+|~[0-9A-Za-z]+)$', case_ref) and not (base_url and apikey):
+		return {'error': 'O registro {0} é um caso do TheHive, e o TheHive não está configurado nesta '
+			'instalação. Os registros gravados em disco têm o prefixo disk: no identificador.'.format(case_ref)}
 	if re.match(r'^\d+$', case_ref):
 		cases = thehive_query(base_url, apikey, [{'_name': 'listCase'}, {'_name': 'filter', '_field': 'number', '_value': int(case_ref)}])
 	elif re.match(r'^~[0-9A-Za-z]+$', case_ref):
@@ -2810,10 +2996,10 @@ def build_chat_context(case_ref):
 					'injection': None
 				}
 				if parsed['llm'] and not llm_summary:
-					llm_summary = 'Social engineering analysis: risk level {0}, detected {1}. {2}'.format(
-						parsed['llm']['risk_level'], parsed['llm']['social_engineering_detected'],
+					llm_summary = 'Análise de engenharia social: risco {0}, engenharia social detectada: {1}. {2}'.format(
+						parsed['llm']['risk_level'], 'sim' if parsed['llm']['social_engineering_detected'] else 'não',
 						parsed['llm']['justification'])[:600]
-			elif not llm_summary and 'Social engineering analysis' in message:
+			elif not llm_summary and ('Social engineering analysis' in message or 'Análise de engenharia social' in message):
 				llm_summary = message[:600]
 	except Exception:
 		pass
@@ -2978,8 +3164,7 @@ def build_chat_system_prompt(context, core_prompt):
 # the same way, so a model configured once answers both
 def chat_llm_settings():
 	try:
-		with open('configuration.json') as conf_file:
-			llm_conf = json.load(conf_file).get('llm_analysis', {})
+		llm_conf = config_file.read('configuration.json').get('llm_analysis', {})
 	except Exception:
 		return None, 'Unable to read the LLM settings from configuration.json.'
 	if not llm_conf.get('api_endpoint') or not llm_conf.get('model_name'):
@@ -2996,20 +3181,18 @@ def ask_chat_llm(llm_conf, messages):
 		if '/api/chat' in llm_endpoint:
 			# Native Ollama API
 			payload = {'model': llm_model, 'messages': messages, 'stream': False, 'options': {'temperature': 0.2}}
-			response = requests.post(llm_endpoint, json = payload, timeout = (10, 300))
-			response.raise_for_status()
+			response = llm_analysis.post_completion(llm_endpoint, payload, timeout = (10, 300))
 			return response.json()['message']['content']
 		# OpenAI-compatible API (OpenRouter and local OpenAI-style servers); the
 		# API key, when set, is carried as a bearer token
 		payload = {'model': llm_model, 'messages': messages, 'temperature': 0.2}
-		response = requests.post(llm_endpoint, json = payload, headers = llm_analysis.openai_compatible_headers(llm_conf.get('api_key', '')), timeout = (10, 300))
-		response.raise_for_status()
+		response = llm_analysis.post_completion(llm_endpoint, payload, headers = llm_analysis.openai_compatible_headers(llm_conf.get('api_key', '')), timeout = (10, 300))
 		return response.json()['choices'][0]['message']['content']
 	except Exception:
 		print("[ERROR]_[thephish_app]: Error while querying the LLM for the chat: {}".format(traceback.format_exc()))
 		return None
 
-# Load the investigation context of a case for the AI chat
+# Load the investigation context of a case for the case assistant
 @app.route('/api/chat/load/<case_ref>', methods = ['GET'])
 @requires_analyst
 def chat_load(case_ref):
@@ -3245,7 +3428,8 @@ def get_analyzers():
 		'customLimit': custom_analyzers.MAX_CUSTOM,
 		'levels': list(analyzers.LEVELS),
 		'customObservables': list(custom_analyzers.ALLOWED_OBSERVABLES),
-		'observableHint': analyzers.OBSERVABLE_CHOICE_HINT
+		'observableHint': analyzers.OBSERVABLE_CHOICE_HINT,
+		'feedStatus': feed_states()
 	})
 
 
@@ -3378,7 +3562,88 @@ def update_analyzer(analyzer_id):
 	except Exception:
 		print("[ERROR]_[thephish_app]: Error while saving the analyzer configuration: {}".format(traceback.format_exc()))
 		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'}), 500
-	return flask.jsonify({'config': analyzers.public_config(config)})
+	# A feed that is turned on with no usable copy is downloaded now, in the
+	# background: the request must not wait for tens of megabytes
+	feed = feeds.BY_ID.get(analyzer_id)
+	if feed is not None and entry.get('enabled') and feeds.status(feed)['status'] != 'fresh':
+		start_feed_refresh(feed)
+	return flask.jsonify({'config': analyzers.public_config(config), 'feedStatus': feed_states()})
+
+
+# =============================================================================
+# Public feeds
+#
+# The lists are downloaded in the background and queried from a local file (see
+# feeds.py). These routes only start a refresh and report its state; none of
+# them takes an address from the request, so they are not a new way to make the
+# server call somewhere.
+# =============================================================================
+
+FEEDS_LOOP_SECONDS = 60
+
+
+def feed_states():
+	return dict((feed['id'], feeds.status(feed)) for feed in feeds.FEEDS)
+
+
+def start_feed_refresh(feed):
+	# The blocking part (parsing and indexing) runs off the eventlet hub, so the
+	# websocket and the mailbox polling keep moving while a 60 MB list is built
+	socketio.start_background_task(feeds.refresh, feed, None, None, analyzers.run_off_hub)
+
+
+def feeds_refresh_loop():
+	while True:
+		socketio.sleep(FEEDS_LOOP_SECONDS)
+		try:
+			feeds.refresh_due(analyzers.load_config(), offload = analyzers.run_off_hub)
+		except Exception:
+			print("[ERROR]_[feeds]: refresh loop failed: {0}".format(traceback.format_exc()))
+
+
+# State of every feed, for the screen to poll while a download runs.
+@app.route('/api/feeds', methods = ['GET'])
+@requires_admin
+def get_feeds():
+	return flask.jsonify({'feedStatus': feed_states()})
+
+
+# Refresh one feed now, whatever its interval says.
+@app.route('/api/feeds/<feed_id>/refresh', methods = ['POST'])
+@requires_admin
+def refresh_feed(feed_id):
+	feed = feeds.BY_ID.get(feed_id)
+	if feed is None:
+		return flask.jsonify({'error': 'Feed desconhecido.'}), 404
+	if feeds.is_refreshing(feed):
+		return flask.jsonify({'error': 'Este feed já está sendo atualizado.'}), 409
+	start_feed_refresh(feed)
+	return flask.jsonify({'started': True, 'feedStatus': feed_states()}), 202
+
+
+# Turn on the feeds whose licence is clean and whose size is small, in one click.
+# What is switched on and where it is downloaded from is shown on the screen
+# before this is called; nothing is downloaded until an admin asks for it.
+@app.route('/api/feeds/recommended', methods = ['POST'])
+@requires_admin
+def enable_recommended_feeds():
+	config = analyzers.load_config()
+	started = []
+	for feed in feeds.FEEDS:
+		if not feed['recommended']:
+			continue
+		config[feed['id']]['enabled'] = True
+		started.append(feed)
+	try:
+		analyzers.save_config(config)
+	except Exception:
+		print("[ERROR]_[thephish_app]: Error while saving the analyzer configuration: {}".format(traceback.format_exc()))
+		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'}), 500
+	for feed in started:
+		if feeds.status(feed)['status'] != 'fresh':
+			start_feed_refresh(feed)
+	return flask.jsonify({'config': analyzers.public_config(config), 'feedStatus': feed_states(),
+		'enabled': [feed['id'] for feed in started]})
 
 
 # Run one analyzer against a value the analyst typed, and report both the raw
@@ -3632,7 +3897,11 @@ def update_ticket_destination(destination_id):
 def test_ticket_destination(destination_id):
 	config = tickets.load_config()
 	submitted = flask.request.get_json(silent = True) or {}
-	entry, error = tickets.validate_entry(destination_id, submitted, config.get(destination_id, {}))
+	# `probing`: o que sai daqui vai ser chamado em seguida, então o endereço
+	# passa pela trava mesmo quando é o já gravado de um destino desligado — a
+	# única situação em que o salvar a dispensa
+	entry, error = tickets.validate_entry(destination_id, submitted, config.get(destination_id, {}),
+		probing = True)
 	if error:
 		return flask.jsonify({'ok': False, 'detail': '', 'error': error})
 	result = tickets.probe(destination_id, entry)
@@ -4074,8 +4343,7 @@ def redphish_case_tag():
 	match cases opened by other tooling) — keep the card's tags in step with it.
 	"""
 	try:
-		with open('configuration.json') as conf_file:
-			tags = json.load(conf_file).get('case', {}).get('tags', [])
+		tags = config_file.read('configuration.json').get('case', {}).get('tags', [])
 		return tags[-1] if tags else ''
 	except Exception:
 		return ''
@@ -4271,10 +4539,14 @@ def thehive_observables_for(case_ids):
 	One request per case through a green pool. A case whose fetch fails
 	contributes an empty list rather than failing the whole dashboard.
 	"""
-	base_url, apikey = thehive_settings()
+	# Decided before the settings are read: `observables_for` calls this for
+	# every listing, with nothing to fetch whenever the history comes from disk
+	# or Jira. An installation that never had TheHive must not need a `thehive`
+	# section in its configuration to list its own cases
 	case_ids = [case_id for case_id in case_ids if case_id]
 	if not case_ids:
 		return {}
+	base_url, apikey = thehive_settings()
 
 	def fetch(case_id):
 		try:
@@ -4331,9 +4603,20 @@ def api_cases():
 		limit = max(1, min(int(flask.request.args.get('limit', CASES_DEFAULT_PAGE_SIZE)), CASES_MAX_PAGE_SIZE))
 	except ValueError:
 		limit = CASES_DEFAULT_PAGE_SIZE
+	# Opening a case from its address (/done/<ref>) asks for one record by the
+	# reference the detail route takes. A link outlives the window the archive was
+	# showing, so the period is ignored: the case is looked for in the whole history
+	ref = (flask.request.args.get('ref') or '').strip()
+	if ref:
+		# A reference comes from an address anybody can type. One that cannot be a
+		# reference names nothing, and does not earn a read of the whole history
+		if not case_insights.valid_record_ref(ref):
+			return flask.jsonify({'cases': [], 'counts': {}, 'total': 0, 'shown': 0, 'range': 'all',
+				'notice': '', 'partial': False, 'truncated': False})
+		range_key = 'all'
 
 	try:
-		cases, known_observables, _truncated, failures = select_cases(range_key)
+		cases, known_observables, truncated, failures = select_cases(range_key)
 	except Exception:
 		print("[ERROR]_[thephish_app]: Error while reading the analysis history: {}".format(traceback.format_exc()))
 		return flask.jsonify({'error': 'Não foi possível consultar os registros.', 'cases': [], 'counts': {}, 'total': 0})
@@ -4342,6 +4625,9 @@ def api_cases():
 	# filters match nothing" are different situations with different answers, and
 	# only the first one is worth explaining
 	window_empty = not cases
+
+	if ref:
+		cases = case_insights.with_record_ref(cases, ref)
 
 	# The work queues ask for what still waits on a person. A record somebody has
 	# already reclassified is decided, and a queue that keeps showing it is not a
@@ -4408,7 +4694,11 @@ def api_cases():
 		'shown': len(rows),
 		'range': range_key,
 		'notice': notice,
-		'partial': bool(failures)
+		'partial': bool(failures),
+		# The history was cut at its ceiling (case_insights.MAX_CASES): a record
+		# older than the cut is not "missing", it was not looked at. A lookup by
+		# reference needs to tell the two apart
+		'truncated': bool(truncated)
 	})
 
 
@@ -4439,6 +4729,7 @@ def api_case_detail(case_ref):
 			history_rows = reclassification.history_for(context.get('recordRef', ''))
 		except Exception:
 			unavailable = True
+	record_keys = case_scope.keys_for(context.get('recordRef', ''))
 
 	return flask.jsonify({
 		'caseNumber': context['caseNumber'],
@@ -4468,8 +4759,14 @@ def api_case_detail(case_ref):
 		# enforced again on submit (decide_reclassification)
 		'decisionTargets': [] if unavailable else reclassification.targets_for(effective),
 		'errataEnabled': errata_enabled(),
-		'reporterKnown': bool((case_scope.keys_for(context.get('recordRef', '')) or {}).get('reporter')),
-		'canTeach': flask_login.current_user.has_role_at_least(models.ROLE_ADMIN),
+		'reporterKnown': bool((record_keys or {}).get('reporter')),
+		# Os hosts e IPs acusados, para a janela de reclassificação perguntar quais
+		# a analista verificou. Só o necessário para a tela: chave, valor e quem acusou
+		'flaggedIndicators': [{'key': item.get('key'), 'value': item.get('value'),
+			'level': item.get('level'), 'analyzers': item.get('analyzers') or []}
+			for item in flagged_indicators(context, record_keys)],
+		# Ensinar a memória é o poder de uma regra de whitelist: a mesma ação do perfil
+		'canTeach': access_profiles.can_open_item(flask_login.current_user, 'action.whitelist_edit'),
 		'learned': verdict_memory.for_decision(decision.get('id')) if decision else [],
 		'body': context['body']
 	})
@@ -4562,11 +4859,12 @@ def api_case_reanalyze(case_ref):
 	if not case_result:
 		auth.audit('case_reanalyze', username = case_ref, status = 'failed', detail = 'extração falhou')
 		return flask.jsonify({'error': 'A mensagem guardada não pôde ser processada; veja o log da análise.'})
-	observables, reporter, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals = case_result
+	observables, reporter, subject_field, email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals, extraction_complete = case_result
 	outcome = {}
 	verdict, llm_result, score_result = run_analysis.main(wsl, observables, reporter, subject_field,
 		email_body, auth_results, images, eml_bytes, observables_seen, bulk_signals,
-		notify = False, report_of = keys.get('reportKey') or case_ref, produced = outcome)
+		notify = False, report_of = keys.get('reportKey') or case_ref, produced = outcome,
+		extraction_complete = extraction_complete)
 	if verdict is None:
 		auth.audit('case_reanalyze', username = case_ref, status = 'failed', detail = 'análise falhou')
 		return flask.jsonify({'error': 'A reanálise não chegou a um veredito; veja o log da análise.'})
@@ -4800,13 +5098,15 @@ def false_positive_follow_up(decision, target, keys, username):
 	  * `memoryScope` — `case` (só este caso, o padrão), `content` (a mensagem
 	    idêntica) ou `sender` (a mensagem idêntica, mais uma proposta de regra de
 	    whitelist para o remetente, que um admin aprova).
+
+	E um passo que não é opt-in: os hosts e IPs que os analisadores acusaram viram
+	precedente (learn_indicator_precedents), porque precedente não rebaixa nada.
 	"""
 	outcomes = []
 
 	if (flask.request.form.get('notifyReporter') or '') == '1':
 		try:
-			with open('configuration.json') as conf_file:
-				notif_conf = json.load(conf_file).get('notification', {}) or {}
+			notif_conf = config_file.read('configuration.json').get('notification', {}) or {}
 		except Exception:
 			notif_conf = {}
 		reporter = (keys or {}).get('reporter') or ''
@@ -4817,6 +5117,8 @@ def false_positive_follow_up(decision, target, keys, username):
 			print("[ERROR]_[thephish_app]: Error while sending the errata: {0}".format(traceback.format_exc()))
 			outcomes.append({'destination': errata.DESTINATION, 'ok': False, 'detail': 'falha inesperada no envio'})
 
+	outcomes.append(learn_indicator_precedents(decision, target, keys, username))
+
 	scope = (flask.request.form.get('memoryScope') or verdict_memory.SCOPE_CASE).strip()
 	if scope in (verdict_memory.SCOPE_CONTENT, verdict_memory.SCOPE_SENDER):
 		# Ensinar a memória é o mesmo poder de uma regra de whitelist — rebaixa
@@ -4824,11 +5126,12 @@ def false_positive_follow_up(decision, target, keys, username):
 		# não na tela: uma conta de analista comprometida que marcasse uma campanha
 		# como legítima e a ensinasse liberaria toda cópia seguinte dela, e diria
 		# "seguro" a cada pessoa que a denunciasse
-		if not flask_login.current_user.has_role_at_least(models.ROLE_ADMIN):
+		# Quem decide é o perfil de acesso (ação whitelist_edit); sem perfil, admin
+		if not access_profiles.can_open_item(flask_login.current_user, 'action.whitelist_edit'):
 			auth.audit('verdict_memory_learn', username = target['recordRef'], status = 'denied',
-				detail = 'escopo={0} exige admin'.format(scope))
+				detail = 'escopo={0} exige a ação de editar a whitelist'.format(scope))
 			outcomes.append({'destination': 'Memória de vereditos', 'ok': False,
-				'detail': 'não aprendida: liberar mensagens futuras exige perfil de admin'})
+				'detail': 'não aprendida: liberar mensagens futuras exige a permissão de editar a whitelist'})
 		elif not keys or not keys.get('contentKey'):
 			# Dito por extenso: a analista pediu para a lição valer e ela não vale
 			outcomes.append({'destination': 'Memória de vereditos', 'ok': False,
@@ -4854,10 +5157,58 @@ def false_positive_follow_up(decision, target, keys, username):
 	return outcomes
 
 
+def flagged_indicators(context, keys):
+	"""Os hosts e IPs que os analisadores acusaram neste registro.
+
+	Da impressão digital da análise; uma anterior à coluna (None) recorre aos
+	observáveis que o registro marcou como IoC.
+	"""
+	flagged = (keys or {}).get('flagged')
+	if flagged is None:
+		flagged = verdict_memory.flagged_from_report({'observables': context.get('observables') or []})
+	return flagged
+
+
+def learn_indicator_precedents(decision, target, keys, username):
+	"""Grava como precedente cada host ou IP que um analisador acusou no caso corrigido.
+
+	Só os que a analista marcou como verificados (campo `indicators`), e para
+	quem pode reclassificar — não só admin, ao contrário do escopo da memória
+	logo abaixo: o precedente não rebaixa nada (verdict_memory.py). Ele vai para a
+	IA e para o passo a passo das análises seguintes, e vira proposta de regra que
+	só um admin aceita.
+	"""
+	flagged = flagged_indicators(target, keys)
+	if not flagged:
+		return {'destination': 'Precedentes de indicador', 'ok': True,
+			'detail': 'nenhum host ou IP acusado por analisador neste caso: nada a registrar'}
+	# Só o que a analista marcou como verificado na janela de reclassificação
+	flagged = verdict_memory.select_indicators(flagged,
+		verdict_memory.parse_chosen_keys(flask.request.form.get('indicators')))
+	if not flagged:
+		return {'destination': 'Precedentes de indicador', 'ok': True,
+			'detail': 'nenhum host marcado como verificado: nada registrado como precedente'}
+	try:
+		learned = verdict_memory.learn_indicators(decision, flagged, username)
+	except Exception:
+		print("[ERROR]_[thephish_app]: Error while recording the indicator precedents: {0}".format(traceback.format_exc()))
+		return {'destination': 'Precedentes de indicador', 'ok': False,
+			'detail': 'não foi possível registrar os hosts acusados como precedente'}
+	if not learned:
+		return {'destination': 'Precedentes de indicador', 'ok': True,
+			'detail': 'nenhum host ou IP acusado pôde ser registrado como precedente'}
+	auth.audit('verdict_memory_precedent', username = target['recordRef'], status = 'ok',
+		detail = ','.join(m['key'] for m in learned)[:300])
+	values = [verdict_memory.split_key(m['key'])[1] for m in learned]
+	return {'destination': 'Precedentes de indicador', 'ok': True,
+		'detail': ('{0} registrado(s) como falso positivo: a IA passa a considerar esta decisão quando '
+			'eles forem acusados de novo, e cada um virou proposta de regra de whitelist em Aprendido').format(
+			', '.join(values[:5]) + (' e mais {0}'.format(len(values) - 5) if len(values) > 5 else ''))}
+
+
 def errata_enabled():
 	try:
-		with open('configuration.json') as conf_file:
-			return errata.enabled(json.load(conf_file).get('notification', {}) or {})
+		return errata.enabled(config_file.read('configuration.json').get('notification', {}) or {})
 	except Exception:
 		return False
 
@@ -4974,9 +5325,422 @@ def api_insights_windows():
 	return flask.jsonify(payload)
 
 
+# =============================================================================
+# Panorama externo
+#
+# O que a comunidade de segurança publicou sobre phishing, coletado em segundo
+# plano de um catálogo fixo (threat_intel.py, threat_intel_sync.py) e cruzado com
+# os casos do período. Nenhuma rota recebe endereço: ligar uma fonte é escolher
+# um id do catálogo, então isto não é um novo jeito de fazer o servidor chamar
+# alguém (BLUEPHISH_ARCHITECTURE.md §4.8.2).
+# =============================================================================
 
-# flask_socketio uses the first async server it finds (eventlet, then gevent)
-# and falls back to Werkzeug when neither is installed
+THREAT_INTEL_LOOP_SECONDS = 60
+# No mesmo cache dos painéis, com um prefixo que não colide com chave de período:
+# a reclassificação que limpa os insights também limpa o cruzamento
+THREAT_INTEL_CACHE_PREFIX = '__intel__:'
+
+
+def threat_intel_loop():
+	while True:
+		socketio.sleep(THREAT_INTEL_LOOP_SECONDS)
+		try:
+			config = threat_intel_sync.load_config()
+			results = threat_intel_sync.refresh_due(config, offload = analyzers.run_off_hub)
+			if results:
+				forget_threat_intel()
+			# No modo automático, o resumo do período padrão é refeito quando a coleta
+			# trouxe publicação nova — e só então, para não gastar token à toa
+			summary = config['summary']
+			if summary['enabled'] and summary['mode'] == 'auto' and any(
+					result.get('added') for result in results.values()):
+				refresh_threat_intel_summary(threat_intel.DEFAULT_PERIOD, config)
+		except Exception:
+			print("[ERROR]_[threat_intel]: refresh loop failed: {0}".format(traceback.format_exc()))
+
+
+def refresh_threat_intel_summary(period, config):
+	now = time.time()
+	store = threat_intel_sync.read_store()
+	payload = threat_intel.build_panorama(store['items'], store['collectingSince'], period, now)
+	try:
+		threat_intel_summary.generate(payload['items'], period, payload['period']['label'], config['summary'], now)
+	except threat_intel_summary.SummaryError as error:
+		print("[WARNING]_[threat_intel]: automatic summary not generated: {0}".format(error))
+	forget_threat_intel()
+
+
+def forget_threat_intel():
+	for key in [key for key in insights_cache if str(key).startswith(THREAT_INTEL_CACHE_PREFIX)]:
+		insights_cache.pop(key, None)
+
+
+def threat_intel_states(config, now):
+	state = threat_intel_sync.read_state()
+	return dict((source['id'], threat_intel_sync.source_status(source, state, now))
+		for source in threat_intel_sync.enabled_sources(config))
+
+
+def threat_intel_local(start, end, now):
+	"""Os sinais dos temas medíveis nos casos de ameaça do período. -> (local, destinos não lidos)"""
+	range_key = threat_intel.covering_range(start, now, case_insights.RANGE_DAYS)
+	cases, known_observables, _truncated, failures = select_cases(range_key)
+	threat = case_insights.threat_cases(cases)
+	observables = observables_for(threat, known_observables)
+	local = threat_intel.local_signals(threat, observables, case_insights.case_verdict,
+		case_insights.case_started_at, int(start * 1000), int(end * 1000), feeds.SHARED_HOSTS)
+	return local, failures
+
+
+def threat_intel_sources_payload(config, now):
+	state = threat_intel_sync.read_state()
+	return {
+		'sources': [dict(
+			id = source['id'], name = source['name'], kind = source['kind'], lang = source['lang'],
+			site = source['site'], url = source['url'], recommended = source['recommended'],
+			enabled = config['sources'].get(source['id'], False),
+			**threat_intel_sync.source_status(source, state, now)
+		) for source in threat_intel.SOURCES],
+		'intervalMinutes': threat_intel_sync.INTERVAL_MINUTES
+	}
+
+
+def start_threat_intel_refresh(source):
+	def run():
+		threat_intel_sync.refresh(source, offload = analyzers.run_off_hub)
+		forget_threat_intel()
+	socketio.start_background_task(run)
+
+
+@app.route('/api/threat-intel', methods = ['GET'])
+@requires_analyst
+def api_threat_intel():
+	now = time.time()
+	period = threat_intel.normalize_period(flask.request.args.get('period', threat_intel.DEFAULT_PERIOD), now)
+	cache_key = THREAT_INTEL_CACHE_PREFIX + period
+	cached = insights_cache.get(cache_key)
+	if cached is not None and cached[0] > now:
+		return flask.jsonify(cached[1])
+
+	try:
+		config = threat_intel_sync.load_config()
+		store = threat_intel_sync.read_store()
+		start, end, _label = threat_intel.period_bounds(period, now)
+		# O cruzamento depende dos destinos que gravam o histórico. Se eles não
+		# responderem, o panorama sai sem o lado "aqui" — e diz isso — em vez de
+		# não sair: o que o mundo publicou não depende do TheHive estar de pé
+		local, unread, local_error = None, [], False
+		try:
+			local, unread = threat_intel_local(start, end, now)
+		except Exception:
+			print("[ERROR]_[thephish_app]: Error while crossing the panorama with the cases: {}".format(
+				traceback.format_exc()))
+			local_error = True
+		payload = threat_intel.build_panorama(store['items'], store['collectingSince'], period, now,
+			local, threat_intel_states(config, now))
+		payload['localUnread'] = unread
+		payload['localError'] = local_error
+		payload['generatedAt'] = int(now * 1000)
+		payload['summaryEnabled'] = config['summary']['enabled']
+		payload['summary'] = threat_intel_summary.view(period, payload['items']) \
+			if config['summary']['enabled'] else None
+	except Exception:
+		print("[ERROR]_[thephish_app]: Error while building the external panorama: {}".format(traceback.format_exc()))
+		return flask.jsonify({'error': 'Não foi possível montar o panorama externo.'})
+
+	insights_cache[cache_key] = (now + INSIGHTS_CACHE_TTL_SECONDS, payload)
+	return flask.jsonify(payload)
+
+
+# O catálogo e o estado de cada fonte. Lido por quem vê o panorama, porque a tela
+# precisa dizer de onde vem o que mostra; alterado só por admin.
+@app.route('/api/threat-intel/sources', methods = ['GET'])
+@requires_analyst
+def api_threat_intel_sources():
+	return flask.jsonify(threat_intel_sources_payload(threat_intel_sync.load_config(), time.time()))
+
+
+@app.route('/api/threat-intel/sources', methods = ['POST'])
+@requires_admin
+def api_threat_intel_sources_save():
+	wanted = json_object().get('sources')
+	if not isinstance(wanted, dict):
+		return flask.jsonify({'error': 'Informe as fontes a ligar.'}), 400
+	config = threat_intel_sync.load_config()
+	before = dict(config['sources'])
+	for source_id, enabled in wanted.items():
+		if source_id in config['sources']:
+			config['sources'][source_id] = enabled is True
+	try:
+		config = threat_intel_sync.save_config(config)
+	except Exception:
+		print("[ERROR]_[thephish_app]: Error while saving the panorama sources: {}".format(traceback.format_exc()))
+		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'}), 500
+	changed = sorted('{0}={1}'.format(source_id, 'on' if enabled else 'off')
+		for source_id, enabled in config['sources'].items() if before.get(source_id) != enabled)
+	auth.audit('threat_intel_sources', status = 'ok', detail = ' '.join(changed)[:300])
+	now = time.time()
+	state = threat_intel_sync.read_state()
+	for source in threat_intel_sync.enabled_sources(config):
+		if not before.get(source['id']) and threat_intel_sync.source_status(source, state, now)['status'] != 'fresh':
+			start_threat_intel_refresh(source)
+	forget_threat_intel()
+	return flask.jsonify(threat_intel_sources_payload(config, now))
+
+
+# Liga o pacote recomendado num clique. A lista do que vai ser ligado está na
+# tela antes do clique; nada é baixado até um admin pedir.
+@app.route('/api/threat-intel/recommended', methods = ['POST'])
+@requires_admin
+def api_threat_intel_recommended():
+	config = threat_intel_sync.load_config()
+	for source in threat_intel.SOURCES:
+		if source['recommended']:
+			config['sources'][source['id']] = True
+	try:
+		config = threat_intel_sync.save_config(config)
+	except Exception:
+		print("[ERROR]_[thephish_app]: Error while saving the panorama sources: {}".format(traceback.format_exc()))
+		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'}), 500
+	auth.audit('threat_intel_sources', status = 'ok', detail = 'pacote recomendado ligado')
+	now = time.time()
+	state = threat_intel_sync.read_state()
+	for source in threat_intel_sync.enabled_sources(config):
+		if threat_intel_sync.source_status(source, state, now)['status'] != 'fresh':
+			start_threat_intel_refresh(source)
+	return flask.jsonify(threat_intel_sources_payload(config, now))
+
+
+# Gera o resumo do período agora. Aberto a quem vê o panorama — é quem lê o
+# resumo —, mas limitado por hora: cada pedido é uma chamada paga ao provedor.
+def threat_intel_summary_limit_key():
+	# Por pessoa, não por IP: atrás do mesmo NAT (ou do gateway do Docker) toda a
+	# equipe dividiria o mesmo balde, e uma pessoa esgotaria o resumo das outras
+	return 'intel-summary:' + str(flask_login.current_user.get_id())
+
+
+def json_object():
+	"""O corpo JSON, ou {} quando não é um objeto: uma lista no corpo não pode virar 500."""
+	body = flask.request.get_json(silent = True)
+	return body if isinstance(body, dict) else {}
+
+
+# O balde é por pessoa: um pedido sem sessão cai no balde de "None", que não é o
+# de ninguém, e a rota o recusa em seguida.
+@app.route('/api/threat-intel/summary', methods = ['POST'])
+@requires_analyst
+@limiter.limit('6 per hour', key_func = threat_intel_summary_limit_key)
+def api_threat_intel_summary():
+	config = threat_intel_sync.load_config()
+	if not config['summary']['enabled']:
+		return flask.jsonify({'error': 'O resumo por IA está desligado em Configurações › IA.'}), 409
+	body = json_object()
+	now = time.time()
+	period = threat_intel.normalize_period(str(body.get('period') or ''), now)
+	store = threat_intel_sync.read_store()
+	payload = threat_intel.build_panorama(store['items'], store['collectingSince'], period, now)
+	try:
+		threat_intel_summary.generate(payload['items'], period, payload['period']['label'], config['summary'], now)
+	except threat_intel_summary.SummaryError as error:
+		return flask.jsonify({'error': str(error)}), 502
+	forget_threat_intel()
+	return flask.jsonify({'summary': threat_intel_summary.view(period, payload['items'])})
+
+
+@app.route('/api/threat-intel/summary-config', methods = ['GET'])
+@requires_admin
+def api_threat_intel_summary_config():
+	return flask.jsonify(threat_intel_sync.load_config()['summary'])
+
+
+@app.route('/api/threat-intel/summary-config', methods = ['POST'])
+@requires_admin
+def api_threat_intel_summary_config_save():
+	body = json_object()
+	config = threat_intel_sync.load_config()
+	config['summary'] = dict(config['summary'], **dict((key, body[key])
+		for key in ('enabled', 'model', 'mode', 'length') if key in body))
+	try:
+		saved = threat_intel_sync.save_config(config)
+	except Exception:
+		print("[ERROR]_[thephish_app]: Error while saving the summary settings: {}".format(traceback.format_exc()))
+		return flask.jsonify({'error': 'Não foi possível gravar a configuração.'}), 500
+	summary = saved['summary']
+	auth.audit('threat_intel_summary_config', status = 'ok',
+		detail = 'enabled={0} model={1} mode={2} length={3}'.format(summary['enabled'], summary['model'][:80],
+			summary['mode'], summary['length']))
+	forget_threat_intel()
+	return flask.jsonify(summary)
+
+
+@app.route('/api/threat-intel/sources/<source_id>/refresh', methods = ['POST'])
+@requires_admin
+def api_threat_intel_refresh(source_id):
+	source = threat_intel.BY_ID.get(source_id)
+	if source is None:
+		return flask.jsonify({'error': 'Fonte desconhecida.'}), 404
+	if threat_intel_sync.is_refreshing(source):
+		return flask.jsonify({'error': 'Esta fonte já está sendo atualizada.'}), 409
+	start_threat_intel_refresh(source)
+	return flask.jsonify({'started': True}), 202
+
+
+
+# --- Certificados TLS (Configurações → Certificados) ---------------------------
+# global_admin: trocar o certificado do vhost é trocar o que o navegador de todo
+# mundo confia, e a CA interna é o que o frontend aceita como API. A regra mora em
+# cert_store e acme_client; a chave privada entra por aqui e nunca sai.
+
+CERT_LOOP_SECONDS = 12 * 3600
+# A primeira conferência sai logo depois da subida: um contêiner reiniciado com o
+# certificado a dias de vencer não espera 12 h
+CERT_FIRST_CHECK_SECONDS = 300
+
+
+def _cert_payload():
+	return {
+		'certificates': cert_store.describe_all(),
+		'letsencrypt': acme_client.settings(),
+		'staging': acme_client.STAGING,
+		'production': acme_client.PRODUCTION
+	}
+
+
+def _cert_refusal(event, error):
+	auth.audit(event, status = 'refused', detail = str(error)[:300])
+	body = {'error': str(error)}
+	# A troca de um certificado de CA por um autoassinado pede confirmação
+	# (cert_store, decisão 7): a tela pergunta e reenvia com confirm=true
+	if isinstance(error, cert_store.NeedsConfirmation):
+		body['confirm'] = True
+		return flask.jsonify(body), 409
+	return flask.jsonify(body), 400
+
+
+def _confirmed():
+	return flask.request.form.get('confirm') in ('1', 'true', 'on')
+
+
+def _upload(name):
+	item = flask.request.files.get(name)
+	return item.read(cert_store.MAX_UPLOAD_BYTES + 1) if item else b''
+
+
+def _cert_saved(event, described):
+	auth.audit(event, status = 'ok', detail = 'certificado={0} assunto={1} validade={2} sha256={3}'.format(
+		described['id'], described.get('subject'), described.get('notAfter'), (described.get('fingerprint') or '')[:16]))
+	return flask.jsonify(_cert_payload())
+
+
+@app.route('/cert-config', methods = ['GET'])
+@requires_global_admin
+def get_cert_config():
+	return flask.jsonify(_cert_payload())
+
+
+@app.route('/cert-config/pem', methods = ['POST'])
+@requires_global_admin
+def upload_cert_pem():
+	try:
+		described = cert_store.import_pem(cert_store.VHOST, _upload('certificate'), _upload('key'), _upload('chain'),
+			flask.request.form.get('password') or None, confirmed = _confirmed())
+	except cert_store.CertError as error:
+		return _cert_refusal('cert_import', error)
+	return _cert_saved('cert_import', described)
+
+
+@app.route('/cert-config/pfx', methods = ['POST'])
+@requires_global_admin
+def upload_cert_pfx():
+	try:
+		described = cert_store.import_pfx(cert_store.VHOST, _upload('pfx'), flask.request.form.get('password') or None,
+			confirmed = _confirmed())
+	except cert_store.CertError as error:
+		return _cert_refusal('cert_import', error)
+	return _cert_saved('cert_import', described)
+
+
+@app.route('/cert-config/selfsigned', methods = ['POST'])
+@requires_global_admin
+def generate_cert_self_signed():
+	try:
+		described = cert_store.generate_self_signed(flask.request.form.get('names') or '', confirmed = _confirmed())
+	except cert_store.CertError as error:
+		return _cert_refusal('cert_selfsigned', error)
+	return _cert_saved('cert_selfsigned', described)
+
+
+@app.route('/cert-config/internal', methods = ['POST'])
+@requires_global_admin
+def reissue_internal_cert():
+	# Reemitir com a mesma CA não pede nada ao frontend; trocar a CA pede que ele
+	# releia trust/ca.pem (o laço dele faz isso sozinho). Os dois valem para a API
+	# no próximo reinício dela, que é quando ela lê o certificado
+	rotate = flask.request.form.get('rotateCa') in ('1', 'true', 'on')
+	described = cert_store.issue_internal(rotate_ca = rotate)
+	auth.audit('cert_internal', status = 'ok', detail = 'trocou_ca={0} validade={1}'.format(rotate, described.get('notAfter')))
+	return flask.jsonify(_cert_payload())
+
+
+@app.route('/cert-config/letsencrypt', methods = ['POST'])
+@requires_global_admin
+def save_letsencrypt_config():
+	form = flask.request.form
+	domains, error = cert_store.validate_names(form.get('domains') or '', allow_ip = False)
+	if error:
+		return _cert_refusal('cert_letsencrypt', error)
+	email = (form.get('email') or '').strip()[:200]
+	if email and not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email):
+		return _cert_refusal('cert_letsencrypt', 'O e-mail de contato não é um endereço válido.')
+	staging = form.get('staging', 'true') in ('1', 'true', 'on')
+	auto_renew = form.get('autoRenew', 'true') in ('1', 'true', 'on')
+	acme_client.save_settings(domains, email, staging, auto_renew)
+	auth.audit('cert_letsencrypt', status = 'ok', detail = 'dominios={0} staging={1} renovar={2}'.format(
+		','.join(domains)[:200], staging, auto_renew))
+	return flask.jsonify(_cert_payload())
+
+
+@app.route('/cert-config/letsencrypt/issue', methods = ['POST'])
+@requires_global_admin
+def issue_letsencrypt_cert():
+	try:
+		described = acme_client.issue_now()
+	except acme_client.AcmeError as error:
+		return _cert_refusal('cert_letsencrypt_issue', error)
+	if described.get('staging'):
+		# Ensaio: emitiu e validou no staging, e não instalou (acme_client, decisão 2)
+		auth.audit('cert_letsencrypt_issue', status = 'ok', detail = 'staging nomes={0} (nada instalado)'.format(
+			','.join(described['names'])[:200]))
+		return flask.jsonify(dict(_cert_payload(), stagingOk = True))
+	return _cert_saved('cert_letsencrypt_issue', described)
+
+
+def cert_renew_loop():
+	delay = CERT_FIRST_CHECK_SECONDS
+	while True:
+		socketio.sleep(delay)
+		delay = CERT_LOOP_SECONDS
+		try:
+			outcome = acme_client.renew_if_due()
+			if outcome:
+				auth.audit('cert_letsencrypt_renew', status = 'ok' if outcome == 'renewed' else 'failure',
+					detail = 'renovacao={0}'.format(outcome))
+		except Exception:
+			print("[ERROR]_[thephish_app]: Erro na renovação do certificado: {}".format(traceback.format_exc()))
+
+
+def _vhost_default_names():
+	# O nome público, se configurado, entra no autoassinado inicial: o navegador
+	# avisa de qualquer jeito, mas com o nome certo
+	names = ['localhost']
+	host = urlparse(os.environ.get('BLUEPHISH_BASE_URL', '') or '').hostname
+	if host and not cert_store.validate_names([host])[1]:
+		names.insert(0, host)
+	return names
+
+
+# If eventlet or gevent are installed, their wsgi server will be used
+# else Werkzeug will be used
 if __name__ == "__main__":
 	load_scheduler_config()
 	load_inbox_poll_config()
@@ -4987,6 +5751,19 @@ if __name__ == "__main__":
 	# ...and the queue is loaded behind it, a batch at a time, from page 1 of each
 	# end of the mailbox to the last page (inbox_loader_step)
 	socketio.start_background_task(inbox_loader_loop)
+	# Public feeds: refresh the enabled ones whose interval has passed
+	socketio.start_background_task(feeds_refresh_loop)
+	# Panorama externo: coleta as fontes ligadas cuja vez chegou
+	socketio.start_background_task(threat_intel_loop)
+	# Certificados: o que faltar (o do vhost e o interno) é gerado na subida, e o
+	# da Let's Encrypt renova sozinho (cert_store, acme_client)
+	try:
+		created = cert_store.ensure_defaults(_vhost_default_names())
+		if created:
+			print('[INFO]_[thephish_app]: certificados gerados na subida: {0}'.format(', '.join(created)))
+	except Exception:
+		print("[ERROR]_[thephish_app]: Erro ao preparar os certificados: {}".format(traceback.format_exc()))
+	socketio.start_background_task(cert_renew_loop)
 	# TLS is required: the session cookie is marked Secure, so the browser would
 	# refuse to send it back over plain HTTP. The certificate path can be
 	# overridden; when the files are missing a self-signed pair is generated on
@@ -4996,4 +5773,8 @@ if __name__ == "__main__":
 	if not (os.path.isfile(cert_file) and os.path.isfile(key_file)):
 		import generate_cert
 		generate_cert.ensure_self_signed(cert_file, key_file)
-	socketio.run(app, host='0.0.0.0', port=8080, certfile=cert_file, keyfile=key_file)
+	# No compose, só o endereço da rede backend (docker-compose.yml): a API também
+	# está na rede de saída, e escutar nela deixaria o host chegar na API por fora
+	# do vhost. Fora do compose, todas as interfaces, como sempre
+	socketio.run(app, host = os.environ.get('BLUEPHISH_LISTEN_ADDRESS') or '0.0.0.0', port = 8080,
+		certfile = cert_file, keyfile = key_file)

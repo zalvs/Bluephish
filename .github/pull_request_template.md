@@ -1,15 +1,9 @@
-**What this changes and why**
+**Issue fixed**
 
-The problem, in a sentence or two, and the approach taken. Link the issue it
-closes, if there is one (`Closes #...`).
+This pull request fixes issue # ...
+(If it does not fix any issue you can delete this part).
 
-**How it was checked**
+**Changes proposed in this pull request**
 
-The tests added or changed, and what you ran to see it work. A change to a
-module that only imports inside the container (`list_emails`, `email_provider`,
-`thephish_app`) needs to be proven there, not on the host.
+A clear and concise description of what are the changes proposed in this pull request.
 
-**Risk**
-
-What could this break silently? Say so even when the answer is "nothing I could
-find".

@@ -76,6 +76,7 @@ tornaria a de baixo inalcançável.
 """
 
 import json
+import config_file
 
 
 CONFIG_FILE = 'configuration.json'
@@ -168,7 +169,12 @@ DEFAULT_ANALYZER_WEIGHTS = {
 	'phishtank': 0.75,
 	'openphish': 0.70,
 	'abuseipdb': 0.65,
-	'otx': 0.60
+	'otx': 0.60,
+	# Feeds públicos: presença convicta, ausência não informa nada. O CERT Polska é
+	# curado; o Phishing.Database é compilação automática, então pesa menos
+	'certpl_domains': 0.70,
+	'phishingdb_links': 0.65,
+	'phishingdb_domains': 0.55
 }
 
 # Um analisador que o registro ganhar depois deste arquivo entra com peso médio em
@@ -231,8 +237,7 @@ def load_config(path = CONFIG_FILE):
 	"""
 	config = default_config()
 	try:
-		with open(path) as conf_file:
-			stored = json.load(conf_file).get(CONFIG_SECTION, {}) or {}
+		stored = config_file.read(path).get(CONFIG_SECTION, {}) or {}
 	except Exception:
 		return config
 	if not isinstance(stored, dict):
@@ -268,11 +273,9 @@ def load_config(path = CONFIG_FILE):
 
 
 def save_config(config, path = CONFIG_FILE):
-	with open(path) as conf_file:
-		conf_dict = json.load(conf_file)
+	conf_dict = config_file.read(path)
 	conf_dict[CONFIG_SECTION] = config
-	with open(path, 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, path)
 
 
 def _clamp_weight(raw):
@@ -619,6 +622,8 @@ def compute(verdict, reports_observables = None, llm_result = None, auth_results
 			spam_headers.summary(bulk))
 
 	raw = (numerator * 100.0 / denominator) if denominator > 0 else 0.0
+	# A média como saiu da conta, antes do teto: é o que os pontos dos fatores somam
+	average = raw
 	capped = False
 	if not conviction_evidence:
 		# Contexto sozinho não convicta. O teto é um ponto abaixo da faixa de
@@ -654,6 +659,7 @@ def compute(verdict, reports_observables = None, llm_result = None, auth_results
 		'tier': tier,
 		'label': label,
 		'raw': round(raw, 1),
+		'average': round(average, 1),
 		'floor': round(floor, 1),
 		'capped': capped,
 		'convictionEvidence': conviction_evidence,

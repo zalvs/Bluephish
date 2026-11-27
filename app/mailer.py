@@ -23,6 +23,7 @@ Duas decisões que valem explicar:
 """
 
 import json
+import config_file
 import re
 import smtplib
 import ssl
@@ -130,8 +131,7 @@ def load_config(path = CONFIG_FILE):
 	"""
 	config = default_config()
 	try:
-		with open(path) as conf_file:
-			stored = (json.load(conf_file).get(CONFIG_SECTION, {}) or {}).get(SMTP_KEY, {})
+		stored = (config_file.read(path).get(CONFIG_SECTION, {}) or {}).get(SMTP_KEY, {})
 	except Exception:
 		return config
 	if not isinstance(stored, dict):
@@ -143,13 +143,11 @@ def load_config(path = CONFIG_FILE):
 
 
 def save_config(entry, path = CONFIG_FILE):
-	with open(path) as conf_file:
-		conf_dict = json.load(conf_file)
+	conf_dict = config_file.read(path)
 	notification = conf_dict.get(CONFIG_SECTION, {})
 	notification[SMTP_KEY] = entry
 	conf_dict[CONFIG_SECTION] = notification
-	with open(path, 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, path)
 
 
 def public_config(entry):

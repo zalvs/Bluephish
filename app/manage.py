@@ -8,18 +8,22 @@
 # recreate the container and lose the bind mounts; the name is an identifier the
 # stack answers to, not the name of the product.
 #
-#   docker compose exec thephish python3 manage.py create-admin
-#   docker compose exec thephish python3 manage.py list-users
-#   docker compose exec thephish python3 manage.py reset-password <username>
-#   docker compose exec thephish python3 manage.py reset-mfa <username>
+#   docker compose exec bluephish python3 manage.py create-admin
+#   docker compose exec bluephish python3 manage.py list-users
+#   docker compose exec bluephish python3 manage.py reset-password <username>
+#   docker compose exec bluephish python3 manage.py reset-mfa <username>
+#   docker compose exec bluephish python3 manage.py captcha-off
+#   docker compose exec bluephish python3 manage.py vault-status
+#   docker compose exec bluephish python3 manage.py vault-seal
+#   docker compose exec bluephish python3 manage.py cert-import cert.pem key.pem [--chain chain.pem]
 #
 # The password is read with getpass (never echoed, never taken from argv, so it
 # does not end up in the shell history or in the process list).
 #
 # E duas leituras da metodologia de score, que nao tocam usuario nenhum:
 #
-#   docker compose exec thephish python3 manage.py weights
-#   docker compose exec thephish python3 manage.py score /tmp/amostra.eml
+#   docker compose exec bluephish python3 manage.py weights
+#   docker compose exec bluephish python3 manage.py score /tmp/amostra.eml
 import sys
 import getpass
 import argparse
@@ -158,6 +162,68 @@ def cmd_unlock(args):
 		return 0
 	finally:
 		session.close()
+
+
+# Saida de emergencia do reCAPTCHA. Uma chave errada, ou um proxy que bloqueia o
+# script do Google no navegador, deixa todo mundo sem login — inclusive quem
+# desligaria o captcha pela tela. Este comando grava o desligamento no arquivo;
+# BLUEPHISH_CAPTCHA_DISABLED=1 no ambiente faz o mesmo sem tocar nele.
+def cmd_captcha_off(args):
+	import security_policy
+	config = security_policy.load_config()
+	captcha = dict(config['captcha'], enabled = False)
+	security_policy.save_config(security_policy.merged({'captcha': captcha}))
+	print('reCAPTCHA desligado. O login volta a funcionar sem ele na proxima tentativa.')
+	return 0
+
+
+# Cofre de segredos (secret_vault.py). A subida da aplicacao ja cifra o que
+# estiver em texto; estes dois comandos dizem o estado e forcam a passagem sem
+# reiniciar. Nenhum dos dois mostra valor de segredo.
+def cmd_vault_status(args):
+	import config_file
+	import secret_vault
+	state = secret_vault.status(config_file.read_raw())
+	print('chave mestra: {0} ({1})'.format('presente, id ' + state['keyId'] if state['keyPresent'] else 'AUSENTE', state['keyFile']))
+	if state['keyError']:
+		print('erro na chave: {0}'.format(state['keyError']))
+	print('segredos cifrados: {0}   em texto: {1}   que nao abrem: {2}'.format(
+		state['sealed'], state['plaintext'], state['unreadable']))
+	return 1 if state['unreadable'] or (state['plaintext'] and state['keyPresent']) else 0
+
+
+def cmd_vault_seal(args):
+	import config_file
+	import secret_vault
+	if secret_vault.master_key() is None:
+		print('Sem chave mestra em {0}: nada a cifrar.'.format(secret_vault.key_file()))
+		return 1
+	print('{0} segredo(s) passaram para o cofre.'.format(config_file.migrate()))
+	return 0
+
+
+# Saida de emergencia dos certificados: um certificado errado no vhost (ou um
+# autoassinado por cima de um de CA, com o HSTS ja gravado nos navegadores)
+# deixa a tela de certificados fora de alcance. Daqui, de um terminal, o par
+# certo volta. Os arquivos precisam estar dentro do conteiner (docker cp).
+def cmd_cert_import(args):
+	import cert_store
+	with open(args.cert, 'rb') as handle:
+		cert_pem = handle.read()
+	with open(args.key, 'rb') as handle:
+		key_pem = handle.read()
+	chain_pem = b''
+	if args.chain:
+		with open(args.chain, 'rb') as handle:
+			chain_pem = handle.read()
+	try:
+		described = cert_store.import_pem(cert_store.VHOST, cert_pem, key_pem, chain_pem, confirmed = True)
+	except cert_store.CertError as error:
+		print('Recusado: {0}'.format(error))
+		return 1
+	print('Certificado do vhost trocado: {0}, valido ate {1}. O vhost recarrega em ate 30 s.'.format(
+		described['subject'], described['notAfter']))
+	return 0
 
 
 # --------------------------------------------------------------------------- #
@@ -372,6 +438,21 @@ def main():
 	p = sub.add_parser('unlock', help = 'clear the lockout of a user')
 	p.add_argument('username')
 	p.set_defaults(func = cmd_unlock)
+
+	p = sub.add_parser('captcha-off', help = 'desliga o reCAPTCHA do login (saida de emergencia)')
+	p.set_defaults(func = cmd_captcha_off)
+
+	p = sub.add_parser('vault-status', help = 'estado do cofre de segredos (sem mostrar valores)')
+	p.set_defaults(func = cmd_vault_status)
+
+	p = sub.add_parser('vault-seal', help = 'cifra os segredos que ainda estao em texto no configuration.json')
+	p.set_defaults(func = cmd_vault_seal)
+
+	p = sub.add_parser('cert-import', help = 'troca o certificado do vhost por um par PEM (saida de emergencia)')
+	p.add_argument('cert')
+	p.add_argument('key')
+	p.add_argument('--chain')
+	p.set_defaults(func = cmd_cert_import)
 
 	p = sub.add_parser('weights', help = 'mostra o ranking de fatores do score (Priorizacao)')
 	p.set_defaults(func = cmd_weights)

@@ -40,6 +40,7 @@ import re
 import requests
 
 import analyzers
+import config_file
 
 
 # Mesmo par de timeouts dos nativos: um destino firewalled falha rápido, um lento
@@ -118,7 +119,7 @@ def _is_forbidden_address(ip_text, allow_internal = False):
 
 	Sem ela, a regra é `is_global`: o que não é internet pública fica de fora. A
 	soma anterior (is_private, is_loopback, ...) esquecia 100.64.0.0/10 no
-	Python 3.8 da imagem, e comparava o endereço de metadados como texto — uma
+	Python 3.8 (a imagem até 11/2026), e comparava o endereço de metadados como texto — uma
 	grafia não canônica, ou o mesmo IPv4 dentro de um IPv6, passava.
 	"""
 	address = _canonical(ip_text)
@@ -376,8 +377,7 @@ def load_all(path = None):
 	import json
 	path = path or analyzers.CONFIG_FILE
 	try:
-		with open(path) as conf_file:
-			stored = json.load(conf_file).get(CONFIG_SECTION, [])
+		stored = config_file.read(path).get(CONFIG_SECTION, [])
 	except Exception:
 		return []
 	if not isinstance(stored, list):
@@ -388,11 +388,9 @@ def load_all(path = None):
 def save_all(definitions, path = None):
 	import json
 	path = path or analyzers.CONFIG_FILE
-	with open(path) as conf_file:
-		conf_dict = json.load(conf_file)
+	conf_dict = config_file.read(path)
 	conf_dict[CONFIG_SECTION] = definitions
-	with open(path, 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, path)
 
 
 def find(definitions, analyzer_id):

@@ -542,6 +542,84 @@ class LlmSummary(unittest.TestCase):
 		self.assertEqual(summary['socialEngineering'], 0)
 
 
+class ScoreView(unittest.TestCase):
+	"""A memória de cálculo precisa fechar com o número que a analista vê.
+
+	A tela mostrava `peso × fator` de cada linha, só as oito primeiras, sem o
+	denominador, o piso nem o teto: somar o que estava na tela dava 108 para um
+	score de 51,4, e um score de 40 que "devia ser 47" não tinha como ser
+	conferido. Cada linha agora traz os pontos que pôs no score, e os pontos
+	somam a média ponderada.
+	"""
+
+	def computed(self, verdict = 'Suspicious', **kwargs):
+		import scoring
+		reports = [
+			{'analyzer_id': 'VirusTotal', 'analyzer_result': 'suspicious'},
+			{'analyzer_id': 'URLhaus', 'analyzer_result': 'safe'},
+			{'analyzer_id': 'AbuseIPDB', 'analyzer_result': 'safe'},
+		]
+		return scoring.compute(verdict, reports,
+			{'social_engineering_detected': True, 'risk_level': 'Medium'},
+			{'spf': 'pass', 'dkim': 'none', 'dmarc': 'fail'}, None, **kwargs)
+
+	def test_points_add_up_to_the_weighted_average(self):
+		view = ci.score_view(self.computed())
+		total = sum(factor['points'] for factor in view['factors'])
+		self.assertAlmostEqual(total, view['raw'], delta = 0.2)
+
+	def test_no_participating_factor_is_dropped(self):
+		result = self.computed()
+		view = ci.score_view(result)
+		participating = [f for f in result['factors'] if f['participation'] > 0]
+		self.assertEqual(len(view['factors']), len(participating))
+
+	def test_floor_and_weight_total_are_carried(self):
+		view = ci.score_view(self.computed())
+		self.assertEqual(view['floor'], 40.0)
+		self.assertGreater(view['weightTotal'], 0)
+		# O piso do veredito aparece como motivo quando é ele que decide
+		low = ci.score_view(self.computed(verdict = 'Malicious'))
+		self.assertGreaterEqual(low['score'], low['raw'])
+
+	def test_ceiling_does_not_hide_the_average_the_points_add_up_to(self):
+		import scoring
+		# Só contexto — autenticação reprovada, analisador limpo, nada condenando: a
+		# média sai 75,9 e o teto segura o score em 49, um ponto abaixo de phishing
+		result = scoring.compute('Safe', [{'analyzer_id': 'VirusTotal', 'analyzer_result': 'safe'}], None,
+			{'spf': 'fail', 'dkim': 'fail', 'dmarc': 'fail'}, None)
+		self.assertTrue(result['capped'])
+		view = ci.score_view(result)
+		total = sum(factor['points'] for factor in view['factors'])
+		self.assertAlmostEqual(total, view['raw'], delta = 0.2)
+		self.assertEqual(view['ceiling'], result['tiers']['phishing'] - 1)
+		self.assertGreater(view['raw'], view['ceiling'])
+		self.assertEqual(view['score'], view['ceiling'])
+
+	def test_an_old_capped_record_does_not_claim_an_average_it_never_stored(self):
+		# Antes de `average` existir, `raw` era gravado já com o teto aplicado: a
+		# média real se perdeu, e mostrar `raw` como "média ponderada" faria os
+		# pontos das linhas somar mais do que o número exibido
+		old = {'score': 49.0, 'tier': 'suspicious', 'capped': True, 'raw': 49.0, 'floor': 0.0,
+			'weightTotal': 2.1, 'tiers': {'phishing': 50},
+			'factors': [{'label': 'x', 'contribution': 1.0, 'participation': 1.0, 'reason': ''}]}
+		view = ci.score_view(old)
+		self.assertIsNone(view['raw'])
+
+	def test_an_old_uncapped_record_keeps_its_raw_value(self):
+		old = {'score': 40.0, 'tier': 'suspicious', 'capped': False, 'raw': 40.0, 'floor': 0.0,
+			'weightTotal': 2.0, 'factors': []}
+		self.assertEqual(ci.score_view(old)['raw'], 40.0)
+
+	def test_a_record_written_before_the_fields_existed_still_renders(self):
+		old = {'score': 40.0, 'tier': 'suspicious', 'capped': False,
+			'factors': [{'label': 'VirusTotal', 'contribution': 0.25, 'participation': 1.0, 'reason': 'x'}]}
+		view = ci.score_view(old)
+		self.assertEqual(view['score'], 40.0)
+		self.assertIsNone(view['raw'])
+		self.assertIsNone(view['factors'][0]['points'])
+
+
 class Ranges(unittest.TestCase):
 
 	def test_all_means_no_lower_bound(self):
@@ -599,6 +677,43 @@ class WhyTheHistoryIsEmpty(unittest.TestCase):
 		# 'all' already covers everything; the cases counted outside it are the
 		# ones past MAX_CASES, and no range change reaches them
 		self.assertEqual(ci.empty_reason(recording = True, outside_window = 92, range_key = 'all'), '')
+
+
+class RecordLookup(unittest.TestCase):
+	"""Abrir um caso pelo endereço (/done/<ref>), seja qual for a idade dele.
+
+	O ref é o mesmo que a rota de detalhe aceita (`record_ref`): o número do caso
+	no TheHive, o `_id` com a origem nos demais.
+	"""
+
+	def test_a_thehive_case_is_found_by_its_number(self):
+		cases = [case(7), case(8)]
+		self.assertEqual([cases[1]], ci.with_record_ref(cases, '8'))
+
+	def test_a_record_from_another_source_is_found_by_its_id(self):
+		disk = {'source': 'disk', '_id': 'disk:2026-09-30-abc', 'title': 'Assunto'}
+		self.assertEqual([disk], ci.with_record_ref([case(1), disk], 'disk:2026-09-30-abc'))
+
+	def test_an_unknown_reference_finds_nothing(self):
+		self.assertEqual([], ci.with_record_ref([case(1), case(2)], '99'))
+
+	def test_an_empty_reference_never_means_every_case(self):
+		self.assertEqual([], ci.with_record_ref([case(1), case(2)], ''))
+
+	def test_the_number_is_not_matched_loosely(self):
+		# '1' não pode trazer o caso 12 só porque um contém o outro
+		self.assertEqual([], ci.with_record_ref([case(12)], '1'))
+
+	def test_every_reference_the_sources_produce_is_valid(self):
+		for ref in ('12', '~40968', 'disk:2026-09-30T14-02-11-Assunto.do.e-mail_1',
+				'jira:SOC-123', 'thehive:7', 'a' * 160):
+			self.assertTrue(ci.valid_record_ref(ref), ref)
+
+	def test_anything_else_is_not_a_reference(self):
+		# Quem decide se a busca alarga a janela para o histórico inteiro é este
+		# formato: um lixo qualquer em /done/<lixo> não pode custar uma leitura de tudo
+		for ref in ('', ' ', '../etc', 'a/b', 'a b', 'a%2fb', 'a?b', 'a#b', 'a\\b', 'a\nb', 'á', 'a' * 161, None, 12):
+			self.assertFalse(ci.valid_record_ref(ref), repr(ref))
 
 
 if __name__ == '__main__':

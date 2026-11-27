@@ -13,7 +13,12 @@ API REST por um conector genérico, ou o TheHive.
 - Lê caixas do **Gmail** e do **Microsoft 365**.
 - Verifica **SPF/DKIM/DMARC** do remetente e lê imagens embutidas com um modelo de visão.
 - Controle de acesso por papéis, **autenticação em dois fatores** obrigatória, SSO e trilha de auditoria.
-- Um contêiner. Todo o resto é opcional.
+- Sessão em JWT estrito, cofre de segredos (AES-256-GCM), perfis de acesso, limite por IP e reCAPTCHA opcional.
+- Feeds públicos de inteligência com consulta offline e um panorama externo de ameaças.
+- Quatro contêineres (vhost, frontend, API e PostgreSQL) em redes separadas, subidos por um script. TheHive, Jira e LLM são opcionais.
+
+> **Atualizando da 1.x?** Leia o [CHANGELOG](CHANGELOG.md) antes: a 2.0 passa para Python 3.14,
+> PostgreSQL e uma stack de quatro contêineres, e o contêiner antigo `thephish` precisa sair.
 
 O Bluephish nasceu inspirado no [ThePhish](https://github.com/emalderson/ThePhish) e hoje é
 um projeto independente. Se você conhece o original e quer ver como os dois se diferenciam,
@@ -26,7 +31,9 @@ leia [Bluephish e ThePhish](docs/bluephish-vs-thephish.md).
 | [Configuração](docs/configuracao.md) | Caixa de e-mail, IA, destinos, analisadores e a whitelist |
 | [Dúvidas gerais](docs/duvidas-gerais.md) | Como trocar o certificado, a porta, atualizar, fazer backup e outras perguntas comuns |
 | [Solução de problemas](docs/solucao-de-problemas.md) | O que fazer quando algo dá errado, sintoma por sintoma |
-| [Integrações opcionais](docs/integracoes.md) | TheHive e MISP |
+| [Integrações opcionais](docs/integracoes/thehive.md) | TheHive e MISP |
+| [DevSecOps](docs/devsecops.md) | A esteira de segurança do CI e o que ainda depende do dono do repositório |
+| [Novidades e atualização](CHANGELOG.md) | O que mudou em cada versão e como atualizar |
 | [Segurança](docs/seguranca.md) | Exposição de rede, autenticação e o que sai da máquina |
 | [Arquitetura](BLUEPHISH_ARCHITECTURE.md) | Modelo de dados, papéis, rotas e restrições conhecidas (em inglês) |
 | [Diagramas](diagrams.md) | O pipeline, a cadeia do veredito e a stack, desenhados a partir do código (em inglês) |
@@ -47,10 +54,11 @@ da imagem.
 - **Docker** com o **plugin Compose**. Confira: `docker compose version` precisa mostrar uma
   versão.
 - **Git**.
-- A porta **8080** livre na sua máquina.
-- **4 GB de RAM livres** e **2 GB de disco**. Em repouso a aplicação usa bem menos, mas a
-  construção da imagem e o carregamento das primeiras telas pedem mais memória, e o tempo
-  que isso dura depende da sua CPU.
+- As portas **443** e **80** livres na sua máquina (dá para trocar: veja
+  [Como mudo a porta](docs/duvidas-gerais.md#como-mudo-a-porta)).
+- **4 GB de RAM livres** e alguns GB de disco. Em repouso a stack usa bem menos, mas a
+  construção das imagens (o `yara-python` é compilado) pede mais memória, e o tempo que isso
+  dura depende da sua CPU.
 
 > **No Windows, execute os próximos passos pelo Git Bash, e não pelo PowerShell nem pelo
 > CMD.** O PowerShell não executa arquivos `.sh`: digitar `./setup.sh` lá apenas abre o
@@ -74,10 +82,11 @@ cd Bluephish
 ./setup.sh
 ```
 
-O script cria o `docker/.env` com uma chave de sessão recém-gerada, protege o arquivo de
-configuração que vai guardar suas credenciais, constrói a imagem, sobe o Bluephish e espera
-ele responder. A primeira execução leva alguns minutos. Pode ser executado de novo sem medo:
-nada que já esteja configurado é sobrescrito. As mensagens dele saem em inglês; no fim você
+O script cria o `docker/.env`, gera a chave mestra do cofre e a senha do PostgreSQL em
+`docker/secrets/`, protege o arquivo de configuração que vai guardar suas credenciais,
+constrói as imagens, sobe a stack e espera a interface responder. A primeira execução leva
+alguns minutos. Pode ser executado de novo sem medo: nada que já esteja configurado é
+sobrescrito. As mensagens dele saem em inglês; no fim você
 deve ver `Setup complete - one manual step left`.
 
 ### 5. Crie o primeiro administrador
@@ -86,21 +95,20 @@ deve ver `Setup complete - one manual step left`.
 
 ```bash
 cd docker
-docker compose exec thephish python3 manage.py create-admin
+docker compose exec bluephish python3 manage.py create-admin
 ```
 
 O comando pede um nome de usuário e uma senha (no mínimo **12 caracteres**), digitada duas
-vezes e nunca exibida na tela (isso exige um terminal interativo: use `docker compose exec` sem `-T`). (`thephish` é o nome do serviço no Docker e continua assim nos
-comandos.)
+vezes e nunca exibida na tela (isso exige um terminal interativo: use `docker compose exec` sem `-T`). (`bluephish` é o nome do serviço da API no Docker.)
 
 ### 6. Abra o Bluephish
 
-Acesse **<https://localhost:8080>**. Para conferir sem navegador, `curl -k -s -o /dev/null -w '%{http_code}' https://localhost:8080/login` deve imprimir `200`.
+Acesse **<https://localhost>**. Para conferir sem navegador, `curl -k -s -o /dev/null -w '%{http_code}' https://localhost/login` deve imprimir `200`.
 
 O certificado é autoassinado, então o navegador avisa uma vez: escolha *Avançado* e depois
 *Continuar para localhost* (no Firefox, *Aceitar o risco e continuar*). Use `https` e
 `localhost`: o login não funciona por HTTP puro, e a porta não é alcançável de outras
-máquinas, de propósito. Para usar um certificado seu, veja as
+máquinas, de propósito. Para usar um certificado seu (PEM, PFX ou Let's Encrypt), use **Configurações → Certificados**; detalhes nas
 [Dúvidas gerais](docs/duvidas-gerais.md#como-troco-o-certificado-https).
 
 ### 7. Entre e configure o segundo fator
@@ -183,14 +191,14 @@ O menu lateral tem três grupos: **PRINCIPAL** (as telas de trabalho), **ADMINIS
      permite reanalisar, reclassificar, bloquear indicadores e adicionar à whitelist.
    - **Visão Tática** mostra o phishing confirmado e a metodologia do score.
    - **Visão Executiva** resume os indicadores do período.
-   - **Chat AI** (no grupo PRINCIPAL) permite questionar um caso já analisado: informe o
-     número do caso, clique em **Carregar** e faça perguntas.
+   - O **Assistente IA**, ao lado do caso aberto, responde perguntas sobre aquele caso.
+   - **Panorama externo** cruza as notícias de ameaças das fontes públicas com os seus casos.
 
 ### Papéis
 
 | Papel | O que enxerga e pode fazer |
 |---|---|
-| `analyst` | Telas do grupo PRINCIPAL: listar e analisar e-mails, reanalisar um original guardado, decidir uma reclassificação, usar o Chat AI, ler a whitelist. Em **Minha conta**, troca a própria senha |
+| `analyst` | Telas do grupo PRINCIPAL: listar e analisar e-mails, reanalisar um original guardado, decidir uma reclassificação, usar o assistente IA do caso, ler a whitelist. Em **Minha conta**, troca a própria senha |
 | `admin` | Tudo isso **mais** Configurações, Integrações e Auditoria (exceto SSO corporativo e onde a trilha de auditoria é guardada), edições da whitelist e desfazer uma reclassificação |
 | `global_admin` | Tudo isso **mais** Usuários, reinício de senha e de segundo fator, SSO corporativo, o local da trilha de auditoria e regras permanentes da whitelist |
 
@@ -200,18 +208,18 @@ Rode a partir do diretório `docker/`.
 
 ```bash
 # Usuários
-docker compose exec thephish python3 manage.py create-admin        # primeiro global_admin
-docker compose exec thephish python3 manage.py create-user         # usuário adicional, qualquer papel
-docker compose exec thephish python3 manage.py list-users
-docker compose exec thephish python3 manage.py reset-password NOME
-docker compose exec thephish python3 manage.py reset-mfa NOME      # celular perdido ou trocado
-docker compose exec thephish python3 manage.py unlock NOME         # limpar o bloqueio de uma conta
+docker compose exec bluephish python3 manage.py create-admin        # primeiro global_admin
+docker compose exec bluephish python3 manage.py create-user         # usuário adicional, qualquer papel
+docker compose exec bluephish python3 manage.py list-users
+docker compose exec bluephish python3 manage.py reset-password NOME
+docker compose exec bluephish python3 manage.py reset-mfa NOME      # celular perdido ou trocado
+docker compose exec bluephish python3 manage.py unlock NOME         # limpar o bloqueio de uma conta
 
 # Em execução
-docker compose up -d --build thephish   # reconstrói depois de uma mudança no código
-docker compose logs -f thephish
-docker compose restart thephish
-docker compose down                     # para (os dados em vol/ são mantidos)
+docker compose up -d --build           # reconstrói depois de uma mudança no código
+docker compose logs -f bluephish        # a API (também: vhost, frontend, db)
+docker compose restart bluephish
+docker compose down                     # para (os dados em vol/ e secrets/ são mantidos)
 ```
 
 ## Onde ficam as coisas
@@ -220,11 +228,11 @@ docker compose down                     # para (os dados em vol/ são mantidos)
 |---|---|
 | `app/` | A aplicação, embutida na imagem na hora do build |
 | `docs/` | Documentação em português; a versão em inglês fica em `docs/en/` |
-| `docker/docker-compose.yml` | O Bluephish, ligado a `127.0.0.1` |
-| `docker/docker-compose.integrations.yml` | Os extras opcionais ([integrações](docs/integracoes.md)) |
-| `docker/.env` | **Segredos**: ignorado pelo git, criado pelo `setup.sh` |
+| `docker/docker-compose.yml` | Quatro serviços: `vhost` (as únicas portas publicadas, em `127.0.0.1` por padrão), `frontend`, `bluephish` (a API) e `db` (PostgreSQL) |
+| `docker/.env` | Ajustes da instalação: ignorado pelo git, criado pelo `setup.sh` |
+| `docker/secrets/` | **Faça backup à parte.** `master.key` (o cofre) e `db.password` (PostgreSQL), criados pelo `setup.sh` |
 | `docker/thephish_conf_files/` | Configuração viva, escrita pela aplicação |
-| `docker/vol/` | **Dados persistentes: faça backup.** Banco de dados, log de auditoria, mensagens guardadas, chaves TLS |
+| `docker/vol/` | **Dados persistentes: faça backup.** PostgreSQL em `vol/postgres/`, log de auditoria, mensagens guardadas, certificados |
 
 > **Rode sempre o `docker compose` a partir do diretório `docker/` deste repositório.** Todo
 > volume é relativo ao arquivo do compose, então rodá-lo a partir de uma cópia da árvore liga o

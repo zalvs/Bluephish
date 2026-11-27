@@ -3,10 +3,11 @@ import datetime
 import secrets
 import bcrypt
 import sqlalchemy
-from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime
+from sqlalchemy import Boolean, Column, Integer, LargeBinary, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
+import database
 import mfa
 
 # The three roles, ordered from the least to the most privileged. The index in
@@ -30,8 +31,9 @@ LOCKOUT_MINUTES = 15
 # long passphrase is accepted (NIST SP 800-63B discourages composition rules)
 MIN_PASSWORD_LENGTH = 12
 
-# The database lives next to the application. The directory is bind-mounted in
-# the compose file so that users survive a container rebuild
+# O SQLite, quando não há PostgreSQL configurado (database.py), mora ao lado da
+# aplicação, numa pasta montada pelo compose. Com o Postgres, é daqui que a
+# migração única lê os dados antigos
 DB_PATH = os.environ.get('THEPHISH_DB_PATH', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'thephish.db'))
 
 Base = declarative_base()
@@ -80,6 +82,11 @@ class User(Base):
 	# O último passo de tempo aceito, contra repetição do mesmo código dentro da
 	# janela de validade (ver mfa.verify)
 	mfa_last_counter = Column(Integer, nullable = True)
+
+	# --- Perfil de acesso (access_profiles.py) ---
+	# Nulo: valem as telas do cargo. Preenchido: valem as do perfil, para mais ou
+	# para menos que o cargo — exceto Usuários e perfis, que é do global_admin
+	profile_id = Column(Integer, nullable = True)
 
 	# --- Flask-Login interface ---
 	@property
@@ -174,7 +181,8 @@ class User(Base):
 			'mfaConfirmedAt': self.mfa_confirmed_at.strftime('%Y-%m-%d %H:%M:%S') if self.mfa_confirmed_at else None,
 			'locked': self.is_locked(),
 			'lockedUntil': self.locked_until.strftime('%Y-%m-%d %H:%M:%S') if self.locked_until else None,
-			'lastLogin': self.last_login.strftime('%Y-%m-%d %H:%M:%S') if self.last_login else None
+			'lastLogin': self.last_login.strftime('%Y-%m-%d %H:%M:%S') if self.last_login else None,
+			'profileId': self.profile_id
 		}
 
 
@@ -345,6 +353,50 @@ class AnalysisFingerprint(Base):
 	reporter = Column(String(320), nullable = False, default = '')
 	verdict = Column(String(16), nullable = False, default = '')
 	analyzed_at = Column(DateTime, nullable = False, default = datetime.datetime.utcnow, index = True)
+	# [{"key": "domain:host", "type", "value", "level", "analyzers": [...]}] — os
+	# hosts e IPs que um analisador acusou (verdict_memory.flagged_from_report).
+	# É o que uma reclassificação como legítimo transforma em precedente. Nulo numa
+	# impressão anterior à coluna: "não sabemos", diferente de "nada acusado"
+	flagged = Column(Text, nullable = True)
+
+
+class AccessProfile(Base):
+	"""Um perfil de acesso: o conjunto de telas e ações que quem o recebe pode usar.
+
+	`items` é uma lista JSON de ids do catálogo (access_profiles.CATALOGUE). O
+	perfil substitui o cargo para as telas — pode dar mais ou menos que ele —, e
+	o servidor confere o perfil em toda rota (access_profiles.ENDPOINT_ITEMS).
+	"""
+
+	__tablename__ = 'access_profile'
+
+	id = Column(Integer, primary_key = True)
+	name = Column(String(64), unique = True, nullable = False)
+	description = Column(String(300), nullable = False, default = '')
+	items = Column(Text, nullable = False, default = '[]')
+	created_at = Column(DateTime, nullable = False, default = datetime.datetime.utcnow)
+	updated_at = Column(DateTime, nullable = False, default = datetime.datetime.utcnow)
+
+
+class VaultSecret(Base):
+	"""Um segredo da configuração, cifrado com AES-256-GCM (ver secret_vault.py).
+
+	O configuration.json guarda só a referência (`vault:v1:<id>`); o valor mora
+	aqui, cifrado com uma chave derivada da chave mestra e do `salt` desta linha.
+	A chave mestra não está neste banco nem no volume dele — é um arquivo montado
+	à parte (BLUEPHISH_MASTER_KEY_FILE) —, de modo que copiar o banco não entrega
+	segredo nenhum. `key_id` diz com qual chave mestra a linha foi cifrada: trocar
+	a chave sem recifrar faz a linha falhar alto, não devolver lixo.
+	"""
+
+	__tablename__ = 'vault_secret'
+
+	id = Column(String(64), primary_key = True)
+	key_id = Column(String(32), nullable = False)
+	salt = Column(LargeBinary, nullable = False)
+	nonce = Column(LargeBinary, nullable = False)
+	ciphertext = Column(LargeBinary, nullable = False)
+	updated_at = Column(DateTime, nullable = False, default = datetime.datetime.utcnow)
 
 
 class VerdictMemory(Base):
@@ -373,10 +425,15 @@ class VerdictMemory(Base):
 	# 'sender': vira proposta de regra de whitelist, nunca rebaixa por si
 	SCOPE_CONTENT = 'content'
 	SCOPE_SENDER = 'sender'
+	# 'indicator': um host ou IP que um analisador acusou num falso positivo
+	# corrigido. Nunca rebaixa: informa a IA e a analista nas análises seguintes,
+	# e vira proposta de regra de whitelist (verdict_memory.learn_indicators)
+	SCOPE_INDICATOR = 'indicator'
 
 	id = Column(Integer, primary_key = True)
 	scope = Column(String(16), nullable = False, default = SCOPE_CONTENT, index = True)
-	# content_key quando o escopo é 'content'; sender_key quando é 'sender'
+	# content_key quando o escopo é 'content'; sender_key quando é 'sender';
+	# '<tipo>:<valor>' (domain:host, ip:rede) quando é 'indicator'
 	key = Column(String(320), nullable = False, default = '', index = True)
 	verdict = Column(String(16), nullable = False, default = 'Safe')
 	reason = Column(Text, nullable = False, default = '')
@@ -392,7 +449,7 @@ class VerdictMemory(Base):
 	revoked_by = Column(String(64), nullable = False, default = '')
 	hits = Column(Integer, nullable = False, default = 0)
 	last_hit_at = Column(DateTime, nullable = True)
-	# Só para o escopo 'sender': 'pending' até um admin decidir, 'accepted' quando
+	# Só para os escopos 'sender' e 'indicator': 'pending' até um admin decidir, 'accepted' quando
 	# virou regra de whitelist (e `whitelist_rule_id` diz qual), 'dismissed' quando
 	# foi recusada. Vazio no escopo 'content', que não é proposta de nada
 	proposal_status = Column(String(16), nullable = False, default = '')
@@ -413,7 +470,16 @@ NEW_COLUMNS = {
 		# intercepta para exigir a configuração
 		('mfa_secret', 'VARCHAR(64)'),
 		('mfa_confirmed_at', 'DATETIME'),
-		('mfa_last_counter', 'INTEGER')
+		('mfa_last_counter', 'INTEGER'),
+		# Toda conta que já existia acorda sem perfil: valem as telas do cargo,
+		# exatamente o que valia antes
+		('profile_id', 'INTEGER')
+	],
+	# Os indicadores acusados, que os precedentes da memória de vereditos leem.
+	# Uma impressão digital anterior a esta coluna acorda nula: a
+	# reclassificação recorre aos observáveis do registro
+	'analysis_fingerprint': [
+		('flagged', 'TEXT')
 	]
 }
 
@@ -423,20 +489,19 @@ NEW_COLUMNS = {
 # não-future (que é o da imagem, onde o DDL já se auto-confirma). Assim o mesmo
 # arquivo roda nas duas versões
 def _add_missing_columns(engine):
+	# O inspector, e não PRAGMA table_info: o mesmo passo roda no SQLite e no
+	# PostgreSQL (database.py)
 	with engine.connect() as connection:
 		for table, columns in NEW_COLUMNS.items():
-			try:
-				rows = connection.execute(sqlalchemy.text('PRAGMA table_info({0})'.format(table))).fetchall()
-			except Exception:
-				continue
-			existing = {row[1] for row in rows}
+			existing = database.existing_columns(engine, table)
 			if not existing:
 				# Tabela ainda não criada: create_all já a fez com tudo
 				continue
 			for name, definition in columns:
 				if name in existing:
 					continue
-				connection.execute(sqlalchemy.text('ALTER TABLE {0} ADD COLUMN {1} {2}'.format(table, name, definition)))
+				connection.execute(sqlalchemy.text('ALTER TABLE {0} ADD COLUMN {1} {2}'.format(
+					table, name, database.column_type(engine, definition))))
 				print('[INFO]_[models]: coluna {0}.{1} acrescentada ao banco existente'.format(table, name))
 		commit = getattr(connection, 'commit', None)
 		if commit is not None:
@@ -446,13 +511,13 @@ def _add_missing_columns(engine):
 def init_db():
 	global _engine, _SessionFactory
 	if _engine is None:
-		db_dir = os.path.dirname(DB_PATH)
-		if db_dir and not os.path.isdir(db_dir):
-			os.makedirs(db_dir, exist_ok = True)
-		_engine = sqlalchemy.create_engine('sqlite:///{0}'.format(DB_PATH), connect_args = {'check_same_thread': False})
-		Base.metadata.create_all(_engine)
-		_add_missing_columns(_engine)
-		_SessionFactory = sessionmaker(bind = _engine)
+		engine = database.create_engine(DB_PATH)
+		Base.metadata.create_all(engine)
+		_add_missing_columns(engine)
+		# Instalação que vem do SQLite: copia uma vez para o Postgres (database.py)
+		database.migrate_from_sqlite(engine, DB_PATH, Base.metadata, _add_missing_columns)
+		_SessionFactory = sessionmaker(bind = engine)
+		_engine = engine
 	return _engine
 
 
@@ -524,7 +589,8 @@ def sso_sign_in(username, role):
 			return user.id, 'created'
 		demoting_last_global_admin = (
 			user.role == ROLE_GLOBAL_ADMIN and role != ROLE_GLOBAL_ADMIN
-			and session.query(User).filter(User.role == ROLE_GLOBAL_ADMIN).count() <= 1
+			and (session.query(User).filter(User.role == ROLE_GLOBAL_ADMIN).count() <= 1
+				or is_last_local_global_admin(session, user))
 		)
 		changed = user.role != role and not demoting_last_global_admin
 		if changed:
@@ -534,6 +600,22 @@ def sso_sign_in(username, role):
 		return user.id, 'role_changed' if changed else 'signed_in'
 	finally:
 		session.close()
+
+
+def is_last_local_global_admin(session, user):
+	"""A conta é a última global_admin que entra por senha?
+
+	A trava do último global_admin conta todos, e um global_admin que só entra
+	pelo SSO conta também. Se a última conta local sai (ou é rebaixada) e o
+	provedor de identidade cai, ninguém mais entra para consertar: é o autolock
+	que esta checagem fecha. Numa instalação só com SSO (nenhum global_admin
+	local), a regra não se aplica e vale só a do último global_admin.
+	"""
+	if user is None or user.role != ROLE_GLOBAL_ADMIN or user.auth_source != AUTH_LOCAL:
+		return False
+	others = session.query(User).filter(User.role == ROLE_GLOBAL_ADMIN,
+		User.auth_source == AUTH_LOCAL, User.id != user.id).count()
+	return others == 0
 
 
 def count_users():

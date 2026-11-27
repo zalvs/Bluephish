@@ -131,7 +131,7 @@ class Handshake(Base):
 
 	def test_sessao_inativa_alem_do_limite_nao_abre_socket(self):
 		self.signed_in()
-		stale = auth._utcnow() - auth.IDLE_TIMEOUT - datetime.timedelta(minutes = 1)
+		stale = auth._utcnow() - auth.idle_timeout() - datetime.timedelta(minutes = 1)
 		with self.client.session_transaction() as session:
 			session['last_seen'] = stale.strftime('%Y-%m-%d %H:%M:%S')
 		self.assertFalse(self.socket().is_connected())
@@ -174,7 +174,7 @@ class Poda(Base):
 		self.signed_in()
 		with self.client.session_transaction() as session:
 			sid = session['sid']
-			stale = auth._utcnow() - auth.IDLE_TIMEOUT - datetime.timedelta(minutes = 1)
+			stale = auth._utcnow() - auth.idle_timeout() - datetime.timedelta(minutes = 1)
 			session['last_seen'] = stale.strftime('%Y-%m-%d %H:%M:%S')
 		self.assertBlocked()
 		self.assertNotIn(sid, auth._live_sessions)

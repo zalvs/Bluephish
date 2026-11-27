@@ -1,40 +1,73 @@
-# Basic CI: install the dependencies and run a syntax/lint check on every
-# push and pull request that targets the main branch
+# CI: lint, testes com cobertura e a imagem que vai para produção.
+#
+# Ações fixadas por SHA de commit (a tag fica no comentário): uma tag pode ser
+# movida por quem controla o repositório da ação, um SHA não. O Dependabot
+# (github-actions) atualiza o SHA e o comentário juntos.
 name: Python application
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "agent/**"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
+# Menor privilégio: o GITHUB_TOKEN só lê o código. Nenhum job aqui escreve
 permissions:
   contents: read
 
+# Um push novo cancela a execução anterior da mesma ref; na main nada é cancelado
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   thephish-app:
-    name: ThePhish app (Python 3.8)
-    # ubuntu-22.04 is used because the app targets Python 3.8 (same as the Docker image),
-    # which is not available on ubuntu-latest runners
-    runs-on: ubuntu-22.04
+    name: ThePhish app (Python 3.14)
+    # Python 3.14, the interpreter of the Docker image (app/Dockerfile). Runner
+    # pinned by version, not ubuntu-latest, so that a runner upgrade is a change
+    # that someone makes, not one that happens
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # O PostgreSQL de produção (mesma imagem e digest do docker/docker-compose.yml),
+    # para test_database rodar a migração do SQLite contra um banco de verdade.
+    # A senha é só deste banco descartável do CI
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+        env:
+          POSTGRES_DB: bluephish
+          POSTGRES_USER: bluephish
+          POSTGRES_PASSWORD: ci-descartavel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bluephish -d bluephish"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v7
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          python-version: "3.8"
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.14"
           cache: "pip"
           cache-dependency-path: app/requirements.txt
       - name: Install system dependencies
-        # libmagic1 for python-magic; the toolchain and OpenSSL headers because
-        # yara-python has no wheel for 3.8 and is compiled from source, exactly
+        # libmagic for python-magic; the toolchain and OpenSSL headers because
+        # yara-python has no wheel for 3.14 and is compiled from source, exactly
         # as app/Dockerfile does it
-        run: sudo apt-get update && sudo apt-get install -y libmagic1 build-essential libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libmagic1t64 build-essential libssl-dev
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r app/requirements.txt
-          pip install flake8
+          # Ferramentas do CI, com versão fixa (ficam fora da imagem)
+          pip install flake8==7.4.1 coverage==7.17.0
+          # Só para os testes: test_docker_configs lê o docker-compose.yml. Fica
+          # fora da imagem, que não precisa dele
+          pip install pyyaml
       - name: Lint with flake8
         run: |
           # Fail the build on syntax errors and undefined names
@@ -42,8 +75,8 @@ jobs:
           # Full lint as a non-blocking report
           flake8 app --count --exit-zero --max-complexity=10 --max-line-length=200 --statistics
       - name: Byte-compile the application
-        run: python -m compileall app
-      - name: Run the test suite
+        run: python -m compileall -q app
+      - name: Run the test suite with coverage
         # A partir de `app/`: os testes importam os modulos como irmaos e leem
         # `configuration.json` relativo ao diretorio de trabalho, exatamente como
         # o processo faz no container.
@@ -54,4 +87,90 @@ jobs:
         # `info` nao vale `safe`, o LLM e o score so elevam) nao era verificado
         # por nada, e e o tipo de regressao que nao levanta excecao nenhuma.
         working-directory: app
-        run: python -m unittest discover -p "test_*.py" --verbose
+        env:
+          BLUEPHISH_TEST_PG_HOST: 127.0.0.1
+          BLUEPHISH_TEST_PG_PORT: "5432"
+          BLUEPHISH_TEST_PG_USER: bluephish
+          BLUEPHISH_TEST_PG_DB: bluephish
+          BLUEPHISH_TEST_PG_PASSWORD: ci-descartavel
+        run: |
+          coverage run --branch --source=. --omit="test_*.py" -m unittest discover -p "test_*.py"
+      - name: "Coverage report (gate: piso de 58%)"
+        # Linha de base medida no CI em 27/11/2026: 60% (ramos incluídos). O piso
+        # fica logo abaixo para pegar queda, não ruído; suba-o quando a cobertura subir
+        if: always()
+        working-directory: app
+        run: |
+          coverage report --skip-empty --sort=cover --fail-under=58 | tee coverage.txt
+          coverage xml -o coverage.xml
+          {
+            echo "### Cobertura"
+            echo '```'
+            tail -n 1 coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: |
+            app/coverage.xml
+            app/coverage.txt
+          retention-days: 14
+
+  docker-image:
+    name: Docker image (build + test suite inside it)
+    # The job above proves the lock installs and the suite passes on a runner's
+    # Python 3.14. This one proves it for the image that is actually deployed: the
+    # base, the system packages (libmagic, openssl, netbase) and the compiled
+    # yara-python are only ever exercised by a build. app/Dockerfile ends its
+    # install layer with an import of every third-party module, so a set that
+    # does not load fails here, at the build, and not on somebody's server.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Build the image
+        run: docker build -t bluephish:ci app
+      - name: Run the test suite inside the image
+        # Same command docker/README.md gives for an installed container. No
+        # volume is mounted: the suite does not touch the network and writes
+        # only to temporary directories.
+        run: docker run --rm --workdir /root/thephish bluephish:ci python3 -m unittest discover -p "test_*.py"
+      - name: Scan the image (Trivy, gate)
+        # Gate: ALTA/CRÍTICA com correção disponível na imagem que vai para
+        # produção falha o job. A base 3.14 é mantida (o build faz apt-get upgrade
+        # e tira o pip), então um achado aqui é corrigível de verdade. Exceção só
+        # com prazo, em .trivyignore.yaml. Imagem do Trivy por digest (0.62.1):
+        # tag de imagem também se move
+        run: |
+          status=0
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" \
+            aquasec/trivy@sha256:fc10faf341a1d8fa8256c5ff1a6662ef74dd38b65034c8ce42346cf958a02d5d \
+            image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            --ignorefile /out/.trivyignore.yaml \
+            --format table --output /out/trivy-image.txt bluephish:ci || status=$?
+          {
+            echo "### Trivy (imagem): ALTA/CRÍTICA com correção disponível"
+            echo '```'
+            grep -E "^Total|^bluephish|^Python" trivy-image.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then cat trivy-image.txt; exit "$status"; fi
+      - name: SBOM of the image (Syft, CycloneDX)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" \
+            anchore/syft@sha256:a29957b223c67ee0503018d9228e74495903b0c6290f9bc6d74d1501680fef85 \
+            bluephish:ci -o cyclonedx-json=/out/sbom-image.cdx.json
+      - name: Upload image report and SBOM
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-security
+          path: |
+            trivy-image.txt
+            sbom-image.cdx.json
+          retention-days: 30

@@ -2,11 +2,16 @@
 
 [Português (Brasil)](../seguranca.md) · **English**
 
-- The port is published on **`127.0.0.1`** only. If you run the
-  [optional integrations](integrations.md), the same holds for theirs, and Cassandra and
-  MISP's MySQL in particular run with development-grade credentials and must never be
-  exposed. To reach the interface from another machine, use an SSH tunnel or a reverse proxy
-  with TLS instead of changing the port bindings ([how](faq.md#how-do-i-access-it-from-another-machine)).
+- Only the **vhost** publishes ports (443 and 80), and only on **`127.0.0.1`** by default. The
+  API and PostgreSQL publish none: the API sits on an `internal` network reached only by the
+  frontend, the database on an `internal` network reached only by the API, and traffic between
+  vhost, frontend and API is TLS under an internal CA. To reach the interface from another
+  machine use an SSH tunnel, a reverse proxy with TLS, or `BLUEPHISH_BIND` with a real
+  certificate ([how](faq.md#how-do-i-access-it-from-another-machine)). If you keep TheHive and
+  MISP next to it ([integrations](integrations.md)), Cassandra and MISP's MySQL run with
+  development credentials and must never be exposed.
+- The vault master key (`docker/secrets/master.key`) encrypts the secrets kept in the database
+  (AES-256-GCM). It lives outside `docker/vol/` and belongs in a separate backup.
 - Secrets are never returned to the browser: the settings API answers with booleans
   (`hasApiKey`) and an empty field on save means "keep the stored value".
 - **The container makes outbound requests to infrastructure the phisher chose.** Two features

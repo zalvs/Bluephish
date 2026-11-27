@@ -254,9 +254,9 @@ def report_detail(report, source, ref, tags = None):
 	llm = report.get('llm') or {}
 	summary = ''
 	if llm:
-		summary = 'Social engineering analysis: risk level {0}, detected {1}. {2}'.format(
+		summary = 'Análise de engenharia social: risco {0}, engenharia social detectada: {1}. {2}'.format(
 			llm.get('risk_level', '?'),
-			llm.get('social_engineering_detected'),
+			'sim' if llm.get('social_engineering_detected') else 'não',
 			llm.get('justification', '') or '')[:600]
 	return {
 		'case': case,

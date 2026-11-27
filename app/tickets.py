@@ -38,9 +38,11 @@ Forma do módulo, espelhando `analyzers.py` e `responders.py` de propósito:
   dispatch()     roda todos os destinos habilitados que aceitam este veredito.
 """
 
+import collections
 import datetime
 import io
 import json
+import config_file
 import os
 import re
 import traceback
@@ -90,9 +92,10 @@ DESTINATIONS = [
 		# `thehive`, que é de onde o resto da aplicação os lê.
 		'credentials': [
 			{'key': 'url', 'label': 'ENDEREÇO DO THEHIVE', 'secret': False, 'required': True,
-			 'placeholder': 'http://thehive:9000',
-			 'help': 'Dentro do Docker é o nome do serviço, não localhost — de dentro do '
-				'contêiner, localhost é o próprio contêiner.'},
+			 'placeholder': 'http://thehive.exemplo.interno:9000',
+			 'help': 'O TheHive é instalado à parte. Se ele roda em outro contêiner na mesma '
+				'rede Docker, use o nome do serviço, não localhost — de dentro do contêiner, '
+				'localhost é o próprio contêiner.'},
 			{'key': 'apikey', 'label': 'CHAVE DE API', 'secret': True, 'required': True,
 			 'help': 'Gerada no TheHive em Organisation → Users → Create API key. A conta '
 				'precisa do perfil analyst na organização de destino.'},
@@ -225,25 +228,31 @@ def accepts_verdict(min_verdict, verdict):
 # Configuração — mesmo contrato dos analisadores e dos destinos de bloqueio    #
 # --------------------------------------------------------------------------- #
 
-# A fresh installation runs on Bluephish alone, with no TheHive and no Jira, so
-# the destination that ships on is the one that needs no service: the disk. The
-# history screens then have somewhere to read from since the first analysis, and
-# no analysis tries to reach a TheHive that is not there.
+# Disk ships enabled: it is the one destination that needs nothing outside this
+# process, so a fresh installation records its analyses — and has something to
+# show on the history screens — before anybody configures anything. TheHive and
+# Jira are services somebody else runs; they default to off.
 DEFAULT_ENABLED = ('disk',)
 
-# An installation that already used TheHive keeps it on: before this refactor
-# every analysis created a case there unconditionally, and an upgrade that
-# silently stopped doing that would look like the application had lost the cases.
-# load_config() tells the two apart (a saved TheHive key, or destinations already
-# saved).
-UPGRADE_ENABLED = ('thehive',)
+# What shipped enabled while TheHive came in the same compose file. An
+# installation from that time that never saved the destinations has no choice
+# stored, only these defaults — see `load_config` for how it keeps them.
+LEGACY_ENABLED = ('thehive',)
+
+# What the configuration template of that time came filled in with: the address
+# of the TheHive container and the name of an example MISP server. The live
+# configuration file is never updated by a `git pull` (it holds the real keys),
+# so these two values are still in every installation, including the ones made
+# today. With no API key next to them nobody ever recorded there, and they are
+# not something anybody typed — see `load_config`.
+SHIPPED_THEHIVE_URL = 'http://thehive:9000'
+SHIPPED_MISP_NAME = 'MISP THP'
 
 
-def default_config(upgrade = False):
-	enabled_by_default = UPGRADE_ENABLED if upgrade else DEFAULT_ENABLED
+def default_config():
 	config = {}
 	for spec in DESTINATIONS:
-		entry = {'enabled': spec['id'] in enabled_by_default}
+		entry = {'enabled': spec['id'] in DEFAULT_ENABLED}
 		for field in spec.get('credentials', []):
 			entry[field['key']] = field.get('default', '')
 		for field in spec.get('settings', []):
@@ -253,12 +262,12 @@ def default_config(upgrade = False):
 
 
 def load_config(path = CONFIG_FILE):
+	config = default_config()
 	try:
-		with open(path) as conf_file:
-			conf_dict = json.load(conf_file)
+		conf_dict = config_file.read(path)
 		stored = conf_dict.get(CONFIG_SECTION, {})
 	except Exception:
-		return default_config()
+		return config
 
 	# The TheHive URL and API key have lived under `thehive` since long before
 	# this section existed, and `save_config` below still writes them there —
@@ -266,13 +275,19 @@ def load_config(path = CONFIG_FILE):
 	# from their old home unless this section overrides them, so an upgrade needs
 	# no migration and nobody retypes a key.
 	legacy = conf_dict.get('thehive', {}) or {}
-	config = default_config(upgrade = bool(stored) or bool(legacy.get('apikey')))
-	if legacy.get('url'):
+	# The template's own address and MISP name, with no key, are read as blank.
+	# Carried into the card they would be a TheHive nobody configured: on a host
+	# with no `thehive` name the card cannot even be saved, because a blank
+	# address falls back to the stored one and the stored one does not resolve —
+	# and a later TheHive would inherit an export to a MISP that does not exist.
+	never_keyed = not legacy.get('apikey')
+	shipped_url = str(legacy.get('url') or '').rstrip('/') == SHIPPED_THEHIVE_URL
+	if legacy.get('url') and not (never_keyed and shipped_url):
 		config['thehive']['url'] = legacy['url']
 	if legacy.get('apikey'):
 		config['thehive']['apikey'] = legacy['apikey']
 	misp = conf_dict.get('misp', {}) or {}
-	if misp.get('id'):
+	if misp.get('id') and not (never_keyed and misp['id'] == SHIPPED_MISP_NAME):
 		config['thehive']['mispId'] = misp['id']
 	case = conf_dict.get('case', {}) or {}
 	if case.get('tags'):
@@ -283,6 +298,15 @@ def load_config(path = CONFIG_FILE):
 				config['thehive'][key] = int(case[key])
 			except (TypeError, ValueError):
 				pass
+	# An installation that already has its TheHive address and key is one that
+	# was recording there, and it keeps the defaults it was installed with:
+	# TheHive on, everything else off. Without this, the change of default above
+	# would switch its TheHive off on upgrade and start writing every reported
+	# email to disk instead — no error, just cases that stop arriving. Whatever
+	# the administrator did save still wins, in the loop below.
+	if legacy.get('url') and legacy.get('apikey'):
+		for destination_id in config:
+			config[destination_id]['enabled'] = destination_id in LEGACY_ENABLED
 	for destination_id, entry in (stored or {}).items():
 		if destination_id not in config or not isinstance(entry, dict):
 			continue
@@ -307,8 +331,7 @@ def save_config(config, path = CONFIG_FILE):
 	direto lá. Gravá-los nos dois lugares criaria duas cópias da mesma chave, e a
 	que ficasse para trás seria justamente a que alguém depuraria por engano.
 	"""
-	with open(path) as conf_file:
-		conf_dict = json.load(conf_file)
+	conf_dict = config_file.read(path)
 
 	stored = {}
 	for destination_id, entry in (config or {}).items():
@@ -325,8 +348,7 @@ def save_config(config, path = CONFIG_FILE):
 		stored[destination_id] = entry
 
 	conf_dict[CONFIG_SECTION] = stored
-	with open(path, 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, path)
 
 
 def public_config(config):
@@ -347,11 +369,14 @@ def public_config(config):
 	return public
 
 
-def validate_entry(destination_id, submitted, stored):
+def validate_entry(destination_id, submitted, stored, probing = False):
 	"""(entrada, erro) para o que veio do formulário.
 
 	Segredo em branco mantém o gravado. Campo obrigatório só é cobrado com o
 	destino habilitado, para o formulário poder ser preenchido em etapas.
+
+	`probing` é o botão Testar: a entrada vai ser usada agora, numa chamada ao
+	destino, e não só gravada — então nenhuma validação de endereço é dispensada.
 	"""
 	spec = BY_ID.get(destination_id)
 	if spec is None:
@@ -396,8 +421,18 @@ def validate_entry(destination_id, submitted, stored):
 	if destination_id == 'thehive':
 		# Mesma trava dos outros destinos digitados, com a rede interna liberada:
 		# dentro do Docker o TheHive é alcançado pelo nome do serviço, que resolve
-		# para um endereço privado da rede do compose
-		if entry['enabled'] or entry.get('url'):
+		# para um endereço privado da rede do compose.
+		#
+		# Uma exceção, e só uma: desligar o destino sem mexer no endereço. Quem
+		# atualizou de uma instalação em que o TheHive vinha no compose tem
+		# `http://thehive:9000` gravado e nenhum `thehive` para resolver — e a
+		# trava, cobrada ali, recusava justamente o salvar que desliga o destino.
+		# Recusar não protegia nada: o endereço já está gravado e continua
+		# gravado, com ou sem este salvar. Endereço novo, destino ligado e o
+		# botão Testar (`probing`) continuam passando pela trava.
+		unchanged = entry.get('url', '') == str(stored.get('url', '') or '').strip()
+		switching_off = not entry['enabled'] and unchanged and not probing
+		if (entry['enabled'] or entry.get('url')) and not switching_off:
 			ok, error = custom_analyzers.validate_destination(
 				entry.get('url', ''), allow_internal = True, require_https = False)
 			if not ok:
@@ -440,10 +475,15 @@ def build_report(subject, verdict, reporter, observables_info, reports_observabl
 	É a fronteira que torna um destino independente do TheHive: nada aqui é um
 	objeto do TheHive, só dados. Um destino novo consome isto e pronto.
 	"""
+	# Indexado uma vez: os observáveis que o teto de consultas deixou de fora
+	# continuam nesta lista, e procurar a cada um deles é quadrático (§7.21)
+	levels_by_observable = {}
+	for report_obs in reports_observables or []:
+		levels_by_observable.setdefault(report_obs.get('observable_id'), set()).add(report_obs.get('analyzer_result'))
+
 	observables = []
 	for observable_info in observables_info or []:
-		levels = [r.get('analyzer_result') for r in (reports_observables or [])
-			if r.get('observable_id') == observable_info.get('id')]
+		levels = levels_by_observable.get(observable_info.get('id'), ())
 		observables.append({
 			'id': observable_info.get('id', ''),
 			'type': observable_info.get('type', ''),
@@ -1132,6 +1172,28 @@ def _thehive_client(entry):
 	return thehive4py.api.TheHiveApi(url, apikey)
 
 
+def thehive_call(method, base_url, apikey, path, **kwargs):
+	"""Uma chamada HTTP ao TheHive que não passa pelo thehive4py.
+
+	Vale para o histórico, os insights e o chat (`thehive_query`, a leitura do
+	.eml). Como no Jira: revalida o endereço na hora da chamada, conecta no IP
+	que a trava aprovou e não segue redirect — um 302 vindo do TheHive levaria a
+	chave de API para onde o Location mandasse. A rede interna é liberada (o
+	TheHive mora no compose ou num Data Center); o serviço de metadados, nunca.
+	"""
+	base = str(base_url or '').strip().rstrip('/')
+	ok, error = custom_analyzers.validate_destination(base, allow_internal = True, require_https = False)
+	if not ok:
+		raise TicketError('Destino recusado: {0}'.format(error))
+	headers = {'Authorization': 'Bearer ' + str(apikey or '')}
+	headers.update(kwargs.pop('headers', {}))
+	try:
+		return pinned_http.request(method, base + path, True, headers = headers,
+			timeout = (10, 30), allow_redirects = False, **kwargs)
+	except pinned_http.DestinationRefused as refused:
+		raise TicketError('Destino recusado: {0}'.format(refused))
+
+
 def _thehive_ensure_template(api):
 	"""Create the case template once, if this TheHive has never seen it."""
 	import thehive4py.models, thehive4py.query
@@ -1169,6 +1231,73 @@ def _thehive_observable(observable, files):
 		**common)
 
 
+# Quantos observáveis um e-mail grava num caso do TheHive (§7.22). Cada um é um
+# POST, e quem decide quantos são é quem escreveu o e-mail. O maior dos 14 e-mails
+# reais medidos em 2026-11-23 grava 76 (70 valores distintos): 200 é mais que o
+# dobro, e um caso normal não percebe que o teto existe.
+MAX_THEHIVE_OBSERVABLES = 200
+
+
+def _thehive_is_file(observable):
+	return str(observable.get('type', '')).split('_')[0] == 'file'
+
+
+def _thehive_value_key(observable):
+	"""O que faz dois observáveis serem o mesmo. Um anexo não é igual a outro pelo nome, que quem atacou escolhe."""
+	if _thehive_is_file(observable):
+		return ('file', observable.get('id'))
+	return (observable.get('type'), observable.get('value'))
+
+
+def thehive_observables_to_record(observables, files = None, limit = MAX_THEHIVE_OBSERVABLES):
+	"""O que vira POST neste caso. Devolve (observáveis, omissão), e a omissão é None sem corte.
+
+	Até o teto, a mesma lista na mesma ordem. Acima dele entram primeiro os IoCs,
+	que nunca são cortados, e depois a ordem de `observable_priority`. Só vira IoC o
+	que um analisador consultou, então o teto de consultas (§7.21) já limita quantos
+	são. Uma cópia de valor já escolhido não gasta o teto nem conta como de fora.
+	Não altera a lista recebida: o disco grava o mesmo relatório, inteiro.
+	"""
+	recordable = [o for o in observables if not _thehive_is_file(o) or (files or {}).get(o.get('id'))]
+	if len(recordable) <= limit:
+		return recordable, None
+
+	# Importado aqui porque run_analysis importa este módulo
+	from run_analysis import observable_priority
+	distinct = {}
+	for observable in sorted(recordable, key = lambda o: (not o.get('ioc'), observable_priority(o))):
+		distinct.setdefault(_thehive_value_key(observable), observable)
+	unique = list(distinct.values())
+	kept = unique[:max(limit, sum(1 for o in unique if o.get('ioc')))]
+	left_out = unique[len(kept):]
+	if not left_out:
+		return kept, None
+	return kept, {
+		'limit': limit,
+		'distinct': len(unique),
+		'recorded': len(kept),
+		'leftOut': len(left_out),
+		'byType': dict(collections.Counter(str(o.get('type', '')).split('_')[0] for o in left_out))
+	}
+
+
+def describe_thehive_omission(omission):
+	"""O aviso que vai no caso. Só contagens e em uma linha: nada escrito por quem mandou o e-mail."""
+	by_type = ', '.join('{0} {1}'.format(count, obs_type)
+		for obs_type, count in sorted(omission['byType'].items()))
+	return ('{0} observável(is) ficaram de fora deste caso ({1}): o e-mail passou do teto de {2} por caso. '
+		'Foram gravados {3} de {4} valores distintos, com todo IoC e por ordem de prioridade. '
+		'A lista completa fica só no relatório do destino Disco, quando ele está habilitado.').format(
+		omission['leftOut'], by_type, omission['limit'], omission['recorded'], omission['distinct'])
+
+
+def _report_with_coverage_note(report, notice):
+	"""Uma cópia do report com o aviso na trilha, que é o que a tela de caso lê de volta do log."""
+	trail = list(report.get('verdictTrail') or [])
+	trail.append({'stage': 'coverage', 'verdict': report['verdict'], 'reason': notice})
+	return dict(report, verdictTrail = trail)
+
+
 # Os fatos da análise que viram tag no caso, além das tags configuradas.
 #
 # O TheHive guarda o histórico das análises e as telas de Casos e Visão Executiva
@@ -1191,12 +1320,17 @@ def create_thehive(entry, report, eml = None, files = None):
 
 	tags = [t.strip() for t in str(entry.get('tags', '') or '').split(',') if t.strip()]
 	tags = (tags or ['email', 'ThePhish']) + analysis_tags(report)
-	# Emojis are stripped from the title: MISP chokes on them when the case is exported
+	# The emojis are removed to prevent problems when exporting the case to MISP
 	try:
 		import emoji
 		title = emoji.replace_emoji(report['subject'], '')
 	except Exception:
 		title = report['subject']
+
+	# Decidido antes de criar o caso porque o aviso vai na descrição: é o único
+	# lugar que existe sempre, mesmo com o log da tarefa falhando
+	to_record, omission = thehive_observables_to_record(report.get('observables', []), files)
+	notice = describe_thehive_omission(omission) if omission else ''
 
 	case = thehive4py.models.Case(
 		title = title,
@@ -1204,7 +1338,7 @@ def create_thehive(entry, report, eml = None, files = None):
 		pap = int(entry.get('pap', 2)),
 		flag = False,
 		tags = tags,
-		description = 'Case created automatically by ThePhish',
+		description = 'Case created automatically by ThePhish' + ('\n\n' + notice if notice else ''),
 		template = THEHIVE_TEMPLATE)
 	response = api.create_case(case)
 	if response.status_code != 201:
@@ -1215,11 +1349,8 @@ def create_thehive(entry, report, eml = None, files = None):
 	case_uuid = created['id']
 	case_ref = str(created.get('caseId', ''))
 	added = 0
-	for observable in report.get('observables', []):
-		model = _thehive_observable(observable, files)
-		if model is None:
-			continue
-		if api.create_case_observable(case_uuid, model).status_code == 201:
+	for observable in to_record:
+		if api.create_case_observable(case_uuid, _thehive_observable(observable, files)).status_code == 201:
 			added += 1
 
 	# The analyzer evidence and the LLM assessment go in as task logs, which is
@@ -1234,8 +1365,9 @@ def create_thehive(entry, report, eml = None, files = None):
 	analysis_task = tasks.get('ThePhish analysis')
 	if analysis_task:
 		try:
+			logged = _report_with_coverage_note(report, notice) if notice else report
 			api.create_task_log(analysis_task, thehive4py.models.CaseTaskLog(
-				message = report_as_markdown(report)))
+				message = report_as_markdown(logged)))
 		except Exception:
 			# The case exists and carries the observables; a missing log is not
 			# worth failing the whole destination over
@@ -1255,6 +1387,9 @@ def create_thehive(entry, report, eml = None, files = None):
 			pass
 
 	detail = 'caso {0} criado com {1} observável(is)'.format(case_ref or case_uuid, added)
+	if omission:
+		detail += ' · {0} observável(is) ficaram de fora (teto de {1})'.format(
+			omission['leftOut'], omission['limit'])
 
 	# A Suspicious verdict deliberately leaves the case open: it is the one that
 	# needs a human, and closing it would bury exactly the work worth doing

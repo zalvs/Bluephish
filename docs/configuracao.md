@@ -108,7 +108,7 @@ descrição. Funciona com o Cloud (e-mail da conta + token de API) e com o Data 
 e malicioso, porque abrir um para cada e-mail Safe soterra a fila.
 
 O **TheHive** registra a análise como um caso. É opcional e roda fora do Bluephish: veja as
-[integrações](integracoes.md) para saber como apontar o Bluephish para ele.
+[integrações](integracoes/thehive.md) para saber como apontar o Bluephish para ele.
 
 Os **Conectores** são o destino sem fornecedor embutido. Em vez de um cliente escrito à mão
 para cada ferramenta, você configura um (botão **Novo conector**): o endpoint, a autenticação

@@ -35,6 +35,7 @@ Três decisões que valem explicar
 import datetime
 import email.utils
 import json
+import config_file
 import logging
 import os
 import traceback
@@ -113,8 +114,7 @@ def load_config(path = None):
 	"""A configuração gravada sobre os padrões. Seção ausente é alerta desligado."""
 	config = default_config()
 	try:
-		with open(path or CONFIG_FILE) as conf_file:
-			stored = json.load(conf_file).get(CONFIG_SECTION, {}) or {}
+		stored = config_file.read(path or CONFIG_FILE).get(CONFIG_SECTION, {}) or {}
 	except Exception:
 		return config
 	if not isinstance(stored, dict):
@@ -127,11 +127,9 @@ def load_config(path = None):
 
 def save_config(entry, path = None):
 	path = path or CONFIG_FILE
-	with open(path) as conf_file:
-		conf_dict = json.load(conf_file)
+	conf_dict = config_file.read(path)
 	conf_dict[CONFIG_SECTION] = entry
-	with open(path, 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, path)
 
 
 def _bounded_int(submitted, key, label):

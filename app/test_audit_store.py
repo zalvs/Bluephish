@@ -183,6 +183,25 @@ class Syslog(unittest.TestCase):
 			ip, _ = audit_store.resolve_syslog('siem.example', 514, 'udp')
 		self.assertIsNone(ip)
 
+	def test_the_address_handed_over_is_judged_not_only_the_first_lookup(self):
+		# O DNS responde um endereço aceitável à trava e outro ao que o handler vai usar
+		# (rebinding). Com um único return_value os dois lookups veem a mesma resposta e
+		# o teste acima passa mesmo com a brecha aberta; side_effect separa um do outro.
+		harmless = [(socket.AF_INET, socket.SOCK_DGRAM, 0, '', ('10.9.8.7', 514))]
+		metadata = [(socket.AF_INET, socket.SOCK_DGRAM, 0, '', ('169.254.169.254', 514))]
+		with mock.patch('socket.getaddrinfo', side_effect = [harmless, metadata]):
+			ip, error = audit_store.resolve_syslog('siem.example', 514, 'udp')
+		self.assertIsNone(ip)
+		self.assertIn('metadados', error)
+
+	def test_one_forbidden_address_among_several_refuses_the_name(self):
+		# O handler recebe um endereço só, mas não se sabe qual: basta um proibido
+		mixed = [(socket.AF_INET, socket.SOCK_DGRAM, 0, '', ('10.9.8.7', 514)),
+			(socket.AF_INET, socket.SOCK_DGRAM, 0, '', ('169.254.169.254', 514))]
+		with mock.patch('socket.getaddrinfo', return_value = mixed):
+			ip, _ = audit_store.resolve_syslog('siem.example', 514, 'udp')
+		self.assertIsNone(ip)
+
 	def test_enabled_without_host_is_refused(self):
 		config, _ = audit_store.validate({'retentionDays': '365', 'maxMegabytes': '30',
 			'syslogEnabled': 'true', 'syslogHost': '', 'syslogPort': '514', 'syslogProtocol': 'udp'})

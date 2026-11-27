@@ -1,0 +1,16 @@
+# Linha de base do Trivy: risco aceito, com prazo.
+#
+# Dependências Python: nenhuma entrada. Com a migração para o Python 3.14
+# (27/11/2026) o lock de app/requirements.txt não tem ALTA/CRÍTICA conhecida;
+# qualquer achado novo bloqueia o CI. Exceção só entra aqui com statement e
+# expired_at, nunca sem prazo.
+#
+# Configuração: o item abaixo é o hardening de contêiner ainda pendente.
+# Detalhes e plano: docs/devsecops.md.
+misconfigurations:
+  # Contêiner como root: o hardening (usuário sem privilégio, cap_drop, read_only)
+  # precisa de teste com o nginx e a API rodando; está no plano de docs/devsecops.md
+  - id: DS002
+    paths: ["app/Dockerfile", "docker/vhost/Dockerfile", "docker/frontend/Dockerfile"]
+    statement: "imagens ainda rodam como root; hardening pendente"
+    expired_at: 2027-02-28

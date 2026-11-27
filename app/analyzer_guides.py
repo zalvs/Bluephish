@@ -71,6 +71,17 @@ FAMILIES = {
 		'body': 'Nada é enviado a terceiro e não há cota a estourar. Em troca, a cobertura é '
 			'exatamente aquela que você mantiver: o analisador só sabe o que suas regras sabem. '
 			'É o único tipo que enxerga conteúdo do anexo sem que ele saia da rede.'
+	},
+	'feed': {
+		'label': 'Feed público',
+		'summary': 'Lista gratuita baixada para o servidor. A consulta é local: nada sai da rede.',
+		'body': 'O arquivo é baixado de uma fonte pública, guardado no volume de dados e atualizado '
+			'em segundo plano; a análise só lê a cópia local, então não há chave, cota nem '
+			'dependência do fornecedor estar no ar. Constar na lista condena (ou levanta suspeita, '
+			'conforme a confiança da lista). **Não constar não absolve:** uma lista de dezenas de '
+			'milhares de entradas não avaliou o indicador, e por isso o resultado é "sem opinião". '
+			'Se a cópia nunca foi baixada ou ficou desatualizada, o analisador diz isso em vez de '
+			'responder. Confira a licença no card: gratuito não quer dizer livre para qualquer uso.'
 	}
 }
 
@@ -140,7 +151,31 @@ GUIDES = {
 		'endereço deles aqui.',
 		'Diferente dos outros, não é consulta por indicador: o feed inteiro é baixado e a URL é '
 		'procurada dentro dele. Fica em cache por 15 minutos para não rebaixar o arquivo a cada '
-		'observável de um mesmo e-mail.'
+		'observável de um mesmo e-mail. Licença: os termos do feed comunitário gratuito proíbem '
+		'uso comercial, inclusive em SOC; numa empresa, aponte para a URL de uma assinatura.'
+	),
+	'certpl_domains': _sections(
+		'Domínios, contra a lista de domínios maliciosos do CERT Polska, baixada para este servidor.',
+		'Nenhuma. Não há chave nem conta: ao habilitar, o arquivo é baixado e passa a ser '
+		'atualizado a cada hora em segundo plano. A consulta é local.',
+		'Constar na lista é sinal forte (malicioso). Não constar não diz nada e volta "info", não '
+		'"safe": a lista não avaliou aquele domínio. Se a cópia nunca foi baixada ou ficou '
+		'desatualizada, o resultado é "info" com o motivo, e não "seguro".'
+	),
+	'phishingdb_domains': _sections(
+		'Domínios, contra os domínios de phishing ativos do projeto Phishing.Database.',
+		'Nenhuma. O arquivo é baixado ao habilitar e atualizado a cada 6 horas. A consulta é local.',
+		'A lista é compilada e retestada automaticamente, então pode conter falso positivo: uma '
+		'ocorrência vale "suspeito" para uma pessoa pesar, não "malicioso". Não constar volta '
+		'"info", nunca "safe".'
+	),
+	'phishingdb_links': _sections(
+		'URLs, contra as URLs de phishing ativas do projeto Phishing.Database.',
+		'Nenhuma. O arquivo é grande (dezenas de megabytes); por isso não vem no pacote '
+		'recomendado. É baixado ao habilitar e atualizado a cada 6 horas.',
+		'A URL inteira (host e caminho) precisa coincidir, então uma ocorrência é sinal forte '
+		'(malicioso). Não constar volta "info": uma URL nova de phishing ainda não entrou em '
+		'lista nenhuma.'
 	),
 	'urlhaus': _sections(
 		'URLs, hosts e hashes de payload, contra a base da abuse.ch de distribuição de malware.',

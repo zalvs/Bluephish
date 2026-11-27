@@ -10,10 +10,20 @@ Rodar com:  python -m unittest test_coverage   (a partir de app/)
 """
 
 import unittest
+from unittest import mock
 
 import run_analysis
 
 import test_scoring_pipeline as pipeline
+
+
+class TrustedSender(pipeline.NoWhitelist):
+	"""Uma regra de whitelist casa com o remetente."""
+
+	class Match(pipeline.NoWhitelist.Match):
+		rule_id = 'regra-do-remetente'
+		def __bool__(self): return True
+		__nonzero__ = __bool__
 
 
 def timed_out(analyzer_id):
@@ -22,7 +32,7 @@ def timed_out(analyzer_id):
 	return finding
 
 
-class NothingLookedIsNotSafe(unittest.TestCase):
+class DecidesAVerdict(unittest.TestCase):
 
 	def setUp(self):
 		self.harness = pipeline.TerminateAnalysisComScore('run_it')
@@ -33,13 +43,17 @@ class NothingLookedIsNotSafe(unittest.TestCase):
 	def tearDown(self):
 		self.harness.tearDown()
 
-	def decide(self, findings, llm = None):
+	def decide(self, findings, llm = None, extraction_complete = True, content_key = ''):
 		trail = []
 		verdict, _score = run_analysis.terminate_analysis(
 			'Acompanhe sua entrega', 'quem@denunciou.com', [pipeline.observable()], findings, llm,
 			self.harness.wsl, auth_results = pipeline.AUTHENTICATED, sent_log = [],
-			observables_seen = None, trail = trail)
+			observables_seen = None, trail = trail, extraction_complete = extraction_complete,
+			content_key = content_key)
 		return verdict, trail
+
+
+class NothingLookedIsNotSafe(DecidesAVerdict):
 
 	def test_every_analyzer_timed_out_and_no_llm_is_suspicious(self):
 		verdict, trail = self.decide([timed_out('virustotal'), timed_out('urlhaus'), timed_out('phishtank')])
@@ -69,6 +83,52 @@ class NothingLookedIsNotSafe(unittest.TestCase):
 	def test_the_floor_never_lowers_a_verdict(self):
 		verdict, _trail = self.decide([timed_out('virustotal'), pipeline.finding('urlhaus', 'malicious')])
 		self.assertEqual(verdict, 'Malicious')
+
+
+class AnUnfinishedExtractionIsNotSafe(DecidesAVerdict):
+	"""Quem respondeu avaliou só o que a extração achou, e ela não leu tudo."""
+
+	LLM = {'social_engineering_detected': False, 'risk_level': 'Low', 'tactics': [], 'justification': 'ok'}
+
+	def test_safe_opinions_do_not_vouch_for_what_was_not_read(self):
+		verdict, trail = self.decide([pipeline.finding('urlhaus', 'safe')], self.LLM, extraction_complete = False)
+		self.assertEqual(verdict, 'Suspicious')
+		reasons = [step['reason'] for step in trail if step['stage'] == 'coverage']
+		self.assertTrue(any('não terminou' in reason for reason in reasons), reasons)
+
+	def test_the_reporter_is_not_told_it_is_safe_either(self):
+		self.decide([pipeline.finding('urlhaus', 'safe')], self.LLM, extraction_complete = False)
+		self.assertEqual(self.harness.notified, [])
+
+	def test_it_never_lowers_a_verdict(self):
+		verdict, _trail = self.decide([pipeline.finding('urlhaus', 'malicious')], self.LLM, extraction_complete = False)
+		self.assertEqual(verdict, 'Malicious')
+
+	def test_a_finished_extraction_changes_nothing(self):
+		verdict, trail = self.decide([pipeline.finding('urlhaus', 'safe')], self.LLM)
+		self.assertEqual(verdict, 'Safe')
+		self.assertFalse(any(step['stage'] == 'coverage' for step in trail))
+
+	def test_a_whitelisted_sender_does_not_undo_the_floor(self):
+		run_analysis.ruleset = TrustedSender()
+		with mock.patch.object(run_analysis.whitelist_state, 'register_downgrade') as downgrade:
+			verdict, _trail = self.decide([pipeline.finding('urlhaus', 'safe')], self.LLM, extraction_complete = False)
+		self.assertEqual(verdict, 'Suspicious')
+		downgrade.assert_not_called()
+
+	def test_the_verdict_memory_does_not_undo_the_floor(self):
+		with mock.patch.object(run_analysis.verdict_memory, 'apply') as memory:
+			verdict, _trail = self.decide([pipeline.finding('urlhaus', 'safe')], self.LLM,
+				extraction_complete = False, content_key = 'conteudo')
+		self.assertEqual(verdict, 'Suspicious')
+		memory.assert_not_called()
+
+	def test_a_finished_extraction_can_still_be_downgraded(self):
+		run_analysis.ruleset = TrustedSender()
+		with mock.patch.object(run_analysis.whitelist_state, 'register_downgrade', return_value = (True, '')) as downgrade:
+			verdict, _trail = self.decide([pipeline.finding('urlhaus', 'malicious')], self.LLM)
+		self.assertEqual(verdict, 'Safe')
+		downgrade.assert_called_once()
 
 
 if __name__ == '__main__':

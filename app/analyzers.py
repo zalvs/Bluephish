@@ -32,12 +32,15 @@ before enabling the analyzer.
 
 import base64
 import json
+import config_file
 import os
 import re
 import time
 import traceback
 
 import requests
+
+import feeds
 
 # Vendor calls are given a short connect timeout and a longer read timeout: a
 # firewalled endpoint should fail fast, a slow-but-alive one should be waited for
@@ -187,7 +190,9 @@ ANALYZERS = [
 		'kind': 'feed comunitário de phishing',
 		'description': 'Lista pública de URLs de phishing ativas. Ao contrário dos outros, não é uma '
 			'consulta por indicador: o feed inteiro é baixado e a URL é procurada nele. O feed fica '
-			'em cache por alguns minutos para não ser rebaixado a cada observável.',
+			'em cache por alguns minutos para não ser rebaixado a cada observável. Atenção à licença: '
+			'os termos do feed comunitário gratuito proíbem uso comercial (inclusive SOC e '
+			'enriquecimento); numa empresa, use uma assinatura deles.',
 		'docs': 'https://openphish.com/faq.html',
 		'observables': ['url'],
 		'credentials': [
@@ -350,6 +355,11 @@ ANALYZERS = [
 	}
 ]
 
+# Public feeds are analyzers too: same card, same toggle, same level contract. The
+# registry of what they download lives in feeds.py so there is one place to read
+# the licence of each
+ANALYZERS.extend(feeds.analyzer_spec(feed) for feed in feeds.FEEDS)
+
 BY_ID = dict((a['id'], a) for a in ANALYZERS)
 
 # Falcon has one API host per region
@@ -414,8 +424,7 @@ def load_config(path = CONFIG_FILE):
 	"""
 	config = default_config()
 	try:
-		with open(path) as conf_file:
-			stored = json.load(conf_file).get(CONFIG_SECTION, {})
+		stored = config_file.read(path).get(CONFIG_SECTION, {})
 	except Exception:
 		return config
 	for analyzer_id, entry in (stored or {}).items():
@@ -434,11 +443,9 @@ def load_config(path = CONFIG_FILE):
 
 
 def save_config(config, path = CONFIG_FILE):
-	with open(path) as conf_file:
-		conf_dict = json.load(conf_file)
+	conf_dict = config_file.read(path)
 	conf_dict[CONFIG_SECTION] = config
-	with open(path, 'w') as conf_file:
-		json.dump(conf_dict, conf_file, indent = '\t')
+	config_file.write(conf_dict, path)
 
 
 def public_config(config):
@@ -555,6 +562,15 @@ def level_for(analyzer_id, thresholds, signal):
 	"""
 	if signal is None:
 		return 'info'
+
+	# A public feed answers "is it on my list". Listed carries the level the feed
+	# declares; not listed is `info`, never `safe`: a list of some tens of
+	# thousands of entries has not looked at this indicator, and a `safe` here
+	# would also count as "an analyzer answered" and switch off the floor that
+	# keeps an email nobody could evaluate from closing as Safe (run_analysis).
+	spec = BY_ID.get(analyzer_id)
+	if spec is not None and spec.get('family') == 'feed':
+		return spec['listedLevel'] if signal.get('listed') else 'info'
 
 	if analyzer_id == 'virustotal':
 		malicious = int(signal.get('malicious', 0))
@@ -736,6 +752,24 @@ def sends(analyzer_id, observable_type, config):
 # Vendor clients — each returns a normalized signal or raises                   #
 # --------------------------------------------------------------------------- #
 
+def _refuse_redirect(response):
+	# Every vendor call carries an API key in a header of its own, and `requests`
+	# strips only `Authorization` when a redirect changes host. A 3xx is therefore
+	# a failure to show the analyst, never a hop to follow (and never 'safe').
+	if 300 <= response.status_code < 400:
+		raise AnalyzerError('O fornecedor respondeu com um redirecionamento (HTTP {0}); '
+			'a consulta não o segue.'.format(response.status_code))
+	return response
+
+
+def _vendor_get(url, **kwargs):
+	return _refuse_redirect(requests.get(url, allow_redirects = False, **kwargs))
+
+
+def _vendor_post(url, **kwargs):
+	return _refuse_redirect(requests.post(url, allow_redirects = False, **kwargs))
+
+
 class AnalyzerError(Exception):
 	"""A vendor call failed in a way worth showing the analyst verbatim."""
 
@@ -768,7 +802,7 @@ def query_virustotal(entry, observable_type, value):
 	if not api_key:
 		raise AnalyzerError('Chave de API do VirusTotal não configurada.')
 	url = 'https://www.virustotal.com/api/v3/' + _virustotal_path(observable_type, value)
-	response = requests.get(url, headers = {'x-apikey': api_key}, timeout = HTTP_TIMEOUT)
+	response = _vendor_get(url, headers = {'x-apikey': api_key}, timeout = HTTP_TIMEOUT)
 	if response.status_code == 401:
 		raise AnalyzerError('O VirusTotal recusou a chave de API (401).')
 	if response.status_code == 429:
@@ -789,7 +823,7 @@ def query_abuseipdb(entry, observable_type, value):
 	api_key = entry.get('apiKey', '')
 	if not api_key:
 		raise AnalyzerError('Chave de API do AbuseIPDB não configurada.')
-	response = requests.get(
+	response = _vendor_get(
 		'https://api.abuseipdb.com/api/v2/check',
 		headers = {'Key': api_key, 'Accept': 'application/json'},
 		params = {'ipAddress': value, 'maxAgeInDays': entry.get('maxAgeInDays', 90)},
@@ -872,7 +906,7 @@ def query_yara(entry, observable_type, value):
 
 def _crowdstrike_token(entry):
 	host = CROWDSTRIKE_HOSTS.get(entry.get('cloud', 'us-1'), CROWDSTRIKE_HOSTS['us-1'])
-	response = requests.post(
+	response = _vendor_post(
 		host + '/oauth2/token',
 		data = {'client_id': entry.get('clientId', ''), 'client_secret': entry.get('clientSecret', '')},
 		headers = {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -891,7 +925,7 @@ def query_crowdstrike(entry, observable_type, value):
 	if not entry.get('clientId') or not entry.get('clientSecret'):
 		raise AnalyzerError('Client id e client secret da CrowdStrike não configurados.')
 	host, token = _crowdstrike_token(entry)
-	response = requests.get(
+	response = _vendor_get(
 		host + '/intel/combined/indicators/v1',
 		headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/json'},
 		params = {'filter': "indicator:'{0}'".format(value), 'limit': 50},
@@ -925,7 +959,7 @@ def query_crowdstrike(entry, observable_type, value):
 
 def _crowdstrike_sandbox_summaries(host, token, report_ids):
 	"""Fetch the summary of each report id, tolerating both response shapes."""
-	response = requests.get(
+	response = _vendor_get(
 		host + '/falconx/entities/report-summaries/v1',
 		headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/json'},
 		params = [('ids', report_id) for report_id in report_ids],
@@ -966,7 +1000,7 @@ def query_crowdstrike_sandbox(entry, observable_type, value):
 	else:
 		query_filter = "sandbox.sha256:'{0}'".format(value)
 
-	response = requests.get(
+	response = _vendor_get(
 		host + '/falconx/queries/reports/v1',
 		headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/json'},
 		params = {'filter': query_filter, 'limit': 10},
@@ -1014,7 +1048,7 @@ def query_safebrowsing(entry, observable_type, value):
 		raise AnalyzerError('Chave de API do Google Safe Browsing não configurada.')
 	# The API only takes URLs, so a bare domain is promoted to one
 	target = value if observable_type == 'url' else 'http://' + value
-	response = requests.post(
+	response = _vendor_post(
 		'https://safebrowsing.googleapis.com/v4/threatMatches:find',
 		params = {'key': api_key},
 		json = {
@@ -1044,7 +1078,7 @@ def query_phishtank(entry, observable_type, value):
 	if entry.get('apiKey'):
 		data['app_key'] = entry['apiKey']
 	# PhishTank rejects requests without an identifying User-Agent
-	response = requests.post(
+	response = _vendor_post(
 		'https://checkurl.phishtank.com/checkurl/',
 		data = data,
 		headers = {'User-Agent': 'phishtank/redphish'},
@@ -1071,11 +1105,29 @@ _openphish_cache = {}
 OPENPHISH_CACHE_TTL_SECONDS = 900
 
 
+def _fetch_openphish_feed(feed_url):
+	# `feedUrl` is the one address an admin types into a native analyzer, so it is
+	# the one vendor call that goes through the SSRF chain: validated on every
+	# fetch, never the internal network (the feed is external), connection pinned
+	# to the approved address, redirects refused
+	# Imported here because custom_analyzers imports this module
+	import custom_analyzers
+	import pinned_http
+	ok, error = custom_analyzers.validate_destination(feed_url)
+	if not ok:
+		raise AnalyzerError('Endereço do feed recusado: {0}'.format(error))
+	try:
+		response = pinned_http.get(feed_url, timeout = HTTP_TIMEOUT, allow_redirects = False)
+	except pinned_http.DestinationRefused as refused:
+		raise AnalyzerError('Destino recusado: {0}'.format(refused))
+	return _refuse_redirect(response)
+
+
 def query_openphish(entry, observable_type, value):
 	feed_url = entry.get('feedUrl') or 'https://openphish.com/feed.txt'
 	cached = _openphish_cache.get(feed_url)
 	if cached is None or cached[0] < time.time():
-		response = requests.get(feed_url, timeout = HTTP_TIMEOUT)
+		response = _fetch_openphish_feed(feed_url)
 		if response.status_code in (401, 403):
 			raise AnalyzerError('O OpenPhish recusou o acesso ao feed (HTTP {0}).'.format(response.status_code))
 		response.raise_for_status()
@@ -1102,7 +1154,7 @@ def query_urlhaus(entry, observable_type, value):
 	# abuse.ch moved URLhaus behind an Auth-Key during 2025
 	if entry.get('apiKey'):
 		headers['Auth-Key'] = entry['apiKey']
-	response = requests.post('https://urlhaus-api.abuse.ch/v1/{0}/'.format(endpoint),
+	response = _vendor_post('https://urlhaus-api.abuse.ch/v1/{0}/'.format(endpoint),
 		data = data, headers = headers, timeout = HTTP_TIMEOUT)
 	if response.status_code in (401, 403):
 		raise AnalyzerError('O URLhaus exige uma Auth-Key (HTTP {0}). Gere uma conta na abuse.ch '
@@ -1136,7 +1188,7 @@ def query_otx(entry, observable_type, value):
 	if not api_key:
 		raise AnalyzerError('Chave de API do AlienVault OTX não configurada.')
 	section = OTX_SECTIONS.get(observable_type, 'domain')
-	response = requests.get(
+	response = _vendor_get(
 		'https://otx.alienvault.com/api/v1/indicators/{0}/{1}/general'.format(section, value),
 		headers = {'X-OTX-API-KEY': api_key},
 		timeout = HTTP_TIMEOUT)
@@ -1158,7 +1210,7 @@ def query_hybridanalysis(entry, observable_type, value):
 	api_key = entry.get('apiKey', '')
 	if not api_key:
 		raise AnalyzerError('Chave de API do Hybrid Analysis não configurada.')
-	response = requests.post(
+	response = _vendor_post(
 		'https://www.hybrid-analysis.com/api/v2/search/hash',
 		data = {'hash': value},
 		headers = {'api-key': api_key, 'User-Agent': 'Falcon Sandbox', 'accept': 'application/json'},
@@ -1184,7 +1236,7 @@ def query_hybridanalysis(entry, observable_type, value):
 
 
 def _mdti_token(entry):
-	response = requests.post(
+	response = _vendor_post(
 		'https://login.microsoftonline.com/{0}/oauth2/v2.0/token'.format(entry.get('tenantId', '')),
 		data = {
 			'client_id': entry.get('clientId', ''),
@@ -1207,7 +1259,7 @@ def query_mdti(entry, observable_type, value):
 		if not entry.get(field):
 			raise AnalyzerError('Credenciais do Defender TI incompletas.')
 	token = _mdti_token(entry)
-	response = requests.get(
+	response = _vendor_get(
 		'https://graph.microsoft.com/beta/security/threatIntelligence/hosts/{0}/reputation'.format(value),
 		headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/json'},
 		timeout = HTTP_TIMEOUT)
@@ -1226,6 +1278,26 @@ def query_mdti(entry, observable_type, value):
 	}
 
 
+def _feed_client(feed):
+	def query(entry, observable_type, value):
+		result = feeds.lookup(feed, observable_type, value)
+		if result['listed']:
+			# A hit stays true when the copy is old: the list still names it
+			return {'listed': True, 'stale': result['status'] != 'fresh', 'count': result['count']}
+		# Not listed is only worth saying about a copy that is current. For a copy that
+		# does not exist or has gone stale it is an error, which also keeps the
+		# result out of the analysis cache (an hour of "no data" would outlive the
+		# download that fixes it)
+		if result['status'] == 'missing':
+			raise AnalyzerError('A lista {0} ainda não foi baixada. Atualize-a na tela de '
+				'integrações.'.format(feed['name']))
+		if result['status'] == 'stale':
+			raise AnalyzerError('A cópia local de {0} está desatualizada e não pôde ser '
+				'renovada; veja o erro no card.'.format(feed['name']))
+		return {'listed': False, 'stale': False, 'count': result['count']}
+	return query
+
+
 CLIENTS = {
 	'virustotal': query_virustotal,
 	'abuseipdb': query_abuseipdb,
@@ -1240,6 +1312,8 @@ CLIENTS = {
 	'hybridanalysis': query_hybridanalysis,
 	'mdti': query_mdti
 }
+for _feed in feeds.FEEDS:
+	CLIENTS[_feed['id']] = _feed_client(_feed)
 
 
 # --------------------------------------------------------------------------- #
@@ -1250,6 +1324,11 @@ def describe(analyzer_id, signal):
 	"""One human-readable line about what the analyzer actually saw."""
 	if signal is None:
 		return 'sem resposta'
+	if analyzer_id in feeds.BY_ID:
+		if not signal.get('listed'):
+			return 'não consta na lista (isso não é um aval: a lista não avaliou este indicador)'
+		return 'consta na lista{0}'.format(
+			', mas a cópia local está desatualizada' if signal.get('stale') else '')
 	if analyzer_id == 'virustotal':
 		if signal.get('unknown'):
 			return 'indicador desconhecido do VirusTotal (nunca submetido)'

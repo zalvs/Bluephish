@@ -45,8 +45,7 @@ def disk_entry(path, **overrides):
 def all_off():
 	"""Defaults com todo destino desligado.
 
-	TheHive vem ligado de fábrica de propósito (antes da refatoração toda análise
-	criava um caso lá, e um upgrade que parasse de criar pareceria perda de dado).
+	O disco vem ligado de fábrica (é o destino que não depende de serviço nenhum).
 	Um teste que queira isolar um destino precisa desligá-lo explicitamente.
 	"""
 	config = tickets.default_config()
@@ -432,14 +431,38 @@ class RegistryIntegrity(unittest.TestCase):
 			for field in spec['credentials'] + spec['settings']:
 				self.assertIn(field['key'], config[spec['id']])
 
-	def test_only_the_disk_ships_enabled_on_a_fresh_installation(self):
-		# Uma instalação nova roda só com o Bluephish, sem TheHive nem Jira: o único
-		# destino que funciona sem nenhum serviço é o disco. Os outros são adesão
-		# explícita (quem já usava o TheHive é tratado em DestinationDefaults).
+	def test_only_disk_ships_enabled(self):
+		# O disco é o único destino que não precisa de nada fora deste processo:
+		# uma instalação nova registra as análises sem configurar serviço nenhum.
+		# TheHive e Jira são adesão explícita.
 		config = tickets.default_config()
 		self.assertTrue(config['disk']['enabled'])
 		self.assertFalse(config['thehive']['enabled'])
 		self.assertFalse(config['jira']['enabled'])
+
+	def test_the_default_disk_path_survives_a_rebuild(self):
+		# Ligado de fábrica, o disco grava onde o padrão apontar. Fora de data/
+		# (o bind-mount) o histórico sumiria no primeiro rebuild da imagem
+		path = tickets.default_config()['disk']['path']
+		self.assertTrue(path.startswith('/root/thephish/data/'))
+
+	def test_thehive_is_imported_only_where_it_is_used(self):
+		# O TheHive é opcional: a aplicação tem de subir, analisar e gravar em
+		# disco sem que o thehive4py seja sequer carregado. Um import no topo de
+		# tickets.py faria dele uma dependência de toda análise outra vez
+		import ast
+		here = os.path.dirname(os.path.abspath(__file__))
+		with open(os.path.join(here, 'tickets.py'), encoding = 'utf-8') as source:
+			tree = ast.parse(source.read())
+		at_module_level = []
+		for node in tree.body:
+			names = []
+			if isinstance(node, ast.Import):
+				names = [alias.name for alias in node.names]
+			elif isinstance(node, ast.ImportFrom):
+				names = [node.module or '']
+			at_module_level.extend(name for name in names if name.split('.')[0] == 'thehive4py')
+		self.assertEqual(at_module_level, [])
 
 	def test_a_configuration_without_the_section_still_loads(self):
 		config = tickets.load_config(path = 'no-such-file.json')
@@ -447,72 +470,172 @@ class RegistryIntegrity(unittest.TestCase):
 		self.assertEqual(config['disk']['minVerdict'], 'all')
 
 
-class DestinationDefaults(unittest.TestCase):
-	"""Qual destino vem ligado, e para quem.
+class DefaultsOnUpgrade(unittest.TestCase):
+	"""O padrão mudou de TheHive para disco, e quem já usava o TheHive não pode notar.
 
-	Uma instalação nova roda só com o Bluephish. O destino que funciona sem nenhum
-	serviço é o disco, então é ele que vem ligado: as telas de histórico têm de onde
-	ler desde a primeira análise, e nenhuma análise tenta falar com um TheHive que
-	não existe. Quem já usava o TheHive não pode sentir a diferença — uma atualização
-	que parasse de criar casos pareceria que a aplicação os perdeu —, então ter uma
-	chave do TheHive salva, ou destinos já gravados, mantém o comportamento de antes.
+	A instalação típica de antes nunca salvou a seção `ticketing`: ela registrava
+	no TheHive porque esse era o padrão, e o que a identifica é ter endereço e
+	chave na seção `thehive`. Se a troca de padrão a alcançasse, o upgrade
+	desligaria o TheHive e passaria a gravar todo e-mail denunciado em disco —
+	sem erro nenhum, só casos que param de chegar.
 	"""
 
 	def setUp(self):
-		import tempfile
 		handle, self.path = tempfile.mkstemp(suffix = '.json')
 		os.close(handle)
 
 	def tearDown(self):
 		os.unlink(self.path)
 
-	def write(self, content):
+	def load(self, document):
 		with open(self.path, 'w') as conf_file:
-			json.dump(content, conf_file)
+			json.dump(document, conf_file)
+		return tickets.load_config(path = self.path)
 
-	def test_a_fresh_installation_records_to_disk_and_not_to_thehive(self):
-		self.write({'thehive': {'url': 'http://thehive:9000', 'apikey': ''}})
-
-		config = tickets.load_config(path = self.path)
-
+	def test_a_fresh_installation_records_to_disk(self):
+		config = self.load({'thehive': {'url': '', 'apikey': ''}})
 		self.assertTrue(config['disk']['enabled'])
 		self.assertFalse(config['thehive']['enabled'])
+
+	def test_a_configuration_without_any_of_the_sections_records_to_disk(self):
+		config = self.load({})
+		self.assertTrue(config['disk']['enabled'])
+		self.assertFalse(config['thehive']['enabled'])
+
+	def test_an_installation_already_on_thehive_stays_on_thehive(self):
+		config = self.load({'thehive': {'url': 'http://thehive:9000', 'apikey': 'chave-antiga'}})
+		self.assertTrue(config['thehive']['enabled'])
+
+	def test_and_does_not_start_writing_reported_mail_to_disk(self):
+		# O e-mail denunciado é dado pessoal de quem denunciou. Começar a gravá-lo
+		# em disco tem de ser decisão de alguém, não efeito de um upgrade
+		config = self.load({'thehive': {'url': 'http://thehive:9000', 'apikey': 'chave-antiga'}})
+		self.assertFalse(config['disk']['enabled'])
 		self.assertFalse(config['jira']['enabled'])
 
-	def test_an_unreadable_file_is_treated_as_a_fresh_installation(self):
-		config = tickets.load_config(path = 'no-such-file.json')
-
-		self.assertTrue(config['disk']['enabled'])
+	def test_an_address_that_never_got_a_key_is_not_an_installation_on_thehive(self):
+		# O arquivo de exemplo trazia o endereço preenchido e a chave em branco.
+		# Quem nunca pôs a chave nunca gravou um caso lá
+		config = self.load({'thehive': {'url': 'http://thehive:9000', 'apikey': ''}})
 		self.assertFalse(config['thehive']['enabled'])
+		self.assertTrue(config['disk']['enabled'])
 
-	def test_a_saved_thehive_key_keeps_thehive_on_after_an_upgrade(self):
-		self.write({'thehive': {'url': 'http://thehive:9000', 'apikey': 'chave-real'}})
-
-		config = tickets.load_config(path = self.path)
-
-		self.assertTrue(config['thehive']['enabled'])
-		self.assertFalse(config['disk']['enabled'])
-
-	def test_destinations_already_saved_are_respected_as_they_were_saved(self):
-		self.write({
+	def test_the_address_the_template_shipped_is_not_carried_into_the_card(self):
+		# O arquivo de configuração vivo não é atualizado por `git pull`, então o
+		# endereço do contêiner do TheHive continua nele em toda instalação. Sem
+		# chave, levá-lo para o card impede até de salvar o card: campo em branco
+		# volta ao valor gravado, e `thehive` não resolve onde não há TheHive
+		config = self.load({
 			'thehive': {'url': 'http://thehive:9000', 'apikey': ''},
+			'misp': {'id': 'MISP THP'}
+		})
+		self.assertEqual(config['thehive']['url'], '')
+		self.assertEqual(config['thehive']['mispId'], '')
+		entry, error = tickets.validate_entry('thehive', {'enabled': False, 'url': ''}, config['thehive'])
+		self.assertIsNone(error)
+		self.assertEqual(entry['url'], '')
+
+	def test_with_a_key_the_same_address_is_a_real_one(self):
+		config = self.load({
+			'thehive': {'url': 'http://thehive:9000', 'apikey': 'chave-antiga'},
+			'misp': {'id': 'MISP THP'}
+		})
+		self.assertEqual(config['thehive']['url'], 'http://thehive:9000')
+		self.assertEqual(config['thehive']['mispId'], 'MISP THP')
+
+	def test_an_address_somebody_typed_is_kept_while_the_key_is_missing(self):
+		# O formulário pode ser preenchido em etapas: endereço hoje, chave amanhã
+		config = self.load({
+			'thehive': {'url': 'https://thehive.exemplo.com', 'apikey': ''},
+			'misp': {'id': 'MISP da equipe'}
+		})
+		self.assertEqual(config['thehive']['url'], 'https://thehive.exemplo.com')
+		self.assertEqual(config['thehive']['mispId'], 'MISP da equipe')
+
+	def test_what_the_administrator_saved_outranks_both_defaults(self):
+		config = self.load({
+			'thehive': {'url': 'http://thehive:9000', 'apikey': 'chave-antiga'},
 			'ticketing': {'thehive': {'enabled': False}, 'disk': {'enabled': True}}
 		})
-
-		config = tickets.load_config(path = self.path)
-
 		self.assertFalse(config['thehive']['enabled'])
 		self.assertTrue(config['disk']['enabled'])
 
-	def test_an_installation_that_saved_the_section_keeps_thehive_as_its_default(self):
-		# Gravou a seção sem dizer nada sobre o TheHive: é uma instalação de antes,
-		# e para ela o padrão continua sendo o de sempre
-		self.write({'ticketing': {'jira': {'enabled': True}}})
+	def test_disk_switched_off_on_purpose_stays_off(self):
+		config = self.load({
+			'thehive': {'url': '', 'apikey': ''},
+			'ticketing': {'disk': {'enabled': False}}
+		})
+		self.assertFalse(config['disk']['enabled'])
 
-		config = tickets.load_config(path = self.path)
+	def test_saving_once_makes_the_inherited_choice_explicit(self):
+		# Depois do primeiro Salvar a escolha está no arquivo, e deixa de depender
+		# de a chave continuar lá
+		config = self.load({'thehive': {'url': 'http://thehive:9000', 'apikey': 'chave-antiga'}})
+		tickets.save_config(config, path = self.path)
+		with open(self.path) as conf_file:
+			stored = json.load(conf_file)
+		self.assertTrue(stored['ticketing']['thehive']['enabled'])
+		self.assertFalse(stored['ticketing']['disk']['enabled'])
 
-		self.assertTrue(config['thehive']['enabled'])
-		self.assertTrue(config['jira']['enabled'])
+
+class TheApplicationDoesNotNeedTheHive(unittest.TestCase):
+	"""O que em thephish_app.py supunha que o TheHive estava lá.
+
+	Lido no texto, como em test_page_routes: thephish_app não se importa fora da
+	imagem. São três suposições, e nenhuma delas dava erro que alguém ligasse ao
+	TheHive — uma listagem de casos que não abre, um nome de exportação que some.
+	"""
+
+	def setUp(self):
+		here = os.path.dirname(os.path.abspath(__file__))
+		with open(os.path.join(here, 'thephish_app.py'), encoding = 'utf-8') as source:
+			self.source = source.read()
+
+	def function(self, name):
+		start = self.source.index('\ndef {0}('.format(name))
+		end = self.source.find('\ndef ', start + 1)
+		return self.source[start:end if end != -1 else len(self.source)]
+
+	def test_the_settings_do_not_require_the_section(self):
+		# conf_dict['thehive']['url'] era um KeyError à espera de uma configuração
+		# que nunca teve TheHive
+		body = self.function('thehive_settings')
+		self.assertNotIn("conf_dict['thehive']", body)
+		self.assertIn("conf_dict.get('thehive')", body)
+
+	def test_a_listing_with_no_thehive_record_does_not_read_the_settings(self):
+		# observables_for chama isto em toda listagem. Com o histórico vindo do
+		# disco não há nada a buscar, e a saída tem de vir antes da leitura
+		body = self.function('thehive_observables_for')
+		self.assertLess(body.index('if not case_ids:'), body.index('thehive_settings()'))
+
+	def test_thehive_reads_do_not_call_requests_directly(self):
+		# thehive_query e a leitura do .eml do chat são as duas chamadas HTTP ao
+		# TheHive que não passam pelo thehive4py. Com `requests.post/get` direto
+		# seguiriam redirect e pulariam a revalidação da hora da chamada
+		for name in ('thehive_query', 'chat_extract_email_body'):
+			body = self.function(name)
+			self.assertNotIn('requests.', body, name)
+			self.assertIn('tickets.thehive_call(', body, name)
+
+	def test_a_thehive_reference_without_thehive_gets_an_answer(self):
+		body = self.function('build_chat_context')
+		self.assertIn('not (base_url and apikey)', body)
+		self.assertLess(body.index('not (base_url and apikey)'), body.index('thehive_query('))
+
+	def test_the_test_button_validates_as_a_call_and_saving_does_not(self):
+		# validate_entry dispensa a trava num único caso (desligar sem mexer no
+		# endereço), e só no salvar. Se a rota de teste perdesse o `probing`, o
+		# botão Testar chamaria um endereço que ninguém conferiu
+		self.assertIn('probing = True', self.function('test_ticket_destination'))
+		self.assertNotIn('probing', self.function('update_ticket_destination'))
+
+	def test_saving_the_case_parameters_leaves_the_misp_name_alone(self):
+		# O campo saiu do formulário. Ler a ausência dele como "em branco" apagaria
+		# o nome da exportação de quem usa o TheHive ao salvar o TLP
+		body = self.function('update_case_config')
+		self.assertIn('if misp_id is not None:', body)
+		self.assertLess(body.index('if misp_id is not None:'), body.index("misp_conf['id']"))
 
 
 class TheHiveCredentials(unittest.TestCase):
@@ -614,6 +737,48 @@ class TheHiveCredentials(unittest.TestCase):
 		entry, error = tickets.validate_entry('thehive',
 			{'enabled': True, 'url': 'http://nome-que-nao-existe.invalid:9000', 'apikey': 'x'},
 			stored)
+		self.assertIsNone(entry)
+		self.assertIn('resolver', error)
+
+	def stored_without_a_host(self):
+		"""O que tem gravado quem atualizou de uma instalação com o TheHive no compose."""
+		return {'enabled': True, 'url': 'http://thehive-que-saiu.invalid:9000', 'apikey': 'chave-antiga'}
+
+	def test_desligar_nao_exige_que_o_endereco_gravado_ainda_resolva(self):
+		# O TheHive saiu do compose e o nome dele não resolve mais. A trava,
+		# cobrada no salvar, recusava exatamente o salvar que desliga o destino —
+		# e o destino ficava ligado, falhando a cada análise, sem saída pela tela
+		stored = self.stored_without_a_host()
+		for submitted_url in ('', stored['url']):
+			entry, error = tickets.validate_entry('thehive',
+				{'enabled': False, 'url': submitted_url, 'apikey': ''}, stored)
+			self.assertIsNone(error)
+			self.assertFalse(entry['enabled'])
+			self.assertEqual(entry['url'], stored['url'])
+			self.assertEqual(entry['apikey'], 'chave-antiga')
+
+	def test_ligar_continua_exigindo(self):
+		stored = self.stored_without_a_host()
+		entry, error = tickets.validate_entry('thehive',
+			{'enabled': True, 'url': '', 'apikey': ''}, stored)
+		self.assertIsNone(entry)
+		self.assertIn('resolver', error)
+
+	def test_um_endereco_novo_e_conferido_mesmo_com_o_destino_desligado(self):
+		# A exceção é para o endereço que já estava gravado. Um endereço novo,
+		# gravado sem conferir num destino desligado, seria lido depois pelas
+		# telas que consultam um caso do TheHive pelo número
+		stored = self.stored_without_a_host()
+		entry, error = tickets.validate_entry('thehive',
+			{'enabled': False, 'url': 'http://outro-nome.invalid:9000', 'apikey': ''}, stored)
+		self.assertIsNone(entry)
+		self.assertIn('resolver', error)
+
+	def test_o_botao_testar_nunca_dispensa_a_trava(self):
+		# Testar usa a entrada agora, numa chamada ao destino
+		stored = self.stored_without_a_host()
+		entry, error = tickets.validate_entry('thehive',
+			{'enabled': False, 'url': '', 'apikey': ''}, stored, probing = True)
 		self.assertIsNone(entry)
 		self.assertIn('resolver', error)
 

@@ -17,6 +17,7 @@ análise parar por causa do arquivo que serve para revê-la.
 """
 
 import json
+import config_file
 import os
 import threading
 
@@ -48,8 +49,7 @@ def load_config(path = CONFIG_FILE):
 	"""
 	entry = {}
 	try:
-		with open(path) as conf_file:
-			entry = json.load(conf_file).get('caseEvidence') or {}
+		entry = config_file.read(path).get('caseEvidence') or {}
 	except Exception:
 		entry = {}
 	if not isinstance(entry, dict):

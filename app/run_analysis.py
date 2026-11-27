@@ -25,8 +25,10 @@ veredito. Nenhuma linha deste módulo fala com o TheHive; quando o veredito sai,
 disco, os três ou nenhum.
 """
 
+import collections
 import logging.config
 import json
+import config_file
 import os
 import shutil
 import tempfile
@@ -41,7 +43,6 @@ import analyzers
 import case_evidence
 import case_insights
 import case_scope
-import config_io
 import connectors
 import custom_analyzers
 import departments
@@ -81,6 +82,28 @@ ruleset = whitelist.empty_ruleset()
 # sistema: o teto existe para não bater no limite de consultas de meia dúzia de
 # fornecedores de uma vez, não por custo de memória.
 MAX_PARALLEL_ANALYSES = 8
+
+# Quantas consultas um único e-mail pode pedir a cada analisador (§7.21). Quem
+# decide quantos domínios um e-mail traz é quem o escreveu: 40.000 domínios viravam
+# 320.000 consultas. Por analisador, e não para a mensagem, porque a cota é de cada
+# fornecedor: um teto da mensagem inteira, com um fornecedor só ligado, seria todo
+# gasto nele. O dobro do maior e-mail real medido em 2026-11-23, que pede 70 a um
+# fornecedor nativo e 75 a um analisador customizado que aceite todos os tipos.
+MAX_JOBS_PER_ANALYZER = 150
+
+# Quanto do que ficou de fora é citado por extenso. O resto vai em contagem: a
+# lista inteira, numa mensagem hostil, seria maior que o próprio relatório
+MAX_OMITTED_EXAMPLES = 5
+MAX_OMITTED_EXAMPLE_LENGTH = 80
+
+# De quantos em quantos observáveis o corte devolve a vez ao hub
+PLANNING_YIELD_EVERY = 200
+
+# Os cabeçalhos que dizem quem enviou. Os outros (`Received` e afins) são sobretudo
+# repetição do caminho, e quem os escreve pode acrescentar quantos quiser
+SENDER_HEADER_TAGS = frozenset(('email_header_From', 'email_header_Reply-To',
+	'email_header_Return-Path', 'email_header_Sender'))
+BODY_TYPE_PRIORITY = {'url': 2, 'domain': 3, 'ip': 4}
 
 # Um 429 não é um veredito, é um "volte daqui a pouco". A chave gratuita do
 # VirusTotal permite 4 consultas por minuto, então a espera é da ordem do minuto
@@ -160,25 +183,178 @@ def plan_jobs(observables_info, native_config, custom_definitions):
 	ausência de relatório como ausência de evidência.
 	"""
 	planned = []
+	applicable = {}
 	for observable_info in observables_info:
 		observable_type = observable_info['type']
-		for spec in analyzers.ANALYZERS:
-			if not native_config.get(spec['id'], {}).get('enabled'):
-				continue
-			# `sends` e não `supports`: além do que o fornecedor sabe avaliar,
-			# vale o que quem administra escolheu mandar para ele
-			if not analyzers.sends(spec['id'], observable_type, native_config):
-				continue
-			planned.append({'observable': observable_info, 'kind': 'native',
-				'id': spec['id'], 'name': spec['name']})
-		for definition in custom_definitions:
-			if not definition.get('enabled'):
-				continue
-			if str(observable_type).split('_')[0] not in definition.get('observables', []):
-				continue
-			planned.append({'observable': observable_info, 'kind': 'custom',
-				'id': definition['id'], 'name': definition.get('name') or definition['id']})
+		if observable_type not in applicable:
+			applicable[observable_type] = applicable_analyzers(observable_type, native_config, custom_definitions)
+		for kind, analyzer_id, name in applicable[observable_type]:
+			planned.append({'observable': observable_info, 'kind': kind, 'id': analyzer_id, 'name': name})
 	return planned
+
+
+def applicable_analyzers(observable_type, native_config, custom_definitions):
+	"""[(kind, id, name)] de quem avalia este tipo. Depende só do tipo, não do valor."""
+	applicable = []
+	for spec in analyzers.ANALYZERS:
+		if not native_config.get(spec['id'], {}).get('enabled'):
+			continue
+		# `sends` e não `supports`: além do que o fornecedor sabe avaliar,
+		# vale o que quem administra escolheu mandar para ele
+		if not analyzers.sends(spec['id'], observable_type, native_config):
+			continue
+		applicable.append(('native', spec['id'], spec['name']))
+	for definition in custom_definitions:
+		if not definition.get('enabled'):
+			continue
+		if str(observable_type).split('_')[0] not in definition.get('observables', []):
+			continue
+		applicable.append(('custom', definition['id'], definition.get('name') or definition['id']))
+	return applicable
+
+
+def observable_priority(observable_info):
+	"""Quem é consultado primeiro quando não dá para consultar todos. Menor vem antes.
+
+	Anexo, porque é o dano mais caro e menos reversível; o destino de um encurtador,
+	que é o que o link esconde; depois o corpo, que é o que a vítima clica; o
+	remetente; e por último o resto do cabeçalho, sobretudo repetição do caminho.
+	"""
+	tags = observable_info.get('tags') or []
+	base_type = str(observable_info.get('type') or '').split('_')[0]
+	if base_type in ('file', 'hash'):
+		return 0
+	if 'unshortened_url' in tags:
+		return 1
+	if 'email_body' in tags:
+		return BODY_TYPE_PRIORITY.get(base_type, 5)
+	if SENDER_HEADER_TAGS.intersection(tags):
+		return 6
+	return 7
+
+
+def plan_capped_jobs(observables_info, native_config, custom_definitions, limit = MAX_JOBS_PER_ANALYZER):
+	"""O plano dentro do teto. Devolve (jobs, omissão), e a omissão é None sem corte.
+
+	Abaixo do teto o resultado é o próprio `plan_jobs`, na mesma ordem: um e-mail
+	normal não pode perceber que esta função existe. Só o analisador que passou do
+	teto é cortado — uma enxurrada de domínios não é motivo para o AbuseIPDB deixar
+	de olhar os IPs.
+	"""
+	applicable = dict((observable_type, applicable_analyzers(observable_type, native_config, custom_definitions))
+		for observable_type in set(o['type'] for o in observables_info))
+	demand = collections.Counter()
+	for observable_type, count in collections.Counter(o['type'] for o in observables_info).items():
+		for kind, analyzer_id, _name in applicable[observable_type]:
+			demand[(kind, analyzer_id)] += count
+	if not demand or max(demand.values()) <= limit:
+		return plan_jobs(observables_info, native_config, custom_definitions), None
+
+	over_limit = set(key for key, count in demand.items() if count > limit)
+	admitted, omitted, capped_names = _admit_within_limit(observables_info, applicable, over_limit, limit)
+	planned = [job for _position, job in sorted(admitted, key = lambda item: item[0])]
+	return planned, {
+		'limit': limit,
+		'plannedJobs': sum(demand.values()),
+		'runJobs': len(planned),
+		'observables': len(omitted),
+		'byType': dict(collections.Counter(obs_type.split('_')[0] for obs_type, _value in omitted)),
+		'analyzers': sorted(capped_names),
+		'examples': _omission_examples([value for _type, value in omitted])
+	}
+
+
+def _omission_examples(values):
+	"""Os primeiros valores, em uma linha: o nome de um anexo é escrito por quem atacou e vai para o log."""
+	return [' '.join(str(value).split())[:MAX_OMITTED_EXAMPLE_LENGTH] for value in values[:MAX_OMITTED_EXAMPLES]]
+
+
+def unresolved_urls_omission(left_out, planned_jobs, limit = MAX_JOBS_PER_ANALYZER):
+	"""A omissão de quando só a resolução de encurtadores foi cortada.
+
+	Acontece sem analisador de URL ligado: o plano não corta nada, mas o destino
+	atrás de um encurtador não resolvido nunca chegou a virar observável.
+	"""
+	return {
+		'limit': limit,
+		'plannedJobs': planned_jobs,
+		'runJobs': planned_jobs,
+		'observables': len(left_out),
+		'byType': {'url': len(left_out)},
+		'analyzers': ['resolução de encurtadores'],
+		'examples': _omission_examples(left_out)
+	}
+
+
+def _admit_within_limit(observables_info, applicable, over_limit, limit):
+	"""Percorre por prioridade e admite até o teto de cada analisador que passou dele.
+
+	Uma cópia de um valor já consultado por aquele analisador não gasta o teto nem
+	vira uma segunda chamada: o cache não a seguraria com o fornecedor falhando, e
+	cópias são o jeito mais barato de empurrar um domínio real para fora do teto.
+	"""
+	used = collections.Counter()
+	queried = dict((key, set()) for key in over_limit)
+	admitted = []
+	omitted = {}
+	capped_names = set()
+	ordered = sorted(enumerate(observables_info), key = lambda pair: observable_priority(pair[1]))
+	for walked, (index, observable_info) in enumerate(ordered, 1):
+		value_key = (observable_info['type'], observable_info['name'])
+		for position, (kind, analyzer_id, name) in enumerate(applicable[observable_info['type']]):
+			key = (kind, analyzer_id)
+			if key in over_limit:
+				if value_key in queried[key]:
+					continue
+				if used[key] >= limit:
+					omitted[value_key] = True
+					capped_names.add(name)
+					continue
+				queried[key].add(value_key)
+				used[key] += 1
+			admitted.append(((index, position),
+				{'observable': observable_info, 'kind': kind, 'id': analyzer_id, 'name': name}))
+		if walked % PLANNING_YIELD_EVERY == 0:
+			eventlet.sleep(0)
+	return admitted, omitted, capped_names
+
+
+def queries_left_out(omission):
+	"""Se algum valor ficou sem consulta. Cópia cortada de valor consultado não conta."""
+	return bool(omission and omission.get('observables'))
+
+
+def describe_omission(omission):
+	"""O que ficou de fora, na frase que a analista lê no log e na trilha."""
+	by_type = ', '.join('{0} {1}'.format(count, obs_type)
+		for obs_type, count in sorted(omission['byType'].items()))
+	return ('{0} observável(is) ficaram sem consulta em ao menos um analisador ({1}): o e-mail passou do '
+		'teto de {2} consultas por analisador ({3} pedidas, {4} feitas). No teto: {5}. Primeiros de fora: {6}').format(
+		omission['observables'], by_type, omission['limit'], omission['plannedJobs'], omission['runJobs'],
+		', '.join(omission['analyzers']), ', '.join(omission['examples']))
+
+
+def describe_omission_for_model(omission):
+	"""O aviso para o modelo, só com contagem: nenhum texto de quem escreveu o e-mail."""
+	return ('Coverage is partial: {0} indicator(s) of this email were NOT checked by at least one reputation '
+		'service, because the email exceeded the per-service query limit. A clean result says nothing '
+		'about them.').format(omission['observables'])
+
+
+def urls_to_unshorten(observables, limit = MAX_JOBS_PER_ANALYZER):
+	"""As URLs a resolver e os valores distintos que ficaram de fora.
+
+	Resolver é uma requisição por URL, em sequência e antes do plano. Sem o mesmo
+	teto, uma enxurrada de URLs prenderia a análise aqui e ela nunca chegaria a ele.
+	"""
+	urls = [o for o in observables if o['type'] == 'url']
+	if len(urls) <= limit:
+		return urls, []
+	distinct = {}
+	for url in sorted(urls, key = observable_priority):
+		distinct.setdefault(url['name'], url)
+	chosen = list(distinct.values())
+	return chosen[:limit], [url['name'] for url in chosen[limit:]]
 
 
 # --------------------------------------------------------------------------- #
@@ -415,15 +591,28 @@ def analyze_observables(observables, wsl):
 
 	# Resolve the shorteners before planning: the destination becomes an
 	# observable and has to be planned along with the others
-	for observable_info in list(observables):
-		if observable_info['type'] == 'url':
-			try:
-				unshorten_url_observable(observable_info, observables, wsl)
-			except Exception:
-				log.warning("Error while unshortening {0}: {1}".format(
-					observable_info['name'], traceback.format_exc()))
+	urls, urls_left_out = urls_to_unshorten(observables)
+	if urls_left_out:
+		log.warning("Shortener resolution capped: {0} distinct URL(s) were not resolved".format(len(urls_left_out)))
+		wsl.emit_warning("Este e-mail traz URLs demais: {0} não tiveram encurtador resolvido.".format(len(urls_left_out)))
+	for observable_info in urls:
+		try:
+			unshorten_url_observable(observable_info, observables, wsl)
+		except Exception:
+			log.warning("Error while unshortening {0}: {1}".format(
+				observable_info['name'], traceback.format_exc()))
 
-	planned = plan_jobs(observables, native_config, custom_definitions)
+	planned, omission = plan_capped_jobs(observables, native_config, custom_definitions)
+	if urls_left_out and not queries_left_out(omission):
+		omission = unresolved_urls_omission(urls_left_out, len(planned))
+
+	if queries_left_out(omission):
+		summary = describe_omission(omission)
+		log.warning("Analyzer query cap reached: {0}".format(summary))
+		wsl.emit_warning("Teto de consultas atingido: {0}. Este e-mail não será classificado como seguro.".format(summary))
+	elif omission:
+		log.info("Analyzer query cap: {0} repeated job(s) reused a value already queried".format(
+			omission['plannedJobs'] - omission['runJobs']))
 
 	if not planned:
 		log.warning('No native analyzer is enabled for the observables of this case')
@@ -459,9 +648,10 @@ def analyze_observables(observables, wsl):
 	finally:
 		shutil.rmtree(workdir, ignore_errors = True)
 
-	_info("All the analysis jobs terminated", wsl)
+	log.info("All the analysis jobs terminated")
+	wsl.emit_info("All the analysis jobs terminated")
 
-	return reports_observables
+	return reports_observables, omission
 
 
 # Condense the analyzer reports into a short text the LLM can reason about. The
@@ -524,35 +714,7 @@ def summarize_link_destinations(observables):
 	return '\n'.join(lines)
 
 
-# Conta os observáveis que algum analisador marcou.
-# Um observável malicioso é marcado como IoC no próprio objeto: o destino de
-# ticket lê essa marca ao registrar a análise — o TheHive continua recebendo os
-# observáveis marcados, só que no fim em vez de durante
-def _count_flagged_observables(observables_info, reports_observables):
-	malicious = 0
-	suspicious = 0
-	for observable_info in observables_info:
-		results = [report['analyzer_result'] for report in reports_observables
-			if report['observable_id'] == observable_info['id']]
-		if 'malicious' in results:
-			malicious += 1
-			observable_info['ioc'] = True
-		if 'suspicious' in results:
-			suspicious += 1
-	return malicious, suspicious
-
-
-# Um observável malicioso basta para o e-mail ser malicioso; na falta dele, um
-# suspeito basta para ser suspeito; sem nenhum dos dois o e-mail é seguro
-def _verdict_from_counts(malicious, suspicious):
-	if malicious:
-		return "Malicious"
-	if suspicious:
-		return "Suspicious"
-	return "Safe"
-
-
-def terminate_analysis(subject, mail_to, observables_info, reports_observables, llm_result, wsl, auth_results = None, sent_log = None, observables_seen = None, injection_findings = None, bulk_signals = None, trail = None, notify = True, content_key = ''):
+def terminate_analysis(subject, mail_to, observables_info, reports_observables, llm_result, wsl, auth_results = None, sent_log = None, observables_seen = None, injection_findings = None, bulk_signals = None, trail = None, notify = True, content_key = '', precedents = None, extraction_complete = True, query_omission = None):
 
 	# O passo a passo do veredito, na ordem em que foi decidido. Cada etapa diz o
 	# veredito depois dela e por quê — inclusive quando não mudou nada, porque
@@ -566,11 +728,43 @@ def terminate_analysis(subject, mail_to, observables_info, reports_observables, 
 	def note(stage, reason):
 		trail.append({'stage': stage, 'verdict': verdict, 'reason': reason})
 
-	# Quantos observáveis têm ao menos um relatório malicioso e quantos têm ao
-	# menos um suspeito: um relatório basta para o observável ser classificado
-	malicious_observables, suspicious_observables = _count_flagged_observables(observables_info, reports_observables)
-	verdict = _verdict_from_counts(malicious_observables, suspicious_observables)
+	# Initialize the number of malicious and suspicious observables to 0
+	malicious_observables = 0
+	suspicious_observables = 0
+	
+	# Which observables each level reached. Indexed once and not searched per
+	# observable: the ones the query cap left out are still in this list, and
+	# walking every report for each of 40.000 of them stopped the hub for seconds
+	malicious_ids = set()
+	suspicious_ids = set()
+	for report_obs in reports_observables:
+		if report_obs['analyzer_result'] == 'malicious':
+			malicious_ids.add(report_obs['observable_id'])
+		elif report_obs['analyzer_result'] == 'suspicious':
+			suspicious_ids.add(report_obs['observable_id'])
 
+	for observable_info in observables_info:
+		# If there is a malicious report for this observable, the observable is malicious
+		if observable_info['id'] in malicious_ids:
+			malicious_observables += 1
+			# Mark the observable as IoC on the object itself. A ticket destination
+			# reads this flag when it records the analysis — TheHive still gets its
+			# observables marked, it just gets them at the end instead of during
+			observable_info['ioc'] = True
+		# If there is a suspicious report for this observable, the observable is suspicious
+		if observable_info['id'] in suspicious_ids:
+			suspicious_observables += 1
+
+
+	# If there is at least one malicious observable, then the email is malicious
+	if malicious_observables > 0:
+		verdict = "Malicious"
+	# If there is at least one suspicious observable, then the email is suspicious
+	elif suspicious_observables > 0:
+		verdict = "Suspicious"
+	# Else the email is safe
+	else:
+		verdict = "Safe"
 	if malicious_observables or suspicious_observables:
 		note('analyzers', '{0} observável(is) com resultado malicioso e {1} suspeito(s) segundo os analisadores'.format(
 			malicious_observables, suspicious_observables))
@@ -579,6 +773,14 @@ def terminate_analysis(subject, mail_to, observables_info, reports_observables, 
 			len(reports_observables)))
 	else:
 		note('analyzers', 'Nenhum analisador avaliou os observáveis deste e-mail')
+	# Logo depois dos analisadores, porque é sobre o que eles acusaram: um host que
+	# a equipe já julgou falso positivo. Não muda o veredito — a linha existe para
+	# quem abrir o caso não refazer uma investigação que já foi feita
+	precedent_note = verdict_memory.describe_for_trail(precedents)
+	if precedent_note:
+		log.info(precedent_note)
+		wsl.emit_info(precedent_note)
+		note('precedent', precedent_note)
 	# A pure social engineering email (BEC, fresh phishing domains still unknown to the
 	# reputation services) contains no observable that the analyzers can flag, so they
 	# alone would classify it as Safe. If the local LLM detected social engineering with
@@ -769,6 +971,30 @@ def terminate_analysis(subject, mail_to, observables_info, reports_observables, 
 			"o caso fica Suspicious para uma pessoa decidir.".format(why))
 		note('coverage', 'Sem avaliação: {0}. Um e-mail que ninguém conseguiu olhar não é Safe: elevado para Suspicious'.format(why))
 
+	# O mesmo piso para o que não foi nem extraído. Aqui uma opinião `safe` não
+	# basta: ela vale para os indicadores que a extração achou, e o que ficou por
+	# ler pode ser justamente a URL que o lixo antes dela estava escondendo
+	if verdict == 'Safe' and not extraction_complete:
+		verdict = 'Suspicious'
+		log.warning("Indicator extraction did not finish: Safe raised to Suspicious")
+		wsl.emit_warning("A extração de indicadores não leu este e-mail inteiro. Sem isso não há Seguro — "
+			"o caso fica Suspicious para uma pessoa decidir.")
+		note('coverage', 'A extração de indicadores não terminou no tempo limite: o que não foi lido não pode ser declarado Safe. Elevado para Suspicious')
+
+	# E para o que foi lido e não foi consultado (§7.21): o `safe` de quem respondeu
+	# vale para os observáveis que couberam no teto. A etapa entra na trilha mesmo
+	# quando o veredito já está acima de Safe, porque é ela que diz à analista o
+	# que ninguém olhou
+	left_out = queries_left_out(query_omission)
+	if left_out and verdict == 'Safe':
+		verdict = 'Suspicious'
+		log.warning("Query cap left observables unchecked: Safe raised to Suspicious")
+		note('coverage', '{0}. O que não foi consultado não pode ser declarado Safe: elevado para Suspicious'.format(
+			describe_omission(query_omission)))
+	elif left_out:
+		note('coverage', '{0}. O veredito já estava acima de Safe'.format(describe_omission(query_omission)))
+	coverage_incomplete = left_out or not extraction_complete
+
 	# --- Score ponderado ------------------------------------------------
 	#
 	# Aqui, depois dos analisadores e da escalada do LLM, porque o score le o que
@@ -849,6 +1075,17 @@ def terminate_analysis(subject, mail_to, observables_info, reports_observables, 
 				"Verifique se a caixa foi comprometida".format(auth.get('fromAddress'), verdict))
 			note('whitelist', 'O remetente {0} está na whitelist, mas entregou anexo malicioso: não rebaixado'.format(
 				auth.get('fromAddress')))
+		elif coverage_incomplete:
+			# Conta comprometida com DKIM válido mais lixo que esgote a extração ou o
+			# teto de consultas: sem esta guarda, o piso de cobertura subiria o
+			# veredito e a regra o desceria
+			gap = 'o e-mail não foi lido inteiro' if not extraction_complete else 'parte dos observáveis ficou sem consulta'
+			log.warning("Remetente confiavel {0}: cobertura incompleta, o veredito {1} NAO e rebaixado".format(
+				auth.get('fromAddress'), verdict))
+			wsl.emit_warning("O remetente {0} está liberado na whitelist, mas {1}: "
+				"o veredito {2} não foi rebaixado.".format(auth.get('fromAddress'), gap, verdict))
+			note('whitelist', 'O remetente {0} está na whitelist, mas {1}: não rebaixado'.format(
+				auth.get('fromAddress'), gap))
 		else:
 			allowed, why = whitelist_state.register_downgrade(
 				sender_match.rule_id, verdict,
@@ -880,7 +1117,7 @@ def terminate_analysis(subject, mail_to, observables_info, reports_observables, 
 	# e contar o mesmo rebaixamento duas vezes aceleraria a suspensão de uma
 	# delas por um evento que foi uma coisa só. Mesmo piso (anexo malicioso nunca
 	# é rebaixado) e o mesmo laço de suspensão (verdict_memory.apply).
-	if downgrade_rule_id is None and verdict != 'Safe' and content_key:
+	if downgrade_rule_id is None and verdict != 'Safe' and content_key and not coverage_incomplete:
 		try:
 			previous = verdict
 			new_verdict, memory_note, memory = verdict_memory.apply(
@@ -912,7 +1149,8 @@ def terminate_analysis(subject, mail_to, observables_info, reports_observables, 
 	except Exception:
 		log.warning("Nao foi possivel registrar a analise no historico: {}".format(traceback.format_exc()))
 
-	_info("The email has been classified as " + verdict, wsl)
+	log.info("The email has been classified as " + verdict)
+	wsl.emit_info("The email has been classified as " + verdict)
 
 	# A Suspicious verdict never mails the reporter: the case stays open for an
 	# analyst, and telling somebody "it might be phishing" is not an answer.
@@ -1009,7 +1247,8 @@ def remember_analysis(record_refs, report, eml_bytes, wsl, report_of = '', keys 
 	# contagem de escopo continua dizendo uma denúncia por pessoa
 	case_scope.record(record_refs, report_of or report.get('caseRef', ''), report.get('subject', ''),
 		sender, report.get('reporter', ''), report.get('body', ''),
-		report.get('observables'), report.get('verdict', ''), keys = keys)
+		report.get('observables'), report.get('verdict', ''), keys = keys,
+		flagged = verdict_memory.flagged_from_report(report))
 
 	kept = case_evidence.keep(record_refs, eml_bytes)
 	if eml_bytes and not kept and case_evidence.enabled():
@@ -1019,12 +1258,40 @@ def remember_analysis(record_refs, report, eml_bytes, wsl, report_of = '', keys 
 		wsl.emit_warning('A mensagem original não pôde ser guardada; reanalisar este caso não vai funcionar')
 
 
-# Lê o configuration.json e deixa em `config` o que esta análise precisa saber:
-# o limiar de escalonamento do LLM, os limiares da whitelist e os textos de aviso.
-# Devolve False (e já avisou o analista) quando o arquivo não pôde ser lido
-def _load_settings(wsl):
+# Main function called from outside
+# The wsl is not a global variable to support multiple tabs
+# The mail_to parameter is the email address of the user to send notifications to
+# The llm_result parameter is the optional result of the social engineering analysis performed by the local LLM
+# The subject/body are needed here (rather than a precomputed llm_result) because
+# the social engineering analysis now runs at the end of this function, once the
+# analyzers have produced the evidence the model reasons about
+# `notify=False` is the reanalysis: nothing is mailed to the reporter.
+# `report_of` names the record a reanalysis re-examines, so the scope count keeps
+# one report per person instead of counting the analyst's second look as another
+# denunciation. `produced`, when given, receives the record references this
+# analysis produced — it is how the desk links the new record back.
+def main(wsl, observables, mail_to, subject_field = None, email_body = None, auth_results = None, images = None, eml_bytes = None, observables_seen = None, bulk_signals = None, notify = True, report_of = '', produced = None, extraction_complete = True):
+
+	global log
+	global ruleset
+
+	# What was actually emailed to the reporter, so a ticket destination can
+	# record it. It is no longer written into a TheHive task on the way out.
+	sent_notifications = []
+
+	# Logging configuration
 	try:
-		conf_dict = config_io.read_configuration()
+		with open('logging_conf.json') as log_conf:
+			log_conf_dict = json.load(log_conf)
+			logging.config.dictConfig(log_conf_dict)
+	except Exception as e:
+		print("[ERROR]_[run_analysis]: Error while trying to open the file 'logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
+		return None, None, None
+	log = logging.getLogger(__name__)
+
+	# Verdict and notification settings
+	try:
+		conf_dict = config_file.read('configuration.json')
 		# Nothing about TheHive or MISP is read here: this module analyzes and
 		# decides, and where the result gets recorded is tickets.py's business
 		# Minimum LLM risk level that escalates a Safe verdict to Suspicious
@@ -1048,65 +1315,9 @@ def _load_settings(wsl):
 		config['notificationStart'] = notif_conf.get('startMessage') or 'Thanks for the submission. Your e-mail with subject [{subject}] is being analyzed.'
 		config['notificationSafe'] = notif_conf.get('safeMessage') or 'Thanks for your submission. The e-mail with subject [{subject}] you submitted has been classified as Safe.'
 		config['notificationMalicious'] = notif_conf.get('maliciousMessage') or 'Thanks for your submission. The e-mail with subject [{subject}] you submitted has been classified as Malicious.'
-	except Exception:
-		_fail(wsl, "Error while trying to open the file 'configuration.json'", traceback.format_exc())
-		return False
-	return True
-
-
-
-# Liga o log do módulo a partir do logging_conf.json. Sem ele nada registra o que
-# acontece, então a análise nem começa
-def _configure_logging():
-	global log
-	try:
-		with open('logging_conf.json') as log_conf:
-			logging.config.dictConfig(json.load(log_conf))
-	except Exception:
-		print("[ERROR]_[run_analysis]: Error while trying to open the file 'logging_conf.json'. It cannot be read or it is not valid: {}".format(traceback.format_exc()))
-		return False
-	log = logging.getLogger(__name__)
-	return True
-
-
-# Registra a mesma linha no log e na tela do analista
-def _info(text, wsl):
-	log.info(text)
-	wsl.emit_info(text)
-
-
-# Registra uma falha no log, com o detalhe, e avisa o analista só do resumo
-def _fail(wsl, text, detail):
-	log.error("{0}: {1}".format(text, detail))
-	wsl.emit_error(text)
-
-
-# Entrada principal, chamada de fora.
-# `wsl` é parâmetro e não variável global para que cada aba tenha o seu.
-# `mail_to` é o endereço de quem recebe os avisos da análise
-# The llm_result parameter is the optional result of the social engineering analysis performed by the local LLM
-# The subject/body are needed here (rather than a precomputed llm_result) because
-# the social engineering analysis now runs at the end of this function, once the
-# analyzers have produced the evidence the model reasons about
-# `notify=False` is the reanalysis: nothing is mailed to the reporter.
-# `report_of` names the record a reanalysis re-examines, so the scope count keeps
-# one report per person instead of counting the analyst's second look as another
-# denunciation. `produced`, when given, receives the record references this
-# analysis produced — it is how the desk links the new record back.
-def main(wsl, observables, mail_to, subject_field = None, email_body = None, auth_results = None, images = None, eml_bytes = None, observables_seen = None, bulk_signals = None, notify = True, report_of = '', produced = None):
-
-	global ruleset
-
-	# What was actually emailed to the reporter, so a ticket destination can
-	# record it. It is no longer written into a TheHive task on the way out.
-	sent_notifications = []
-
-	# Logging configuration
-	if not _configure_logging():
-		return None, None, None
-
-	# Verdict and notification settings
-	if not _load_settings(wsl):
+	except Exception as e: 
+		log.error("Error while trying to open the file 'configuration.json': {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to open the file 'configuration.json'")
 		return None, None, None
 
 	# Carrega o whitelist v2. Mesma leitura que o case_from_email faz, mesmo
@@ -1121,8 +1332,9 @@ def main(wsl, observables, mail_to, subject_field = None, email_body = None, aut
 	try:
 		if notify:
 			notify_start_of_analysis(subject_field, mail_to, wsl, sent_notifications)
-	except Exception:
-		_fail(wsl, "Error while trying to notify the start of analysis", traceback.format_exc())
+	except Exception as e:
+		log.error("Error while trying to notify the start of analysis: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error while trying to notify the start of analysis")
 		return None, None, None
 
 	# Correspondencia em massa que o servidor de entrada autenticou pode dispensar
@@ -1146,6 +1358,7 @@ def main(wsl, observables, mail_to, subject_field = None, email_body = None, aut
 		skip_analyzers = False
 
 	# Run the analyzers over the observables extracted from the email
+	query_omission = None
 	try:
 		if skip_analyzers:
 			reports_observables = []
@@ -1154,9 +1367,10 @@ def main(wsl, observables, mail_to, subject_field = None, email_body = None, aut
 			wsl.emit_info('Correspondencia em massa de dominio autenticado: os analisadores de '
 				'reputacao foram pulados para poupar cota. A avaliacao de conteudo continua rodando')
 		else:
-			reports_observables = analyze_observables(observables, wsl)
-	except Exception:
-		_fail(wsl, "Error during the analysis task", traceback.format_exc())
+			reports_observables, query_omission = analyze_observables(observables, wsl)
+	except Exception as e:
+		log.error("Error during the analysis task: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error during the analysis task")
 		return None, None, None
 
 	# Social engineering analysis with the LLM, run LAST on purpose: at this point
@@ -1181,9 +1395,20 @@ def main(wsl, observables, mail_to, subject_field = None, email_body = None, aut
 			"própria análise.".format(', '.join(finding['rule'] for finding in injection)))
 
 	model_findings = summarize_analyzer_findings(reports_observables)
+	# Sem isto o resumo acima diria ao modelo que nada foi apontado, sobre um e-mail
+	# em que quase nada foi consultado
+	if queries_left_out(query_omission):
+		model_findings += '\n\n' + describe_omission_for_model(query_omission)
 	link_destinations = summarize_link_destinations(observables)
 	if link_destinations:
 		model_findings += '\n\n' + link_destinations
+	# O que a equipe já decidiu sobre os hosts que os analisadores acusaram agora.
+	# Vai dentro do mesmo bloco cercado dos achados: o motivo é texto livre de uma
+	# analista, que pode citar o próprio e-mail, e passa pelo prompt_guard como ele.
+	# Falha aberta (verdict_memory.consult): sem precedente a análise é a de antes
+	precedents = verdict_memory.consult(reports_observables)
+	if precedents:
+		model_findings += '\n\n' + verdict_memory.describe_for_model(precedents)
 	llm_result = llm_council.main(wsl, subject_field, email_body, auth_results,
 		model_findings, images, injection)
 
@@ -1203,9 +1428,12 @@ def main(wsl, observables, mail_to, subject_field = None, email_body = None, aut
 	try:
 		verdict, score_result = terminate_analysis(subject_field, mail_to, observables, reports_observables,
 			llm_result, wsl, auth_results, sent_notifications, observables_seen, injection, bulk_signals,
-			trail = verdict_trail, notify = notify, content_key = message_keys['contentKey'])
-	except Exception:
-		_fail(wsl, "Error during the termination of the analysis", traceback.format_exc())
+			trail = verdict_trail, notify = notify, content_key = message_keys['contentKey'],
+			precedents = precedents, extraction_complete = extraction_complete,
+			query_omission = query_omission)
+	except Exception as e:
+		log.error("Error during the termination of the analysis: {}".format(traceback.format_exc()))
+		wsl.emit_error("Error during the termination of the analysis")
 		return None, None, None
 
 	# Hand the finished analysis to every enabled ticket destination — TheHive,

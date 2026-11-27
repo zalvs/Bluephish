@@ -112,7 +112,7 @@ Todas as tentativas ficam em `data/auth.log`, como `event=sso_login`, com o
 motivo da recusa:
 
 ```bash
-cd docker && docker compose exec thephish tail -F data/auth.log   # data/<pasta>/auth.log se uma pasta foi definida em Configurações → Auditoria
+cd docker && docker compose exec bluephish tail -F data/auth.log   # data/<pasta>/auth.log se uma pasta foi definida em Configurações → Auditoria
 ```
 
 ---

@@ -2,25 +2,51 @@
 # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 version: 2
 updates:
-  # Bluephish web application (/app) — deliberately NOT managed here.
+  # ThePhish web application: app/requirements.txt is the lock of the image
+  # (app/Dockerfile installs it on Python 3.14, and CI installs the same file on
+  # the same interpreter). The `docker-image` job builds the image and runs the
+  # suite inside it for every PR, so a bump is tested where it will run.
   #
-  # app/requirements.txt is the lock that app/Dockerfile installs: whatever it pins
-  # is what runs. The image sits on Ubuntu 20.04 with Python 3.8, and roughly four
-  # in five of the versions Dependabot proposes declare Requires-Python >= 3.9 or
-  # >= 3.10, so pip cannot even find the distribution and the job dies at the
-  # install step. The remainder were mergeable but moved one piece of a set whose
-  # core (Flask 2.0.1, Werkzeug 2.0.1, eventlet 0.31.1) has to move together.
-  #
-  # Upgrades are deliberate: pick the Python, re-pin, rebuild the image and run the
-  # suite inside it. The upgrades Python 3.8 already allows are listed at the top
-  # of app/requirements.txt so nothing is silently lost.
-  #
-  # To manage it again, delete this comment and restore a `pip` entry for /app.
+  # cooldown: a release only becomes a candidate after 30 days, the same rule
+  # the lock was built with (supply-chain hygiene: a hijacked release is usually
+  # caught and yanked within days). Security updates ignore the cooldown.
+  # Majors come as separate PRs; the pins held back on purpose are listed at the
+  # top of app/requirements.txt with the reason.
+  - package-ecosystem: "pip"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 30
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-patch:
+        update-types: ["minor", "patch"]
 
-  # The GitHub Actions used by the CI workflow
+  # The GitHub Actions used by the workflows. They are pinned by commit SHA;
+  # Dependabot bumps the SHA and the version comment together
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "monthly"
     labels:
       - "dependencies"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Base images of the Dockerfiles. Patch bumps only for python: 3.14 -> 3.15 is a
+  # migration, not a dependency update
+  - package-ecosystem: "docker"
+    directories:
+      - "/app"
+      - "/docker/*"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

@@ -33,6 +33,7 @@
 	--t0: #fafafa; --t1: #e4e4ec; --t2: #c4c4cc; --t3: #8f8f98;
 	--t4: #8a8a93; --t5: #82828b;
 	--danger: #ff5c62; --danger2: #ff8a8f; --warn: #e5a54a; --ok: #3fb950;
+	--v-safe: #3fb950; --v-suspicious: #f97316; --v-malicious: #ef4444; --v-other: #8a8a93;
 	--accent: #2563eb; --accent-hi: #3b82f6;
 	--accent-soft: rgba(37, 99, 235, 0.08);
 	--accent-soft2: rgba(37, 99, 235, 0.16);
@@ -55,6 +56,7 @@
 	--t0: #0d0d10; --t1: #26262b; --t2: #3f3f47; --t3: #5f5f68;
 	--t4: #62626b; --t5: #67676f;
 	--danger: #c1121f; --danger2: #a50f1a; --warn: #8a5a00; --ok: #1a7f37;
+	--v-safe: #1a7f37; --v-suspicious: #c2410c; --v-malicious: #c1121f; --v-other: #62626b;
 	--accent: #1d4ed8; --accent-hi: #2563eb;
 	--accent-soft: rgba(29, 78, 216, 0.07);
 	--accent-soft2: rgba(29, 78, 216, 0.14);
@@ -154,6 +156,104 @@ a:hover { color: #60a5fa; }
 ::-webkit-scrollbar-thumb:hover { background: var(--b4); }
 
 .mono { font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* Utilitários: o que eram atributos style="" nos templates. A CSP não tem
+   'unsafe-inline' em style-src (security_headers.py), então nenhum style="" no
+   HTML vale; um layout pontual vira uma classe daqui. !important porque
+   substituem um style inline, que vencia qualquer regra de classe; ficam antes
+   de .hidden para que esconder continue vencendo. Um u-* novo segue o padrão:
+   u-<propriedade abreviada>-<valor>, uma declaração por classe. No JS, el(...,
+   {style}) aplica pelo CSSOM (node.style.cssText), que a CSP permite. */
+.u-bb-0 { border-bottom: 0 !important; }
+.u-bl-0 { border-left: 0 !important; }
+.u-br-0 { border-right: 0 !important; }
+.u-bt-1-solid-b1 { border-top: 1px solid var(--b1) !important; }
+.u-c-danger2 { color: var(--danger2) !important; }
+.u-c-t0 { color: var(--t0) !important; }
+.u-c-t3 { color: var(--t3) !important; }
+.u-c-t4 { color: var(--t4) !important; }
+.u-cols-repeat-auto-fit-minmax-140-1fr { grid-template-columns: repeat(auto-fit,minmax(140px,1fr)) !important; }
+.u-cols-repeat-auto-fit-minmax-260-1fr { grid-template-columns: repeat(auto-fit,minmax(260px,1fr)) !important; }
+.u-cols-repeat-auto-fit-minmax-320-1fr { grid-template-columns: repeat(auto-fit,minmax(320px,1fr)) !important; }
+.u-cursor-pointer { cursor: pointer !important; }
+.u-d-flex { display: flex !important; }
+.u-dir-column { flex-direction: column !important; }
+.u-fit-cover { object-fit: cover !important; }
+.u-flex-0-0-26 { flex: 0 0 26px !important; }
+.u-flex-0-0-7_5rem { flex: 0 0 7.5rem !important; }
+.u-flex-0-0-90 { flex: 0 0 90px !important; }
+.u-flex-0-0-auto { flex: 0 0 auto !important; }
+.u-flex-1-1-180 { flex: 1 1 180px !important; }
+.u-flex-1-1-200 { flex: 1 1 200px !important; }
+.u-fs-12 { font-size: 12px !important; }
+.u-fs-15 { font-size: 15px !important; }
+.u-fs-fs-body { font-size: var(--fs-body) !important; }
+.u-fs-fs-micro { font-size: var(--fs-micro) !important; }
+.u-fs-fs-title { font-size: var(--fs-title) !important; }
+.u-gap-0 { gap: 0 !important; }
+.u-gap-1 { gap: 1px !important; }
+.u-gap-10 { gap: 10px !important; }
+.u-gap-12 { gap: 12px !important; }
+.u-gap-14 { gap: 14px !important; }
+.u-gap-2 { gap: 2px !important; }
+.u-gap-3 { gap: 3px !important; }
+.u-gap-4 { gap: 4px !important; }
+.u-gap-5 { gap: 5px !important; }
+.u-gap-6 { gap: 6px !important; }
+.u-gap-7 { gap: 7px !important; }
+.u-gap-8 { gap: 8px !important; }
+.u-gap-8-12 { gap: 8px 12px !important; }
+.u-gap-9 { gap: 9px !important; }
+.u-h-13 { height: 13px !important; }
+.u-h-26 { height: 26px !important; }
+.u-h-38 { height: 38px !important; }
+.u-items-center { align-items: center !important; }
+.u-items-flex-start { align-items: flex-start !important; }
+.u-justify-space-between { justify-content: space-between !important; }
+.u-lh-1 { line-height: 1 !important; }
+.u-lh-1_25 { line-height: 1.25 !important; }
+.u-ls-0_24em { letter-spacing: 0.24em !important; }
+.u-m-0 { margin: 0 !important; }
+.u-maxh-260 { max-height: 260px !important; }
+.u-maxh-280 { max-height: 280px !important; }
+.u-maxh-320 { max-height: 320px !important; }
+.u-maxw-100 { max-width: 100% !important; }
+.u-mb-12 { margin-bottom: 12px !important; }
+.u-mb-4 { margin-bottom: 4px !important; }
+.u-minh-0 { min-height: 0 !important; }
+.u-minh-240 { min-height: 240px !important; }
+.u-minw-0 { min-width: 0 !important; }
+.u-ml-6 { margin-left: 6px !important; }
+.u-mt-n1 { margin-top: -1px !important; }
+.u-mt-12 { margin-top: 12px !important; }
+.u-mt-2 { margin-top: 2px !important; }
+.u-mt-3 { margin-top: 3px !important; }
+.u-ov-auto { overflow: auto !important; }
+.u-ov-visible { overflow: visible !important; }
+.u-ovy-auto { overflow-y: auto !important; }
+.u-p-10-22 { padding: 10px 22px !important; }
+.u-p-10-22-0-22 { padding: 10px 22px 0 22px !important; }
+.u-p-14-14-10-14 { padding: 14px 14px 10px 14px !important; }
+.u-p-14-22 { padding: 14px 22px !important; }
+.u-pt-11 { padding-top: 11px !important; }
+.u-radius-0 { border-radius: 0 !important; }
+.u-radius-6 { border-radius: 6px !important; }
+.u-self-flex-start { align-self: flex-start !important; }
+.u-text-right { text-align: right !important; }
+.u-w-110 { width: 110px !important; }
+.u-w-120 { width: 120px !important; }
+.u-w-13 { width: 13px !important; }
+.u-w-26 { width: 26px !important; }
+.u-w-400 { width: 400px !important; }
+.u-w-480 { width: 480px !important; }
+.u-w-520 { width: 520px !important; }
+.u-w-540 { width: 540px !important; }
+.u-w-560 { width: 560px !important; }
+.u-w-640 { width: 640px !important; }
+.u-w-90 { width: 90px !important; }
+.u-w-min-56rem-96vw { width: min(56rem, 96vw) !important; }
+.u-wrap { flex-wrap: wrap !important; }
+.u-ws-pre-wrap { white-space: pre-wrap !important; }
+
 .hidden { display: none !important; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grow { flex: 1; min-width: 0; }
@@ -164,6 +264,9 @@ a:hover { color: #60a5fa; }
 .app {
 	display: flex;
 	height: 100vh;
+	/* Em navegador de celular 100vh é a altura *sem* a barra de endereço, e o
+	   rodapé da tela fica atrás dela; dvh é a altura que de fato está visível */
+	height: 100dvh;
 	width: 100%;
 	padding-right: 46px;
 	background: var(--s0);
@@ -393,6 +496,8 @@ h1.pane-title, h2.pane-title { font-size: var(--fs-title); font-weight: 600; mar
 	font-family: inherit;
 	font-size: var(--fs-body);
 	text-align: left;
+	/* É um link (<a href>), para abrir numa nova guia com o botão do meio */
+	text-decoration: none;
 	cursor: pointer;
 	transition: background 120ms ease;
 }
@@ -555,7 +660,7 @@ h1.pane-title, h2.pane-title { font-size: var(--fs-title); font-weight: 600; mar
 /* A altura de um controle é uma escala só para botão, campo e seletor:
  * --control-h (2.125rem) e --control-h-sm (1.75rem). O botão tinha 2rem e o
  * campo 2.125rem, e toda linha que juntava os dois — Simular/Incluir ao lado dos
- * campos da whitelist, Carregar ao lado do caso no chat — ficava 2px fora. */
+ * campos da whitelist, o botão ao lado do campo de caso — ficava 2px fora. */
 :root { --control-h: 2.125rem; --control-h-sm: 1.75rem; }
 
 .btn {
@@ -724,6 +829,14 @@ h1.pane-title, h2.pane-title { font-size: var(--fs-title); font-weight: 600; mar
 	white-space: nowrap;
 	cursor: pointer;
 	transition: color 120ms ease, border-color 120ms ease;
+}
+/* As abas de Configurações e Integrações são links (abrem em nova guia); o botão
+ * centrava o rótulo sozinho, o link precisa pedir */
+a.tab {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	text-decoration: none;
 }
 .tab:hover { color: var(--t1); }
 .tab.active { color: var(--t0); border-bottom-color: var(--accent); font-weight: 500; }
@@ -1115,6 +1228,15 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .dot.warn { background: var(--warn); }
 .dot.bad { background: var(--danger); }
 
+/* A bolinha de veredito. Sempre preenchida, e com a cor do veredito — seguro
+   verde, suspeito laranja, malicioso vermelho —, em vez de herdar --warn, que é
+   âmbar no tema escuro e marrom no claro. 10px: com 6px a cor não se lê de
+   relance numa lista de quarenta linhas */
+.vdot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: var(--v-other); }
+.vdot.ok { background: var(--v-safe); }
+.vdot.warn { background: var(--v-suspicious); }
+.vdot.bad { background: var(--v-malicious); }
+
 /* Inline status line under a settings card */
 .status { font-size: var(--fs-micro); line-height: 1.55; color: var(--t4); }
 .status strong { color: var(--t1); font-weight: 500; }
@@ -1188,7 +1310,13 @@ input[type="checkbox"] { accent-color: var(--accent); }
 /* Mesma correção da whitelist, pela mesma razão: a faixa de AÇÕES era `auto`, e
  * os botões de uma conta bloqueada não são os mesmos de uma conta ativa — cada
  * linha media a sua própria largura, contra um cabeçalho que media a dele. */
-.cols-users { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 13rem; }
+.cols-users { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) 13rem; }
+/* Editor de perfil de acesso: uma coluna de caixas por grupo do catálogo */
+.profile-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 14px; }
+.profile-group { display: flex; flex-direction: column; gap: 6px; }
+.profile-check { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-body); }
+.profile-check .field-hint { margin-left: auto; }
+.profile-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 22px; border-top: 1px solid var(--b1); }
 
 /* Priorização: o ranking de fatores do score. A primeira coluna é a nota, e ela
    vem antes do nome de propósito — é por ela que a tabela está ordenada, e uma
@@ -1899,9 +2027,9 @@ button.legend-row:focus-visible { outline: none; box-shadow: var(--anel); }
 	background: var(--s4);
 	color: var(--t4);
 }
-.trail-node.ok { color: var(--ok); border-color: var(--ok); }
-.trail-node.warn { color: var(--warn); border-color: var(--warn); }
-.trail-node.bad { color: var(--danger); border-color: var(--danger); }
+.trail-node.ok { color: var(--v-safe); border-color: var(--v-safe); background: var(--v-safe); }
+.trail-node.warn { color: var(--v-suspicious); border-color: var(--v-suspicious); background: var(--v-suspicious); }
+.trail-node.bad { color: var(--v-malicious); border-color: var(--v-malicious); background: var(--v-malicious); }
 .trail-step.changed .trail-node { background: currentColor; box-shadow: 0 0 0 3px var(--s4); }
 .trail-stage { font-family: "Geist Mono", ui-monospace, monospace; font-size: var(--fs-micro); letter-spacing: 0.06em; color: var(--t4); }
 .trail-step.changed .trail-stage { color: var(--t2); }
@@ -1931,6 +2059,8 @@ button.legend-row:focus-visible { outline: none; box-shadow: var(--anel); }
 .agent { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--b1); background: var(--s3); }
 .score-factor { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; font-size: var(--fs-body); color: var(--t3); }
 .score-factor strong { color: var(--t1); font-weight: 500; }
+.score-factor.score-total { border-top: 1px solid var(--b2); padding-top: 4px; }
+.score-factor.score-total + .score-factor.score-total { border-top: 0; padding-top: 0; }
 
 /* One observable of the case. The value may be a 300-character URL: it wraps to
  * two lines instead of truncating to one, because the part that gives a phishing
@@ -2390,6 +2520,31 @@ button.legend-row:focus-visible { outline: none; box-shadow: var(--anel); }
 
 /* --- toast ---------------------------------------------------------------- */
 
+/* Aviso de auto logoff: no topo, acima de qualquer modal aberto, e sem cobrir a
+   tela — a pessoa pode estar no meio de uma leitura que quer terminar */
+.idle-warning {
+	position: fixed;
+	top: 14px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 300;
+	width: min(36rem, calc(100vw - 28px));
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 14px;
+	border-radius: 10px;
+	border: 1px solid var(--warn);
+	background: var(--s1);
+	box-shadow: var(--shadow-modal);
+}
+.idle-warning-title { color: var(--t1); font-weight: 600; font-size: var(--fs-body); }
+.idle-warning-text { color: var(--t3); font-size: var(--fs-body); }
+.idle-warning-text b { color: var(--warn); font-weight: 500; }
+@media (max-width: 560px) {
+	.idle-warning { flex-wrap: wrap; }
+}
+
 .toast-dock {
 	position: fixed;
 	bottom: 18px;
@@ -2578,6 +2733,17 @@ a.auth-btn {
 	line-height: 0;
 }
 .mfa-qr img { display: block; width: 164px; height: 164px; }
+/* Prazo e tentativas do desafio. Fica âmbar nos últimos segundos e na última
+   tentativa: é o aviso de que o próximo erro devolve a pessoa para a senha */
+.mfa-status {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	font-size: var(--fs-body);
+	color: var(--t3);
+}
+.mfa-status b { color: var(--t2); font-weight: 500; }
+.mfa-status b.urgent { color: var(--warn); }
 .mfa-manual { font-size: var(--fs-body); color: var(--t4); }
 .mfa-manual summary { cursor: pointer; color: var(--t3); }
 .mfa-manual p { margin: 9px 0 6px; line-height: 1.5; }
@@ -2645,7 +2811,7 @@ a.auth-btn {
 .scope-row.current { color: var(--t0); }
 
 /* O assistente ao lado do caso. Estreito, e com a conversa na largura dele —
- * a coluna de 760px do Chat AI não cabe aqui e ficaria cortada */
+ * a coluna padrão de 760px da conversa não cabe aqui e ficaria cortada */
 .pane.side {
 	flex: 0 1 20rem;
 	width: 20rem;
@@ -2911,3 +3077,205 @@ a.auth-btn {
 .audit-usage-line strong { color: var(--t0); font-weight: 600; }
 .audit-usage-bar { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
 .audit-usage-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.25s ease-out; }
+
+
+/* --- telas estreitas ---------------------------------------------------------
+ *
+ * O shell é um flex de menu + lista + detalhe, cada um com uma largura mínima, e
+ * abaixo da soma delas a tela inteira passava a rolar na horizontal com colunas
+ * cortadas — o painel "quebrava" conforme a resolução. Os dois degraus abaixo
+ * deixam as colunas encolherem primeiro e, quando nem assim cabem, empilham.
+ * Acima de 1100px nada muda.
+ */
+@media (max-width: 1100px) {
+	:root {
+		--pane-list: 17rem;
+		--pane-list-min: 14rem;
+		--pane-min: 20rem;
+	}
+	.sidebar { width: 208px; flex-basis: 208px; }
+}
+
+@media (max-width: 860px) {
+	.app {
+		flex-direction: column;
+		padding-right: 0;
+		overflow-x: hidden;
+		overflow-y: auto;
+	}
+	/* O dock de tema/tamanho é fixo no canto: sem a coluna reservada à direita,
+	   ele ganha uma faixa própria no topo para não cobrir o conteúdo */
+	.theme-dock {
+		position: static;
+		flex-direction: row;
+		justify-content: flex-end;
+		padding: 8px 10px 0 10px;
+		background: var(--s0);
+	}
+	.rail {
+		width: 100%;
+		flex: 0 0 auto;
+		height: auto;
+		flex-direction: row;
+		padding: 8px 12px;
+	}
+	.sidebar {
+		width: 100%;
+		flex: 0 0 auto;
+		height: auto;
+		max-height: 70dvh;
+		border-right: 0;
+		border-bottom: 1px solid var(--b1);
+	}
+	#conteudo { flex: 0 0 auto; flex-wrap: wrap; width: 100%; }
+	.pane,
+	.pane.list,
+	.pane.detail,
+	.pane.empty {
+		flex: 1 1 100%;
+		width: 100%;
+		min-width: 0;
+		height: auto;
+		min-height: 70dvh;
+		border-right: 0;
+	}
+	.pane.side { min-height: 0; }
+}
+
+/* Botão de idioma da tela de entrada, no canto do painel do formulário */
+.auth-main { position: relative; }
+.auth-lang {
+	position: absolute;
+	top: 14px;
+	right: 14px;
+	min-width: 2.25rem;
+	height: 1.75rem;
+	padding: 0 8px;
+	border-radius: 7px;
+	border: 1px solid var(--b2);
+	background: var(--s5);
+	color: var(--t3);
+	font: inherit;
+	font-size: var(--fs-micro);
+	letter-spacing: 0.06em;
+	cursor: pointer;
+}
+.auth-lang:hover { color: var(--t1); border-color: var(--b3); }
+
+#promptBody { white-space: pre-line; }
+
+/* --- panorama externo ------------------------------------------------------ */
+
+/* Seis períodos não cabem ao lado do título numa tela estreita: em vez de espremer
+ * o título numa coluna, os chips descem para a linha de baixo */
+.intel-head { flex-wrap: wrap; row-gap: 8px; }
+.intel-head > .grow { min-width: 14rem; }
+.intel-head-tools { gap: 10px; margin-left: auto; }
+.intel-head .chips { justify-content: flex-end; }
+
+/* O card da Visão Executiva: até três temas, cada um com o lado "mundo" (quantas
+ * publicações) e o lado "aqui" (o cruzamento com os casos) */
+.intel-teaser-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.intel-teaser-item {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 11px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--b1);
+	background: var(--s3);
+}
+.intel-teaser-item.trending { border-color: rgba(229, 165, 74, 0.38); }
+.intel-teaser-label { font-size: var(--fs-body); font-weight: 500; color: var(--t1); }
+.intel-teaser-count { font-size: var(--fs-micro); color: var(--t4); }
+
+/* A frase do cruzamento. Vermelha só quando o tema já chegou à caixa */
+.intel-here { margin: 0; font-size: var(--fs-body); line-height: 1.5; color: var(--t3); text-wrap: pretty; }
+.intel-here.bad { color: var(--danger); }
+
+.intel-link { color: var(--accent-hi); }
+.intel-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.intel-meta { font-size: var(--fs-micro); color: var(--t4); }
+.intel-cites { font-size: var(--fs-micro); color: var(--t4); }
+
+/* Os destaques do período, com o resumo por IA embaixo de um traço */
+.intel-headline { border-color: var(--accent-line); background: linear-gradient(var(--accent-soft), transparent 140px), var(--s4); }
+.intel-summary {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-top: 12px;
+	border-top: 1px dashed var(--b2);
+}
+.intel-summary.hidden { display: none; }
+.intel-summary-label { font-size: var(--fs-micro); letter-spacing: 0.08em; color: var(--accent-hi); }
+.intel-summary-text { margin: 0; font-size: var(--fs-body); line-height: 1.6; color: var(--t1); text-wrap: pretty; }
+.intel-ref { font-family: "Geist Mono", ui-monospace, monospace; font-size: var(--fs-micro); margin-left: 2px; }
+
+/* Temas à esquerda, grupos/setores/fontes à direita; uma coluna em tela estreita */
+.intel-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
+	gap: 14px;
+	align-items: start;
+}
+@media (max-width: 1080px) {
+	.intel-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.intel-theme { gap: 10px; }
+.intel-theme.trending { border-color: rgba(229, 165, 74, 0.38); }
+.intel-theme-title { font-size: var(--fs-body); font-weight: 600; color: var(--t0); }
+
+/* Cada alegação é o título da publicação, que leva à fonte */
+.intel-claims { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.intel-claim { display: flex; flex-direction: column; gap: 2px; padding-left: 10px; border-left: 2px solid var(--b2); }
+.intel-claim-title { font-size: var(--fs-body); line-height: 1.45; }
+
+.intel-rank {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 6px 8px;
+	border-radius: 6px;
+	border: 1px solid transparent;
+	background: transparent;
+	color: var(--t2);
+	font: inherit;
+	font-size: var(--fs-body);
+	text-align: left;
+	cursor: pointer;
+}
+.intel-rank:hover { background: var(--s6); color: var(--t0); }
+.intel-rank:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.intel-rank-count { font-size: var(--fs-micro); color: var(--t4); }
+
+.intel-filter {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 9px 14px;
+	border-bottom: 1px solid var(--b1);
+	background: var(--accent-soft);
+}
+.intel-filter.hidden { display: none; }
+.intel-row { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px; border-bottom: 1px solid var(--b1); }
+.intel-row:last-child { border-bottom: 0; }
+.intel-row-title { font-size: var(--fs-body); font-weight: 500; line-height: 1.45; }
+.intel-excerpt {
+	margin: 0;
+	font-size: var(--fs-body);
+	line-height: 1.5;
+	color: var(--t3);
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.intel-source { display: flex; align-items: center; gap: 9px; padding: 6px 0; border-bottom: 1px solid var(--b1); }
+.intel-source:last-child { border-bottom: 0; }
+.intel-source.off { opacity: 0.62; }
+.intel-source-name { font-size: var(--fs-body); color: var(--t1); }
+.intel-source .toggle { flex: 0 0 auto; }

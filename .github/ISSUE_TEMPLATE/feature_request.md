@@ -1,24 +1,24 @@
 ---
 name: Feature request
-about: Propose something Bluephish should do.
-title: "[Feature] "
+about: Suggest an idea for this project.
+title: "[Feature request]"
 labels: enhancement
 assignees: ''
 
 ---
 
-**The problem**
+**Is your feature request related to a problem? Please describe.**
 
-What is hard or impossible today? Describe a situation, not a solution.
+A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
 
-**What you would like to happen**
+**Describe the solution you'd like**
 
-How the analyst, the administrator or the pipeline would work once it exists.
+A clear and concise description of what you want to happen.
 
-**Alternatives**
+**Describe alternatives you've considered**
 
-Other ways to get there, including doing it outside Bluephish.
+A clear and concise description of any alternative solutions or features you've considered.
 
-**Anything else**
+**Additional context**
 
-Mockups, links, or examples from other tools.
+Add any other context or screenshots about the feature request here.

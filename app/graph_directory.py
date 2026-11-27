@@ -60,6 +60,8 @@ def _explain(response):
 		return ('O Entra ID recusou a consulta (HTTP {0}). O registro de aplicativo precisa da permissão '
 			'de aplicativo User.Read.All no Microsoft Graph, com consentimento de administrador '
 			'concedido.').format(response.status_code)
+	if 300 <= response.status_code < 400:
+		return 'O Microsoft Graph respondeu com um redirecionamento (HTTP {0}); a consulta não o segue.'.format(response.status_code)
 	if response.status_code == 429:
 		return 'O Entra ID está limitando as consultas (HTTP 429). Tente de novo em alguns minutos.'
 	return 'O Entra ID respondeu HTTP {0}.'.format(response.status_code)
@@ -84,7 +86,7 @@ def lookup_user(tenant_id, client_id, client_secret, address, attribute = DEFAUL
 	url = '{0}/users/{1}'.format(GRAPH_BASE_URL, urllib.parse.quote(address, safe = ''))
 	try:
 		response = requests.get(url, headers = _auth_headers(tenant_id, client_id, client_secret),
-			params = {'$select': attribute}, timeout = REQUEST_TIMEOUT)
+			params = {'$select': attribute}, timeout = REQUEST_TIMEOUT, allow_redirects = False)
 	except requests.RequestException as error:
 		raise DirectoryError('Não foi possível falar com o Entra ID: {0}'.format(error))
 	except Exception as error:
@@ -92,7 +94,7 @@ def lookup_user(tenant_id, client_id, client_secret, address, attribute = DEFAUL
 		raise DirectoryError('Não foi possível obter o token do Entra ID: {0}'.format(error))
 	if response.status_code == 404:
 		return '', False
-	if not response.ok:
+	if not response.ok or 300 <= response.status_code < 400:
 		raise DirectoryError(_explain(response))
 	value = (response.json() or {}).get(attribute)
 	return str(value).strip() if value else '', True
@@ -108,11 +110,11 @@ def probe(tenant_id, client_id, client_secret):
 	url = '{0}/users'.format(GRAPH_BASE_URL)
 	try:
 		response = requests.get(url, headers = _auth_headers(tenant_id, client_id, client_secret),
-			params = {'$select': 'id', '$top': '1'}, timeout = REQUEST_TIMEOUT)
+			params = {'$select': 'id', '$top': '1'}, timeout = REQUEST_TIMEOUT, allow_redirects = False)
 	except requests.RequestException as error:
 		raise DirectoryError('Não foi possível falar com o Entra ID: {0}'.format(error))
 	except Exception as error:
 		raise DirectoryError('Não foi possível obter o token do Entra ID: {0}'.format(error))
-	if not response.ok:
+	if not response.ok or 300 <= response.status_code < 400:
 		raise DirectoryError(_explain(response))
 	return True

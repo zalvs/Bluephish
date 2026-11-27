@@ -41,9 +41,11 @@ cliente MSAL e a política de cargo em volta dele.
 """
 
 import json
+import config_file
 
 import msal
 
+import m365_auth
 import models
 
 CONFIG_SECTION = 'sso'
@@ -115,8 +117,7 @@ def load_config(path = 'configuration.json'):
 	chamador quer quando nem a configuração pode ser lida.
 	"""
 	try:
-		with open(path) as conf_file:
-			conf_dict = json.load(conf_file)
+		conf_dict = config_file.read(path)
 	except Exception:
 		return default_config()
 	return normalize_config(conf_dict.get(CONFIG_SECTION))
@@ -149,7 +150,8 @@ def _client(config):
 	return msal.ConfidentialClientApplication(
 		config['clientId'],
 		client_credential = config['clientSecret'],
-		authority = AUTHORITY_TEMPLATE.format(config['tenantId'])
+		authority = AUTHORITY_TEMPLATE.format(config['tenantId']),
+		timeout = m365_auth.MSAL_TIMEOUT
 	)
 
 

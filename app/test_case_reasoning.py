@@ -216,6 +216,25 @@ class TheTrailIsRecorded(unittest.TestCase):
 		_verdict, trail = self.decide([pipeline.finding('virustotal', 'safe')])
 		self.assertTrue(any(step['stage'] == 'llm' and 'não avaliou' in step['reason'] for step in trail))
 
+	def test_a_team_precedent_is_a_step_and_does_not_change_the_verdict(self):
+		# O host de imagens que a equipe já julgou falso positivo: a analista vê o
+		# precedente no caso, e o veredito dos analisadores continua o mesmo
+		precedents = [{'key': 'domain:d1a2b3c4.cloudfront.net', 'type': 'domain',
+			'value': 'd1a2b3c4.cloudfront.net', 'level': 'malicious', 'analyzers': ['VirusTotal'], 'count': 1,
+			'by': 'ana', 'at': '2026-09-15T12:00:00Z', 'recordRef': '4127',
+			'reasons': ['imagem de newsletter hospedada na CloudFront'], 'ids': [1]}]
+		trail = []
+		verdict, _score = run_analysis.terminate_analysis(
+			'Assunto', 'quem@denunciou.com', [pipeline.observable()], [pipeline.finding('virustotal', 'malicious')],
+			None, self.harness.wsl, auth_results = pipeline.UNAUTHENTICATED, sent_log = [],
+			observables_seen = None, trail = trail, precedents = precedents)
+		self.assertEqual(verdict, 'Malicious')
+		steps = [step for step in trail if step['stage'] == 'precedent']
+		self.assertEqual(len(steps), 1)
+		self.assertEqual(steps[0]['verdict'], 'Malicious')
+		self.assertIn('d1a2b3c4.cloudfront.net', steps[0]['reason'])
+		self.assertEqual([step['stage'] for step in trail][:2], ['analyzers', 'precedent'])
+
 
 class ReclassificationRules(unittest.TestCase):
 

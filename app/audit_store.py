@@ -34,13 +34,14 @@ Quatro decisões que não são óbvias lendo o código:
 """
 
 import datetime
-import json
 import logging
 import logging.handlers
 import os
 import re
 import socket
 import threading
+
+import config_store
 
 
 CONFIG_FILE = 'configuration.json'
@@ -279,14 +280,25 @@ def resolve_syslog(host, port, protocol):
 	A validação é a mesma dos outros consumidores (custom_analyzers.validate_destination),
 	com rede interna liberada — um SIEM mora nela — e metadados da nuvem recusados.
 	Todos os endereços do nome são checados; o handler recebe um deles, fixo.
+
+	A trava resolve o nome uma vez e este código resolve de novo para escolher o IP. Um
+	DNS que responde diferente na segunda vez (rebinding) entregaria ao handler um
+	endereço que ninguém julgou — por isso cada endereço da *segunda* resposta passa
+	pela mesma trava, e a escolha sai só dos que foram julgados.
 	"""
 	# Importado aqui: auth importa este módulo na subida, e custom_analyzers puxa o
 	# registro de analisadores inteiro — que nada tem a ver com escrever a trilha
 	import custom_analyzers
+
+	def judge(target):
+		# O sufixo de zona (fe80::1%eth0) não muda para onde o pacote vai, e a URL não o aceita
+		target = target.split('%')[0]
+		literal = '[{0}]'.format(target) if ':' in target else target
+		return custom_analyzers.validate_destination('http://{0}:{1}'.format(literal, port),
+			allow_internal = True, require_https = False)
+
 	host = str(host or '').strip().strip('[]')
-	literal = '[{0}]'.format(host) if ':' in host else host
-	ok, error = custom_analyzers.validate_destination('http://{0}:{1}'.format(literal, port),
-		allow_internal = True, require_https = False)
+	ok, error = judge(host)
 	if not ok:
 		return None, error
 	socktype = socket.SOCK_STREAM if protocol == 'tcp' else socket.SOCK_DGRAM
@@ -296,6 +308,10 @@ def resolve_syslog(host, port, protocol):
 		infos = []
 	if not infos:
 		return None, 'Não consegui resolver o nome {0}.'.format(host)
+	for address in dict.fromkeys(info[4][0] for info in infos):
+		ok, error = judge(address)
+		if not ok:
+			return None, error
 	return infos[0][4][0], None
 
 
@@ -308,21 +324,20 @@ def valid_folder(folder):
 	return bool(FOLDER_RE.match(folder)) and folder.lower() not in RESERVED_FOLDERS and folder not in ('.', '..')
 
 
-def _clamp(value, low, high, default):
-	try:
-		return min(max(int(value), low), high)
-	except (TypeError, ValueError):
-		return default
+# Um só lugar para limitar um número e regravar uma seção (config_store), em vez
+# de uma cópia aqui e outra em security_policy
+_clamp = config_store.clamp
 
 
 def load_config(path = CONFIG_FILE):
+	# A mesma tolerância de security_policy a uma seção com formato errado
+	# (`"auditLog": "x"`): vale o padrão em vez de um AttributeError
 	try:
-		with open(path) as handle:
-			stored = json.load(handle).get(CONFIG_KEY) or {}
+		stored = config_store.as_dict(config_store.read_section(path, CONFIG_KEY))
 	except Exception:
 		stored = {}
 	syslog = dict(DEFAULTS['syslog'])
-	syslog.update({key: value for key, value in (stored.get('syslog') or {}).items() if key in syslog})
+	syslog.update({key: value for key, value in config_store.as_dict(stored.get('syslog')).items() if key in syslog})
 	folder = stored.get('folder', DEFAULTS['folder'])
 	# Uma configuração gravada à mão abaixo do piso não é obedecida
 	return {
@@ -336,11 +351,7 @@ def load_config(path = CONFIG_FILE):
 
 
 def save_config(config, path = CONFIG_FILE):
-	with open(path) as handle:
-		conf_dict = json.load(handle)
-	conf_dict[CONFIG_KEY] = config
-	with open(path, 'w') as handle:
-		json.dump(conf_dict, handle, indent = '\t')
+	config_store.write_section(path, CONFIG_KEY, config)
 
 
 def validate(form):
