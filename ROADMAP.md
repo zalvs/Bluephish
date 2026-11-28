@@ -326,7 +326,7 @@ Visão Tática no lugar da antiga guia Phishing; Filas de Trabalho (Suspeitos e 
 que espera decisão; o detalhe do caso com o e-mail como entregue a partir do original guardado,
 o porquê do veredito, quantas pessoas denunciaram a mesma mensagem, os indicadores e um
 assistente de IA ao lado, já com o contexto do caso. Decisões: marcar como legítimo, confirmar
-malicioso, reanalisar. Errata ao denunciante configurável em Notificações. Memória de vereditos:
+malicioso, reclassificar como malicioso um e-mail que saiu seguro (o falso negativo), reanalisar. Errata ao denunciante configurável em Notificações. Memória de vereditos:
 a mensagem idêntica a um falso positivo corrigido passa a ser liberada, e o remetente vira
 proposta de whitelist. Ver `BLUEPHISH_ARCHITECTURE.md` §7.15–7.17.
 

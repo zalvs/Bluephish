@@ -88,9 +88,21 @@ class Transitions(unittest.TestCase):
 		self.assertTrue(reclassification.can_reclassify('Suspicious', 'Malicious'))
 		self.assertTrue(reclassification.can_reclassify('Malicious', 'Malicious'))
 
-	def test_a_safe_verdict_is_never_condemned_from_here(self):
-		self.assertFalse(reclassification.can_reclassify('Safe', 'Malicious'))
-		self.assertEqual(reclassification.targets_for('Safe'), [])
+	def test_a_safe_verdict_can_be_condemned_as_a_false_negative(self):
+		# O pipeline liberou um phishing: sem este caminho o registro dizia
+		# "seguro" para sempre e o painel contava o erro como acerto
+		self.assertTrue(reclassification.can_reclassify('Safe', 'Malicious'))
+		self.assertEqual(reclassification.targets_for('Safe'), ['Malicious'])
+
+	def test_a_safe_verdict_is_never_offered_legitimate_or_suspicious(self):
+		# "Legítimo" não aparece ao lado de "malicioso" num registro seguro, e
+		# "suspeito" nunca é uma decisão: é o estado de esperar uma
+		self.assertFalse(reclassification.can_reclassify('Safe', 'Safe'))
+		self.assertFalse(reclassification.can_reclassify('Safe', 'Suspicious'))
+
+	def test_an_unknown_verdict_offers_nothing(self):
+		self.assertEqual(reclassification.targets_for('Other'), [])
+		self.assertEqual(reclassification.targets_for(''), [])
 
 	def test_the_default_target_is_still_legitimate(self):
 		# Uma chamada anterior a esta versão continua significando "legítimo"
@@ -100,6 +112,21 @@ class Transitions(unittest.TestCase):
 	def test_targets_in_screen_order(self):
 		self.assertEqual(reclassification.targets_for('Suspicious'), ['Safe', 'Malicious'])
 		self.assertEqual(reclassification.targets_for('Malicious'), ['Safe', 'Malicious'])
+
+	def test_condemning_a_safe_email_is_not_a_false_positive(self):
+		# Não dispara errata nem ensina a memória: os dois só servem para liberar
+		fn = {'action': 'reclassify', 'previousVerdict': 'Safe', 'verdict': 'Malicious'}
+		self.assertFalse(reclassification.is_false_positive(fn))
+		self.assertFalse(reclassification.is_confirmation(fn))
+		self.assertTrue(reclassification.is_false_negative(fn))
+
+	def test_only_condemning_a_safe_email_is_a_false_negative(self):
+		fn = {'action': 'reclassify', 'previousVerdict': 'Safe', 'verdict': 'Malicious'}
+		self.assertFalse(reclassification.is_false_negative(dict(fn, previousVerdict = 'Suspicious')))
+		self.assertFalse(reclassification.is_false_negative(dict(fn, previousVerdict = 'Malicious')))
+		# Desfazer uma decisão de legítimo também termina em malicioso, e não é isto
+		self.assertFalse(reclassification.is_false_negative(dict(fn, action = 'revert')))
+		self.assertFalse(reclassification.is_false_negative(None))
 
 	def test_only_a_corrected_false_positive_is_one(self):
 		fp = {'action': 'reclassify', 'previousVerdict': 'Malicious', 'verdict': 'Safe'}
@@ -114,6 +141,31 @@ class Transitions(unittest.TestCase):
 			{'action': 'reclassify', 'previousVerdict': 'Malicious', 'verdict': 'Malicious'}))
 		self.assertFalse(reclassification.is_confirmation(
 			{'action': 'reclassify', 'previousVerdict': 'Suspicious', 'verdict': 'Malicious'}))
+
+
+class OverriddenRelease(unittest.TestCase):
+	"""Condenar por cima de um "legítimo" precisa achar a decisão cuja lição cai.
+
+	A memória que aquele falso positivo corrigido ensinou continuaria liberando as
+	próximas cópias da mensagem que outra pessoa acaba de dizer que é phishing.
+	"""
+
+	RELEASE = {'id': 7, 'recordRef': 'disk:a', 'action': 'reclassify',
+		'previousVerdict': 'Malicious', 'verdict': 'Safe'}
+
+	def test_condemning_over_a_release_names_it(self):
+		self.assertIs(reclassification.overridden_release(self.RELEASE, 'Malicious'), self.RELEASE)
+
+	def test_a_safe_verdict_from_the_pipeline_has_no_release_to_override(self):
+		self.assertIsNone(reclassification.overridden_release(None, 'Malicious'))
+
+	def test_only_a_reclassification_to_legitimate_is_a_release(self):
+		# Uma decisão desfeita já teve a lição revogada quando foi desfeita
+		self.assertIsNone(reclassification.overridden_release(dict(self.RELEASE, action = 'revert'), 'Malicious'))
+		self.assertIsNone(reclassification.overridden_release(dict(self.RELEASE, verdict = 'Malicious'), 'Malicious'))
+
+	def test_marking_legitimate_again_overrides_nothing(self):
+		self.assertIsNone(reclassification.overridden_release(self.RELEASE, 'Safe'))
 
 
 if __name__ == '__main__':

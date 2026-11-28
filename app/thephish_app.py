@@ -5027,7 +5027,7 @@ def decide_reclassification(case_ref, action):
 				message = ('Só um e-mail malicioso ou suspeito pode ser reclassificado como legítimo. '
 					'Este está como {0}.').format(effective or 'desconhecido')
 			else:
-				message = ('Só um e-mail suspeito ou malicioso pode ser confirmado como malicioso. '
+				message = ('Só um e-mail seguro, suspeito ou malicioso pode ser reclassificado como malicioso. '
 					'Este está como {0}.').format(effective or 'desconhecido')
 			return flask.jsonify({'error': message})
 		previous, verdict = effective, wanted
@@ -5058,20 +5058,14 @@ def decide_reclassification(case_ref, action):
 	if action == reclassification.ACTION_RECLASSIFY and reclassification.is_false_positive(decision):
 		outcomes.extend(false_positive_follow_up(decision, target, keys, username))
 	elif action == reclassification.ACTION_REVERT and current:
-		try:
-			# O registro da própria decisão, e não o que a tela abriu: a mesma
-			# decisão vale para a cópia em disco de um caso do TheHive (achada pelo
-			# caseRef), e desfazer por ela precisa revogar o que foi ensinado lá
-			revoked = verdict_memory.revoke_for_decision(current.get('id'), username,
-				current.get('recordRef') or target['recordRef'])
-			if revoked:
-				outcomes.append({'destination': 'Memória de vereditos', 'ok': True,
-					'detail': '{0} liberação(ões) aprendida(s) com a decisão desfeita foram revogadas'.format(revoked)})
-		except Exception:
-			print("[ERROR]_[thephish_app]: Error while revoking the verdict memory of decision {0}: {1}".format(
-				current.get('id'), traceback.format_exc()))
-			outcomes.append({'destination': 'Memória de vereditos', 'ok': False,
-				'detail': 'não foi possível revogar o que a decisão desfeita ensinou; revogue em Configurações › Whitelist'})
+		outcomes.extend(revoke_what_it_taught(current, target, username, 'desfeita'))
+	elif action == reclassification.ACTION_RECLASSIFY:
+		# Condenar por cima de um "legítimo" derruba o que aquela decisão ensinou:
+		# a memória continuaria liberando as próximas cópias da mensagem que uma
+		# pessoa acaba de dizer que é phishing
+		released = reclassification.overridden_release(current, verdict)
+		if released:
+			outcomes.extend(revoke_what_it_taught(released, target, username, 'derrubada'))
 	decision['outcomes'] = outcomes
 	try:
 		reclassification.save_outcomes(decision['id'], outcomes)
@@ -5087,6 +5081,29 @@ def decide_reclassification(case_ref, action):
 			','.join('{0}:{1}'.format(o['destination'], 'ok' if o['ok'] else 'falhou') for o in outcomes),
 			reason[:300]))
 	return flask.jsonify({'ok': True, 'decision': decision})
+
+
+def revoke_what_it_taught(earlier, target, username, how):
+	"""Revoga a memória de veredito que uma decisão anterior ensinou. Devolve outcomes.
+
+	`how` diz o que aconteceu com ela — "desfeita" ou "derrubada" —, para a tela
+	dizer por que a liberação deixou de valer.
+	"""
+	try:
+		# O registro da própria decisão, e não o que a tela abriu: a mesma
+		# decisão vale para a cópia em disco de um caso do TheHive (achada pelo
+		# caseRef), e revogar por ela precisa alcançar o que foi ensinado lá
+		revoked = verdict_memory.revoke_for_decision(earlier.get('id'), username,
+			earlier.get('recordRef') or target['recordRef'])
+	except Exception:
+		print("[ERROR]_[thephish_app]: Error while revoking the verdict memory of decision {0}: {1}".format(
+			earlier.get('id'), traceback.format_exc()))
+		return [{'destination': 'Memória de vereditos', 'ok': False,
+			'detail': 'não foi possível revogar o que a decisão {0} ensinou; revogue em Configurações › Whitelist'.format(how)}]
+	if not revoked:
+		return []
+	return [{'destination': 'Memória de vereditos', 'ok': True,
+		'detail': '{0} liberação(ões) aprendida(s) com a decisão {1} foram revogadas'.format(revoked, how)}]
 
 
 def false_positive_follow_up(decision, target, keys, username):

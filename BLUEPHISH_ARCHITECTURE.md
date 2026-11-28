@@ -420,7 +420,7 @@ ROLES = [ROLE_ANALYST, ROLE_ADMIN, ROLE_GLOBAL_ADMIN]
 |---|:---:|:---:|:---:|
 | List emails, run analyses, view verdicts | ✅ | ✅ | ✅ |
 | AI assistant over an open case | ✅ | ✅ | ✅ |
-| Reclassify an analyzed email as legitimate (reason required, audited) | ✅ | ✅ | ✅ |
+| Reclassify an analyzed email — as legitimate, or as malicious, a Safe one included (reason required, audited) | ✅ | ✅ | ✅ |
 | Undo a reclassification (reason required, audited) | ❌ | ✅ | ✅ |
 | Read the whitelist / export it | ✅ | ✅ | ✅ |
 | Read scheduler status | ✅ | ✅ | ✅ |
@@ -1057,10 +1057,20 @@ Two decisions exist, and they are asymmetric on purpose (`reclassification.TRANS
 | Decision | From | What else it sets in motion |
 |---|---|---|
 | **Legítimo** (`Safe`) | Malicious, Suspicious | The errata to the reporter (§7.16) and, for an admin, the verdict memory (§7.17) |
-| **Malicioso** (`Malicious`) | Suspicious, or Malicious as a *confirmation* | Nothing. A confirmation leaves the verdict as it was and takes the case out of the work queue |
+| **Malicioso** (`Malicious`) | Suspicious; Malicious as a *confirmation*; Safe as a *false negative* | Nothing is sent and nothing is taught. A confirmation leaves the verdict as it was and takes the case out of the work queue. Over a Safe that an earlier reclassification set, the verdict memory that decision taught is revoked |
 
-A Safe email is never condemned from here: condemning what the pipeline cleared is an
-incident, and it must not be one click away from "mark as legitimate". Rules:
+A Safe email can be condemned here — the false negative, the pipeline releasing a phishing.
+This used to be refused ("condemning what the pipeline cleared is an incident, not a click"),
+and the refusal was worse than the click: with no path on the screen the record kept saying
+Safe about a confirmed phishing, and the executive dashboard counted the pipeline's most
+dangerous mistake as a hit. What the refusal protected is kept another way. A Safe record is
+never offered "Legítimo", so the two buttons are never side by side (the button reads
+"Reclassificar como malicioso", not "Confirmar"); the reason is mandatory and audited; and
+condemning teaches nothing and notifies nobody — the form says the reporter may have been
+told the email was safe, and that warning them is the analyst's call, through another channel.
+When the Safe in force came from an analyst's "Legítimo", condemning over it revokes what that
+decision taught (`reclassification.overridden_release`): otherwise the verdict memory would keep
+releasing the next copies of a message a person just called phishing. Rules:
 
 - **Append-only.** Undoing is another row; the latest row per record is the one in force.
   The original verdict is never erased — it stays in `previous_verdict` and in the

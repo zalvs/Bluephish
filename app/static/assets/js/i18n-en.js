@@ -1573,7 +1573,19 @@ window.BLUEPHISH_I18N_EN = {
 "Nenhum setor citado nas publicações do período.": "No sector cited in the period's publications.",
 "Nenhuma publicação do período trata do Brasil ou da América Latina.": "No publication in the period covers Brazil or Latin America.",
 "Nenhum tema do vocabulário apareceu no período.": "No theme of the vocabulary appeared in the period.",
-"consultando as fontes…": "querying the sources…"
+"consultando as fontes…": "querying the sources…",
+"Analisando…": "Analyzing…",
+"Outra análise em andamento": "Another analysis in progress",
+"Esta aba roda uma análise por vez. Aguarde a atual terminar.": "This tab runs one analysis at a time. Wait for the current one to finish.",
+"Analisando o e-mail UID": "Analyzing email UID",
+"A análise do UID": "The analysis of UID",
+"Análise do UID": "Analysis of UID",
+"concluída": "finished",
+"analisado(s)": "analyzed",
+"erro(s)": "error(s)",
+"Reclassificar como malicioso": "Reclassify as malicious",
+"O e-mail passa a malicioso em todas as telas e contagens, e a decisão é escrita em": "The email becomes malicious on all screens and counts, and the decision is written to",
+"com o seu usuário e o motivo abaixo. Se uma reclassificação anterior o liberou, o que ela ensinou às análises seguintes é revogado. Nada é enviado a quem denunciou — e essa pessoa pode ter recebido o aviso de que o e-mail era seguro: avise-a por outro canal.": "with your user and the reason below. If an earlier reclassification released it, what that decision taught later analyses is revoked. Nothing is sent to the reporter — and that person may have received the notice that the email was safe: warn them through another channel."
 },
 "patterns": [
 [

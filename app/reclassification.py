@@ -29,20 +29,27 @@ import case_insights
 import models
 
 # As decisões que uma pessoa pode tomar sobre um veredito, e de onde cada uma
-# parte. Duas, e deliberadamente assimétricas:
+# parte. Duas, e deliberadamente assimétricas no que põem em movimento:
 #
 #   * **Legítimo** parte de malicioso ou suspeito. É a correção de um falso
 #     positivo — a que dispara a errata ao denunciante e a que pode ensinar a
 #     memória de veredito.
 #   * **Malicioso** parte de suspeito — o pipeline não conseguiu concluir e uma
-#     pessoa concluiu — ou de malicioso, e aí é uma *confirmação*: o veredito não
-#     muda, mas o caso deixa de esperar decisão humana e sai da fila. Nunca parte
-#     de legítimo: condenar um e-mail que o pipeline liberou é outro fluxo (um
-#     incidente), e não deve ser um clique ao lado de "marcar como legítimo".
+#     pessoa concluiu —, de malicioso — uma *confirmação*: o veredito não muda,
+#     mas o caso deixa de esperar decisão humana e sai da fila —, ou de legítimo,
+#     e aí é a correção de um **falso negativo**: o pipeline liberou um phishing.
+#     Esta já foi proibida aqui ("condenar o que o pipeline liberou é um
+#     incidente, não um clique"), e o resultado foi pior do que o clique: sem
+#     caminho na tela, o registro continuava dizendo "seguro" sobre um phishing
+#     confirmado, e o painel executivo contava o erro mais perigoso do pipeline
+#     como acerto. O cuidado que motivou a proibição continua de pé de outro
+#     jeito: num registro seguro "legítimo" não é oferecido, então os dois botões
+#     nunca ficam lado a lado; o motivo é obrigatório e auditado; e condenar não
+#     ensina nada à memória nem manda nada a ninguém.
 TARGET_VERDICT = 'Safe'
 TRANSITIONS = {
 	'Safe': ('Malicious', 'Suspicious'),
-	'Malicious': ('Suspicious', 'Malicious')
+	'Malicious': ('Safe', 'Suspicious', 'Malicious')
 }
 ELIGIBLE_VERDICTS = TRANSITIONS[TARGET_VERDICT]
 
@@ -58,7 +65,7 @@ def normalize_reason(text):
 	reason = ' '.join(str(text or '').split())
 	if len(reason) < MIN_REASON_CHARS:
 		return '', ('Escreva o motivo da reclassificação (pelo menos {0} caracteres): quem abrir '
-			'este caso depois precisa saber por que ele deixou de ser phishing.').format(MIN_REASON_CHARS)
+			'este caso depois precisa saber por que o veredito é este.').format(MIN_REASON_CHARS)
 	if len(reason) > MAX_REASON_CHARS:
 		return '', 'O motivo passou de {0} caracteres.'.format(MAX_REASON_CHARS)
 	return reason, ''
@@ -81,6 +88,27 @@ def is_false_positive(decision):
 def is_confirmation(decision):
 	"""Uma pessoa confirmou o que o pipeline já dizia. O veredito não muda."""
 	return bool(decision) and decision.get('action') == ACTION_RECLASSIFY 		and decision.get('verdict') == decision.get('previousVerdict')
+
+
+def is_false_negative(decision):
+	"""Se esta decisão condenou um e-mail que estava liberado como seguro."""
+	return bool(decision) and decision.get('action') == ACTION_RECLASSIFY 		and decision.get('verdict') == 'Malicious' and decision.get('previousVerdict') == 'Safe'
+
+
+def overridden_release(current, wanted):
+	"""A decisão de "legítimo" que condenar agora derruba, ou None.
+
+	Um falso positivo corrigido pode ter ensinado a memória de veredito a liberar
+	a próxima cópia da mesma mensagem. Se outra pessoa conclui depois que ela era
+	phishing, essa lição não pode sobreviver: continuaria liberando as cópias
+	seguintes como seguras enquanto este registro diz malicioso. Desfazer já
+	revoga o que a decisão ensinou; condenar por cima dela precisa revogar também.
+	"""
+	if wanted != 'Malicious' or not current:
+		return None
+	if current.get('action') != ACTION_RECLASSIFY or current.get('verdict') != 'Safe':
+		return None
+	return current
 
 
 def _iso(moment):

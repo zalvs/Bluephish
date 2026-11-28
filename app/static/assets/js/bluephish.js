@@ -1162,9 +1162,13 @@ socket.on("logError", function(data){ append_log("error", data); });
 
 // Refresh the scheduler status when an automatic analysis cycle starts or ends
 socket.on("autoAnalysis", function(data){
-	if (data.event === "cycle_start"){
-		show($("runCard"), true);
+	// The cycle belongs to no open email, so its card shows over the empty
+	// preview only. A manual run of this tab keeps the card: retitling it would
+	// make "Analisando o e-mail UID 9" disappear while UID 9 is still running
+	if (data.event === "cycle_start" && !run_in_flight){
+		run_uids = [];
 		$("runTitle").textContent = "Ciclo automático em andamento";
+		sync_run_panel();
 	}
 	if (can_see("config.auto")){ load_scheduler_config(); }
 });
@@ -1203,6 +1207,24 @@ let queue_order = "newest";
  * email the analyst has already navigated away from is dropped instead of
  * overwriting whatever they are looking at now. */
 let inbox_loading_uid = null;
+
+/* The emails the run card is about.
+ *
+ * The card is one element, and an analysis outlives the email it was started
+ * on: the server keeps working while the analyst opens the next report. So the
+ * card belongs to the run, not to the screen. It shows over the email (or the
+ * batch) it was started for, and over the empty preview the result lands on
+ * once the email leaves the queue — and nowhere else. It used to stay up over
+ * whatever was opened next, and "Analisando o e-mail UID 9" above UID 8 reads
+ * as UID 8 being analyzed.
+ *
+ * `null` is no run on this tab yet; `[]` is a run that belongs to no email in
+ * particular (the automatic cycle), shown only over the empty preview. */
+let run_uids = null;
+
+/* A run of this tab is waiting for the server. One at a time: the log console
+ * is one, and two runs writing into it would interleave their lines. */
+let run_in_flight = false;
 
 /* What the analyst typed in the queue search box.
  *
@@ -1736,6 +1758,8 @@ function open_queue_item(uid){
 	// which is a thing to ask for, not a thing to land in
 	reset_preview_visual();
 	render_preview(mail);
+	// A run started on another email keeps going, out of sight
+	sync_run_panel();
 	// The address names the e-mail the preview has open
 	sync_url();
 
@@ -2140,8 +2164,9 @@ function render_preview_auth(mail){
 	}
 }
 
-function reset_run_panel(title){
-	show($("runCard"), true);
+function reset_run_panel(title, uids){
+	run_uids = uids.slice();
+	run_in_flight = true;
 	$("runTitle").textContent = title;
 	$("runVerdict").textContent = "";
 	$("runVerdict").className = "pill";
@@ -2149,9 +2174,11 @@ function reset_run_panel(title){
 	$("logText").replaceChildren();
 	show($("logConsole"), true);
 	show($("runProgress"), true);
+	sync_run_panel();
 }
 
 function finish_run_panel(title, summary, tone, verdict_label){
+	run_in_flight = false;
 	$("runTitle").textContent = title;
 	$("runSummary").textContent = summary;
 	show($("runProgress"), false);
@@ -2159,6 +2186,34 @@ function finish_run_panel(title, summary, tone, verdict_label){
 		$("runVerdict").textContent = verdict_label;
 		$("runVerdict").className = "pill " + (tone || "");
 	}
+	sync_run_panel();
+}
+
+// Whether what the preview shows is what the run card is about: the email or
+// batch the run was started for, or the empty preview a finished email leaves
+function run_panel_visible(){
+	if (run_uids === null){ return false; }
+	return !queue_selected || run_uids.indexOf(queue_selected) !== -1;
+}
+
+/* The card and both analyze buttons, from the run state and what is open.
+ *
+ * Called whenever either changes. While a run is in flight the buttons stay
+ * disabled for every email, and the single one says why: a greyed-out button
+ * with no reason reads as "this email cannot be analyzed". */
+function sync_run_panel(){
+	show($("runCard"), run_panel_visible());
+	let running_here = run_in_flight && !!queue_selected && (run_uids || []).indexOf(queue_selected) !== -1;
+	let button = $("analyzeOneBtn");
+	button.disabled = run_in_flight;
+	button.textContent = !run_in_flight ? "Analisar este e-mail"
+		: running_here ? "Analisando…" : "Outra análise em andamento";
+	if (run_in_flight && !running_here){
+		button.setAttribute("title", "Esta aba roda uma análise por vez. Aguarde a atual terminar.");
+	} else {
+		button.removeAttribute("title");
+	}
+	$("runScanBtn").disabled = run_in_flight;
 }
 
 /* Live mailbox — the server rereads the monitored mailbox on a fixed interval
@@ -2204,6 +2259,9 @@ function apply_inbox_snapshot(state){
 	render_queue();
 	render_phish_inbox_subjects();
 	if (selection_left){ sync_url(true); }
+	// The open email may have just left the mailbox, which hands the preview back
+	// to whatever run this tab has
+	sync_run_panel();
 	open_pending_inbox_item();
 
 	// The open preview follows the refreshed entry: a tick that arrives while an
@@ -2312,20 +2370,19 @@ function list_emails(){
 
 // POST /analysis — analyze the email currently open in the preview
 function analyze_current(){
-	if (!queue_selected){ return; }
+	if (!queue_selected || run_in_flight){ return; }
 	let uid = queue_selected;
-	reset_run_panel("Analisando o e-mail UID " + uid + "…");
-	$("analyzeOneBtn").disabled = true;
+	reset_run_panel("Analisando o e-mail UID " + uid + "…", [uid]);
 
 	post_form("analysis", {sid: socket.id, mailUID: uid}).then(function(result){
-		$("analyzeOneBtn").disabled = false;
 		let response = result.ok ? result.data : null;
 		if (response == null){
 			// The server says why when it refuses before analyzing: no UID, or an
 			// email that already left the queue
 			let reason = (result.data && result.data.error) || "Ocorreu um erro durante a análise. Consulte o log acima.";
 			finish_run_panel("Falha na análise", reason, "bad");
-			toast("A análise falhou.", "bad");
+			// Named by UID: the analyst may be reading another email by now
+			toast("A análise do UID " + uid + " falhou.", "bad");
 			if (result.status === 404){ drop_from_queue([uid]); }
 			return;
 		}
@@ -2337,6 +2394,12 @@ function analyze_current(){
 				+ response.llmAnalysis.justification;
 		}
 		finish_run_panel("Análise concluída", summary, VERDICT_TONE[verdict], VERDICT_LABEL[verdict] || verdict);
+		// The analyst moved on to another email while this ran: the card is not on
+		// their screen, so the verdict reaches them here
+		if (!run_panel_visible()){
+			toast("Análise do UID " + uid + " concluída: " + (VERDICT_LABEL[verdict] || verdict) + ".",
+				VERDICT_TONE[verdict] || "");
+		}
 		drop_from_queue([uid]);
 	});
 }
@@ -2364,13 +2427,12 @@ function analyze_selected(){
 		toast("Um scan roda no máximo " + BATCH_SCAN_MAX + " e-mails por vez. Desmarque alguns e rode de novo.", "bad");
 		return;
 	}
+	if (run_in_flight){ return; }
 	let uids = queue_checked.slice();
-	reset_run_panel("Analisando " + uids.length + " e-mail(s)…");
-	$("runScanBtn").disabled = true;
+	reset_run_panel("Analisando " + uids.length + " e-mail(s)…", uids);
 	show($("inboxIntro"), false);
 
 	post_form("analysis-selected", {sid: socket.id, mailUIDs: JSON.stringify(uids)}).then(function(result){
-		$("runScanBtn").disabled = false;
 		let response = result.ok ? result.data : null;
 		if (response == null){
 			finish_run_panel("Falha no scan", "Ocorreu um erro durante o lote. Consulte o log acima.", "bad");
@@ -2384,6 +2446,9 @@ function analyze_selected(){
 		finish_run_panel("Scan concluído", lines.join("\n"),
 			response.failed === 0 ? "ok" : "warn",
 			response.failed === 0 ? "OK" : "PARCIAL");
+		if (!run_panel_visible()){
+			toast("Scan concluído: " + lines[0], response.failed === 0 ? "ok" : "bad");
+		}
 		drop_from_queue(uids);
 	});
 }
@@ -2416,6 +2481,7 @@ function close_queue_item(){
 	$("detailTitle").textContent = "Nenhum e-mail aberto";
 	$("detailSub").textContent = "selecione um item da lista";
 	show($("inboxIntro"), true);
+	sync_run_panel();
 	render_queue();
 }
 
@@ -10279,6 +10345,9 @@ function render_case_decisions(detail){
 	let malicious = targets.indexOf("Malicious") !== -1 && !already;
 	show($("caseDecideSafeBtn"), safe);
 	show($("caseDecideMaliciousBtn"), malicious);
+	// Sobre um e-mail liberado não há o que "confirmar": é corrigir o veredito
+	$("caseDecideMaliciousLabel").textContent = detail && detail.effectiveVerdict === "Safe"
+		? "Reclassificar como malicioso" : "Confirmar malicioso";
 	let none = "";
 	if (detail && detail.reclassificationUnavailable){
 		none = "Decisões bloqueadas até o banco de reclassificações responder.";
@@ -10309,9 +10378,11 @@ function start_case_reclassify(mode, target){
 	let to_safe = !revert && case_reclass_target === "Safe";
 	let effective = case_detail.effectiveVerdict;
 	let confirming = !to_safe && !revert && effective === "Malicious";
+	// Um falso negativo: o pipeline (ou uma pessoa) liberou e agora se condena
+	let condemning = !to_safe && !revert && effective === "Safe";
 
 	$("caseReclassFormTitle").textContent = revert ? "Desfazer reclassificação"
-		: to_safe ? "Marcar como legítimo" : "Confirmar malicioso";
+		: to_safe ? "Marcar como legítimo" : condemning ? "Reclassificar como malicioso" : "Confirmar malicioso";
 	$("caseReclassFrom").textContent = revert
 		? verdict_label(decision.verdict).toUpperCase() + " → " + verdict_label(decision.previousVerdict)
 		: verdict_label(effective) + " → " + verdict_label(case_reclass_target).toUpperCase();
@@ -10324,11 +10395,15 @@ function start_case_reclassify(mode, target){
 			: confirming
 				? "O veredito continua malicioso; o que muda é que uma pessoa o confirmou. O caso sai da fila, e a confirmação é escrita em "
 					+ selected_case.label + " com o seu usuário e o motivo abaixo."
-				: "O e-mail passa a malicioso em todas as telas e contagens, e sai da fila de suspeitos. A decisão é escrita em "
-					+ selected_case.label + " com o seu usuário e o motivo abaixo. Nada é enviado a quem denunciou.";
+				: condemning
+					? "O e-mail passa a malicioso em todas as telas e contagens, e a decisão é escrita em "
+						+ selected_case.label + " com o seu usuário e o motivo abaixo. Se uma reclassificação anterior o liberou, o que ela ensinou às análises seguintes é revogado. "
+						+ "Nada é enviado a quem denunciou — e essa pessoa pode ter recebido o aviso de que o e-mail era seguro: avise-a por outro canal."
+					: "O e-mail passa a malicioso em todas as telas e contagens, e sai da fila de suspeitos. A decisão é escrita em "
+						+ selected_case.label + " com o seu usuário e o motivo abaixo. Nada é enviado a quem denunciou.";
 	$("caseReclassReason").value = "";
 	$("caseReclassSave").textContent = revert ? "Desfazer reclassificação"
-		: to_safe ? "Reclassificar como legítimo" : "Confirmar malicioso";
+		: to_safe ? "Reclassificar como legítimo" : condemning ? "Reclassificar como malicioso" : "Confirmar malicioso";
 	$("caseReclassSave").className = revert ? "btn danger" : "btn";
 	set_status("caseReclassStatus", "");
 
